@@ -16,7 +16,7 @@ export class ClaudeAIProvider implements AIProvider {
       : 'You are a helpful requirements engineering assistant.'
 
     const message = await this.client.messages.create({
-      model: 'claude-opus-4-6',
+      model: process.env.CLAUDE_MODEL ?? 'claude-opus-4-6',
       max_tokens: options?.maxTokens ?? 4096,
       temperature: options?.temperature ?? 0,
       system: systemPrompt,

@@ -26,6 +26,9 @@ export class OpenAIProvider implements AIProvider {
       ],
     })
 
-    return response.choices[0].message.content ?? ''
+    if (!response.choices.length) throw new Error('OpenAI returned no choices')
+    const content = response.choices[0].message.content
+    if (content === null) throw new Error('OpenAI returned null content (possible tool_calls or content filter response)')
+    return content
   }
 }
