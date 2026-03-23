@@ -22,7 +22,7 @@ Phase 1 takes messy, unstructured input (plain text or markdown pasted into a te
 3. Generate clarifying questions per gap (with target stakeholder role)
 4. Create investigation tasks for critical/major gaps
 5. Completeness scoring (0–100) with defined formula
-6. Full audit trail
+6. Full audit trail (`audit_log`) + decision traceability (`decision_log`)
 
 ---
 
@@ -169,12 +169,24 @@ investigation_tasks (
   created_at
 )
 
--- Append-only audit trail
+-- Append-only audit trail (what changed)
 audit_log (
   id, entity_type TEXT, entity_id UUID,
   action TEXT,              -- created | updated | deleted | analyzed | scored
   actor_id UUID,            -- nullable: NULL for system/pipeline actions, user UUID for human actions
   diff JSONB,               -- before/after state
+  created_at
+)
+
+-- Decision traceability (why it was decided)
+decision_log (
+  id,
+  requirement_id UUID,
+  related_gap_id UUID,      -- nullable: the gap this decision resolves (if any)
+  related_question_id UUID, -- nullable: the question this decision answers (if any)
+  decision TEXT,            -- what was decided
+  rationale TEXT,           -- why — the reasoning, context, constraints considered
+  decided_by UUID,          -- user who recorded the decision (NOT nullable — decisions need an owner)
   created_at
 )
 
@@ -190,7 +202,16 @@ completeness_scores (
 )
 ```
 
-**`audit_log` is append-only.** Every mutation to any entity writes a row. This provides full auditability without event sourcing complexity.
+**Two logs, distinct purposes:**
+
+| | `audit_log` | `decision_log` |
+|---|---|---|
+| Answers | *What changed?* | *Why was this decided?* |
+| Written by | System (automatic) | User (explicit) |
+| Structure | entity + diff | decision + rationale |
+| Required | Always | When a decision is made |
+
+`audit_log` is append-only and written automatically on every mutation. `decision_log` is written explicitly by users when they resolve a gap, dismiss a question, or override a requirement — and requires both a `decision` and a `rationale`. A decision without rationale cannot be saved.
 
 **`questions.requirement_id` is denormalized** — it duplicates the `gaps.requirement_id` value for direct querying. Queries like "all questions for a requirement" use this directly without joining through `gaps`.
 
@@ -390,6 +411,7 @@ Three tabbed views at `projects/[id]/requirements/`:
 - Each gap with a question expands to show:
   - Clarifying question with target role badge (BA / Architect / PO / Dev)
   - Inline answer input field (for stakeholder responses)
+  - "Record Decision" action: opens a two-field form (decision + rationale, both required) that writes to `decision_log` and marks the gap resolved
   - Linked investigation task with status badge
 - Each gap without a question shows a "Generate question" button (on-demand, single AI call)
 - Merged gaps are shown collapsed under their representative gap with a count badge ("+ 2 similar")
@@ -444,5 +466,6 @@ Phase 1 is complete when:
 3. Each gap has a clarifying question with a target stakeholder role assigned
 4. Critical/major gaps have auto-generated investigation tasks with `open` status
 5. A completeness score (0–100) is shown with a 4-dimension breakdown
-6. Every action is recorded in the audit log
-7. The AI provider can be swapped by changing the `AI_PROVIDER` environment variable with no code changes
+6. Every mutation is recorded in the audit log; every resolved gap can have a decision + rationale in the decision log
+7. A decision record cannot be saved without both `decision` and `rationale` fields populated
+8. The AI provider can be swapped by changing the `AI_PROVIDER` environment variable with no code changes
