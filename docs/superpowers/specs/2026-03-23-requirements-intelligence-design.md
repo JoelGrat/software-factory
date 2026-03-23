@@ -25,6 +25,7 @@ Phase 1 takes messy, unstructured input (plain text or markdown pasted into a te
 6. Full audit trail (`audit_log`) + decision traceability (`decision_log`)
 7. Status gate — requirements cannot reach `ready_for_dev` while critical gaps remain unresolved
 8. Partial re-evaluation — answering a question or resolving a task updates the score and status gate immediately, no full re-run required
+9. Knowledge layer — resolved gaps and decisions are stored as reusable patterns; future analyses draw on them
 
 ---
 
@@ -73,7 +74,7 @@ softwareFactory_git/
 │   ├── supabase/                   # DB client + generated types
 │   └── requirements/
 │       ├── parser.ts               # Structure raw input
-│       ├── gap-detector.ts         # Gap detection orchestrator (runs rules + AI, merges results)
+│       ├── gap-detector.ts         # Gap detection orchestrator (rules + AI + pattern matching)
 │       ├── rules/                  # Rule-based checks (pure functions, no AI)
 │       │   ├── has-approval-role.ts
 │       │   ├── has-workflow-states.ts
@@ -81,7 +82,11 @@ softwareFactory_git/
 │       │   ├── has-error-handling.ts
 │       │   └── has-actors-defined.ts
 │       ├── scorer.ts               # Completeness scoring
-│       └── question-generator.ts   # Clarifying question generation
+│       ├── question-generator.ts   # Clarifying question generation
+│       └── knowledge/
+│           ├── pattern-extractor.ts  # Distil resolved gaps into gap_patterns (async)
+│           ├── resolution-extractor.ts # Distil decisions into resolution_patterns (async)
+│           └── domain-classifier.ts  # Classify requirements into domain (1 AI call)
 └── components/
     ├── requirements/               # Workspace UI components
     └── ui/                         # Shared UI primitives
@@ -204,6 +209,39 @@ completeness_scores (
   confidence INTEGER,       -- 0-100: average AI confidence across AI-sourced gaps
   breakdown JSONB,          -- full breakdown (see Scoring Formula)
   scored_at TIMESTAMPTZ
+)
+
+-- Knowledge layer: common gap patterns observed across requirements
+gap_patterns (
+  id,
+  project_id UUID,          -- nullable: NULL = global pattern, UUID = project-scoped
+  category TEXT,            -- missing | ambiguous | conflicting | incomplete
+  severity TEXT,            -- critical | major | minor
+  description_template TEXT, -- generalised description of the gap pattern
+  occurrence_count INTEGER,  -- how many times this pattern has fired
+  last_seen_at TIMESTAMPTZ,
+  created_at
+)
+
+-- Knowledge layer: how specific gap types were resolved
+resolution_patterns (
+  id,
+  gap_pattern_id UUID,       -- the pattern this resolution applies to
+  project_id UUID,           -- nullable: NULL = global, UUID = project-scoped
+  resolution_summary TEXT,   -- generalised resolution approach (not raw answer text)
+  source_decision_id UUID,   -- the decision_log entry this was distilled from
+  use_count INTEGER,         -- how many times this pattern has been suggested
+  created_at
+)
+
+-- Knowledge layer: domain-specific requirement templates
+domain_templates (
+  id,
+  project_id UUID,           -- nullable: NULL = global, UUID = project-scoped
+  domain TEXT,               -- e.g. "e-commerce", "healthcare", "fintech", "saas"
+  name TEXT,                 -- template name
+  requirement_areas JSONB,   -- expected functional + NFR areas for this domain
+  created_at
 )
 ```
 
@@ -538,6 +576,71 @@ Three tabbed views at `projects/[id]/requirements/`:
 Rule tests are the most important unit tests in the system — they are the only place where "this is definitely missing" is asserted. Each rule function gets its own test file covering: fires correctly, does not fire when satisfied, edge cases.
 
 The mock AI provider returns deterministic fixture responses and implements the `AIProvider` interface — it makes the full pipeline testable without real AI calls or network access.
+
+---
+
+## Knowledge Layer
+
+Every run is currently stateless — no learning, no moat. The knowledge layer changes that by capturing patterns from resolved gaps and decisions, then reusing them in future analyses.
+
+### The Flywheel
+
+```
+analysis run → gaps detected → gaps resolved → patterns extracted
+                                                        ↓
+                                          next run draws on patterns
+                                                        ↓
+                                    faster detection, better questions
+                                          higher first-run score
+```
+
+### How Patterns Are Populated
+
+**Gap patterns** are written automatically when a gap is resolved:
+- On `gaps.resolved_at` being set, the system checks whether a `gap_patterns` row with matching `category` and a similar `description_template` already exists
+- If yes: `occurrence_count` is incremented
+- If no: a new pattern is created with AI distilling the gap description into a generalised template (one AI call, async — does not block the user)
+- Patterns are project-scoped by default; promoted to global (`project_id = NULL`) when `occurrence_count ≥ 5` across ≥ 3 distinct projects
+
+**Resolution patterns** are written when a `decision_log` entry is created:
+- AI distils the `decision + rationale` into a generalised `resolution_summary` (async)
+- Linked to the corresponding `gap_pattern_id`
+
+**Domain templates** are seeded manually for Phase 1 (e.g. "saas", "fintech", "e-commerce"). User-generated templates are a Phase 2 feature.
+
+### How Patterns Feed Back Into the Pipeline
+
+**Gap Detection — Layer C (pattern matching):**
+
+A third layer is added to gap detection, running after rules (Layer A) and AI analysis (Layer B):
+
+- Query `gap_patterns` for the current project (project-scoped first, then global)
+- For each pattern with `occurrence_count ≥ 3`, check whether a matching gap was already detected in Layers A or B
+- If not: surface it as a candidate gap with `source: "pattern"` and the pattern's historical `occurrence_count` as a confidence signal
+- Pattern-sourced gaps are shown in the UI with a badge: "Seen 12× in this project"
+
+This means: the more requirements the system processes, the more gaps it catches on the first pass — without changing any prompts or rules.
+
+**Question Generation — suggested resolutions:**
+
+When generating a question for a gap, if a `resolution_pattern` exists for the matched `gap_pattern`:
+- The suggested resolution is pre-populated as a hint below the question: *"Previously resolved by: [resolution_summary]"*
+- The user can accept it (writes a `decision_log` entry using the suggestion), edit it, or ignore it
+- Acceptance increments `resolution_patterns.use_count`
+
+**Domain Templates — scoring augmentation:**
+
+At the start of analysis, the AI classifies the requirements into a domain (one call, returns `domain: string`). If a matching `domain_template` exists:
+- The template's `requirement_areas` are used to augment the NFR coverage check — missing areas in the template that aren't covered by structured items are flagged as gaps (Layer C)
+- The completeness score's NFR dimension checks against template expectations, not just the three hardcoded categories
+
+### Scope for Phase 1
+
+- Gap patterns and resolution patterns: **yes** — populated automatically on gap resolution
+- Domain templates: **yes** — seeded with 3 templates (saas, fintech, e-commerce); user-created templates are Phase 2
+- Global pattern promotion: **yes** — threshold: occurrence_count ≥ 5 across ≥ 3 projects
+- Pattern UI ("Seen 12× in this project"): **yes**
+- Cross-organisation patterns: **no** — global means across projects within the same instance, not across tenants
 
 ---
 
