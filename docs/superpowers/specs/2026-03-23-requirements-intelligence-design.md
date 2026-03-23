@@ -23,6 +23,7 @@ Phase 1 takes messy, unstructured input (plain text or markdown pasted into a te
 4. Create investigation tasks for critical/major gaps
 5. Completeness scoring (0–100) with defined formula
 6. Full audit trail (`audit_log`) + decision traceability (`decision_log`)
+7. Status gate — requirements cannot reach `ready_for_dev` while critical gaps remain unresolved
 
 ---
 
@@ -61,7 +62,7 @@ softwareFactory_git/
 │   ├── projects/
 │   │   └── [id]/requirements/      # Requirements workspace (3 views)
 │   └── api/
-│       ├── requirements/           # analyze, items, gaps, questions, tasks
+│       ├── requirements/           # analyze, items, gaps, questions, tasks, status
 │       └── ai/                     # AI provider proxy
 ├── lib/
 │   ├── ai/
@@ -117,7 +118,8 @@ projects (id, name, owner_id, created_at)
 requirements (
   id, project_id, title,
   raw_input TEXT,           -- original pasted text
-  status TEXT,              -- draft | analyzing | structured | reviewed | approved
+  status TEXT,              -- see Status Gate below
+  blocked_reason TEXT,      -- nullable: populated when status = blocked, explains why
   created_at, updated_at
 )
 
@@ -214,6 +216,52 @@ completeness_scores (
 `audit_log` is append-only and written automatically on every mutation. `decision_log` is written explicitly by users when they resolve a gap, dismiss a question, or override a requirement — and requires both a `decision` and a `rationale`. A decision without rationale cannot be saved.
 
 **`questions.requirement_id` is denormalized** — it duplicates the `gaps.requirement_id` value for direct querying. Queries like "all questions for a requirement" use this directly without joining through `gaps`.
+
+---
+
+## Status Gate
+
+The `requirements.status` field is a controlled state machine. Transitions are enforced server-side — the API rejects any invalid transition.
+
+```
+draft → analyzing → incomplete | review_required
+                                      ↓
+                              ready_for_dev
+                                      ↑
+                               (blocked if critical gaps exist)
+```
+
+**States:**
+
+| Status | Meaning |
+|---|---|
+| `draft` | User is entering raw input, no analysis run yet |
+| `analyzing` | Pipeline is running |
+| `incomplete` | Analysis complete; critical gaps exist — **cannot proceed** |
+| `review_required` | Analysis complete; no critical gaps but major/minor gaps remain |
+| `ready_for_dev` | No unresolved critical or major gaps; cleared for development |
+| `blocked` | Manually blocked by a user with a reason (overrides any other status) |
+
+**Transition rules (enforced in `POST /api/requirements/[id]/status`):**
+
+```
+draft         → analyzing         always allowed (triggers pipeline)
+analyzing     → incomplete        if any critical gap exists (set by pipeline)
+analyzing     → review_required   if no critical gaps but major/minor gaps exist
+analyzing     → ready_for_dev     if no unresolved gaps at all
+incomplete    → review_required   only if all critical gaps are resolved (decision_log entry required per gap)
+review_required → ready_for_dev  only if all major gaps are resolved or explicitly dismissed with rationale
+any           → blocked           any user with write access
+blocked       → (previous status) only the user who set blocked, or a project admin
+```
+
+**Enforcement:**
+- `PATCH /api/requirements/[id]/status` validates the transition server-side and returns `409` with a reason if blocked
+- The UI disables the "Mark ready for dev" button and shows exactly which critical gaps are blocking it
+- The `audit_log` records every status transition with the actor and timestamp
+- A requirement in `incomplete` status is visually distinct (red border, lock icon) — not just a label
+
+**There is no bypass.** The API enforces this unconditionally. There is no admin override to skip the gate — the only path through is resolving the gaps.
 
 ---
 
@@ -403,6 +451,10 @@ Three tabbed views at `projects/[id]/requirements/`:
 - Two scores shown at top of view: **Completeness** (0–100) and **Confidence** (0–100)
   - Completeness bar with breakdown on hover: gap-penalty score, NFR coverage (per category), overall weighted score
   - Confidence displayed as a secondary indicator — low confidence flags that the AI was uncertain about its analysis
+- **Status badge** shown prominently: `draft` / `analyzing` / `incomplete` / `review_required` / `ready_for_dev` / `blocked`
+  - `incomplete` renders with a red banner listing the unresolved critical gaps blocking progression
+  - `ready_for_dev` renders with a green banner
+- **"Mark ready for dev"** button: disabled with tooltip listing blocking gaps if status is `incomplete`; enabled only when status is `review_required` or all gaps resolved
 - Last-write-wins for concurrent edits in MVP — no conflict resolution UI
 
 ### View 3: Gaps & Questions
