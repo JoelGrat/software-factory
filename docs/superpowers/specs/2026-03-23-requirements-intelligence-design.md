@@ -24,6 +24,7 @@ Phase 1 takes messy, unstructured input (plain text or markdown pasted into a te
 5. Completeness scoring (0–100) with defined formula
 6. Full audit trail (`audit_log`) + decision traceability (`decision_log`)
 7. Status gate — requirements cannot reach `ready_for_dev` while critical gaps remain unresolved
+8. Partial re-evaluation — answering a question or resolving a task updates the score and status gate immediately, no full re-run required
 
 ---
 
@@ -147,6 +148,8 @@ gaps (
   confidence INTEGER,           -- 0-100: AI certainty this is a real gap (100 for rule-sourced gaps)
   question_generated BOOLEAN,   -- false until a question is generated for this gap
   merged_into UUID,             -- nullable: if this gap was merged into another
+  resolved_at TIMESTAMPTZ,      -- nullable: when the gap was resolved
+  resolution_source TEXT,       -- nullable: question_answered | task_resolved | decision_recorded
   created_at
 )
 
@@ -435,6 +438,48 @@ Overall confidence score = average confidence across all AI-sourced gaps. A high
 
 ---
 
+## Partial Re-Evaluation
+
+The full pipeline runs once (on initial analysis). After that, two user actions trigger lightweight re-evaluation without re-running the full pipeline:
+
+### Triggers
+
+**1. Question answered** (`PATCH /api/questions/[id]` with `answer`)
+- AI evaluates whether the answer resolves the linked gap
+- One AI call: receives the gap description + answer, returns `{ resolved: boolean, rationale: string }`
+- If resolved: gap is marked `resolved_at = now`, `resolution_source = "question_answered"`
+- Score and status gate are recalculated (deterministic, no AI)
+
+**2. Investigation task resolved** (`PATCH /api/investigation-tasks/[id]` with `status = resolved`)
+- Linked gap is marked `resolved_at = now`, `resolution_source = "task_resolved"` (no AI call needed)
+- Score and status gate are recalculated (deterministic, no AI)
+
+### What re-evaluation updates
+
+```
+gap resolved
+    ↓
+recalculate completeness score   ← deterministic, uses gap counts
+    ↓
+recalculate status gate          ← deterministic, checks unresolved critical gaps
+    ↓
+write new completeness_scores row  ← versioned, audit trail preserved
+    ↓
+push update via Supabase Realtime  ← UI reflects change without page reload
+```
+
+**Score recalculation is always deterministic** — it recomputes the formula over the current set of unresolved gaps. No AI involved. The previous score row is preserved in `completeness_scores` (versioned); the new row reflects the updated state.
+
+### What partial re-evaluation does NOT do
+
+- Re-run gap detection on the full document (that requires a new analysis)
+- Generate new gaps from the updated answer (answers resolve gaps, they don't create new ones)
+- Re-rank questions (the priority order is frozen at analysis time)
+
+If the user adds new requirements text or wants a fresh gap scan, they trigger a full re-analysis via the "Re-analyze" button on View 1.
+
+---
+
 ## UI — Requirements Workspace
 
 Three tabbed views at `projects/[id]/requirements/`:
@@ -500,7 +545,7 @@ The mock AI provider returns deterministic fixture responses and implements the 
 
 - File upload (PDF, DOCX) — textarea input only
 - Real-time collaborative editing — last-write-wins for now
-- Re-scoring after a question is answered — the completeness score is computed once at the end of the pipeline and is static until a full re-analysis is triggered
+- Full pipeline re-run on every change — only affected gaps and the score are updated on partial re-evaluation
 - Completeness validation against external standards (Phase 2)
 - Test case generation (Phase 3)
 - Ticket/issue generation (Phase 4)
