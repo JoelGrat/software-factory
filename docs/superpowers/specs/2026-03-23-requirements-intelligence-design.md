@@ -129,6 +129,7 @@ requirement_items (
   description TEXT,
   priority TEXT,            -- high | medium | low
   source_text TEXT,         -- original snippet this was extracted from
+  nfr_category TEXT,        -- nullable: security | performance | auditability (only for non-functional items)
   created_at
 )
 
@@ -141,6 +142,7 @@ gaps (
   source TEXT,                  -- "rule" (deterministic) | "ai" (contextual)
   rule_id TEXT,                 -- nullable: name of the rule function if source = "rule"
   priority_score INTEGER,       -- impact × uncertainty (see Gap Prioritization)
+  confidence INTEGER,           -- 0-100: AI certainty this is a real gap (100 for rule-sourced gaps)
   question_generated BOOLEAN,   -- false until a question is generated for this gap
   merged_into UUID,             -- nullable: if this gap was merged into another
   created_at
@@ -179,8 +181,11 @@ audit_log (
 -- Versioned completeness scores
 completeness_scores (
   id, requirement_id,
-  score INTEGER,            -- 0-100
-  breakdown JSONB,          -- per-dimension scores (see Scoring Formula)
+  overall_score INTEGER,    -- 0-100: weighted combination of completeness + nfr
+  completeness INTEGER,     -- 0-100: gap-penalty score
+  nfr_score INTEGER,        -- 0-100: NFR category coverage
+  confidence INTEGER,       -- 0-100: average AI confidence across AI-sourced gaps
+  breakdown JSONB,          -- full breakdown (see Scoring Formula)
   scored_at TIMESTAMPTZ
 )
 ```
@@ -280,17 +285,78 @@ The user can explicitly request a question for any ungrouped gap via a "Generate
 - Status defaults to `open`
 
 **6. Completeness Scoring**
-- Produces a score 0–100 using an equal-weight average across 4 dimensions (25 points each):
 
-  | Dimension | How scored |
-  |---|---|
-  | **Functional coverage** | % of functional requirement items that have no `missing` or `incomplete` gaps |
-  | **Ambiguity** | % of requirement items with no `ambiguous` gaps |
-  | **Consistency** | `max(0, 100 - (conflicting_gap_count × 25))` |
-  | **Non-functional presence** | 100 if ≥1 non-functional requirement item exists; 0 otherwise |
+Produces two separate scores: **completeness** and **confidence**. Both are stored in `completeness_scores`.
 
-- Final score = `(dim1 + dim2 + dim3 + dim4) / 4`, rounded to nearest integer
-- Breakdown stored as JSONB: `{ functional_coverage: N, ambiguity: N, consistency: N, nfr_presence: N }`
+---
+
+**Completeness score (0–100)**
+
+Starts at 100. Deduct for every gap detected:
+
+```
+score = max(0, 100 - (critical_count × 20) - (major_count × 10) - (minor_count × 3))
+```
+
+Critical gaps are expensive. A document with 5 critical gaps scores 0 regardless of how many minor things are fine.
+
+---
+
+**NFR coverage score (0–100, separate dimension)**
+
+Binary NFR presence is replaced with per-category coverage. Each category is independently scored:
+
+| NFR Category | Present | Absent |
+|---|---|---|
+| Security | +34 | 0 |
+| Performance | +33 | 0 |
+| Auditability | +33 | 0 |
+
+`nfr_score = sum of present categories` (0, 33, 34, 66, 67, or 100)
+
+NFR presence is determined by the structured items from step 1 — any `non-functional` item whose description matches the category keyword set (e.g., "auth", "encrypt", "access" → security). The AI classifies NFR items into categories during parsing (add `nfr_category` field to `requirement_items` for non-functional items).
+
+---
+
+**Final breakdown:**
+
+```
+completeness_score = max(0, 100 - (critical × 20) - (major × 10) - (minor × 3))
+nfr_score          = sum of covered NFR categories (0–100)
+overall_score      = round((completeness_score × 0.7) + (nfr_score × 0.3))
+```
+
+Overall score weights completeness at 70% and NFR coverage at 30%.
+
+---
+
+**Confidence score (0–100, separate from completeness)**
+
+Completeness measures *what is there*. Confidence measures *how certain the AI is about what it found*.
+
+The AI returns a confidence value per gap during gap detection (Layer B only — rule-based gaps have confidence 100 by definition):
+
+```typescript
+// gap detection AI response
+{ gaps: Array<{ item_id, severity, category, description, confidence: number }> }
+// confidence: 0–100, where 100 = "this is definitely a gap"
+```
+
+Overall confidence score = average confidence across all AI-sourced gaps. A high completeness score with low confidence means "it looks complete, but the AI wasn't sure what it was reading." Both scores are shown in the UI.
+
+---
+
+**Stored breakdown JSONB:**
+```json
+{
+  "completeness": 72,
+  "nfr_score": 67,
+  "overall": 71,
+  "confidence": 84,
+  "gap_counts": { "critical": 1, "major": 2, "minor": 4 },
+  "nfr_coverage": { "security": true, "performance": true, "auditability": false }
+}
+```
 
 ### Failure Handling
 - Each step is independently committed — if gap detection fails, structured items still save
@@ -313,7 +379,9 @@ Three tabbed views at `projects/[id]/requirements/`:
 ### View 2: Structured Requirements
 - Requirement items grouped by type (functional / non-functional / constraint / assumption)
 - Each item shows: extracted requirement, source text snippet, attached gaps (severity badge)
-- Completeness score bar (0–100) at top of view with dimension breakdown on hover
+- Two scores shown at top of view: **Completeness** (0–100) and **Confidence** (0–100)
+  - Completeness bar with breakdown on hover: gap-penalty score, NFR coverage (per category), overall weighted score
+  - Confidence displayed as a secondary indicator — low confidence flags that the AI was uncertain about its analysis
 - Last-write-wins for concurrent edits in MVP — no conflict resolution UI
 
 ### View 3: Gaps & Questions
