@@ -64,7 +64,7 @@ softwareFactory_git/
 │   ├── projects/
 │   │   └── [id]/requirements/      # Requirements workspace (3 views)
 │   └── api/
-│       ├── requirements/           # analyze, items, gaps, questions, tasks, status
+│       ├── requirements/           # analyze, items, gaps, questions, tasks, status, summary
 │       └── ai/                     # AI provider proxy
 ├── lib/
 │   ├── ai/
@@ -522,6 +522,47 @@ If the user adds new requirements text or wants a fresh gap scan, they trigger a
 
 Three tabbed views at `projects/[id]/requirements/`:
 
+### Risk Summary Panel (persistent, above all tabs)
+
+The first thing a user sees after analysis — pinned above the tab navigation, always visible regardless of which view is active.
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  🔴 3 critical risks    ⚠️ 5 major gaps    📉 62%        │
+│  Confidence: 84%        ⛔ NOT READY FOR DEVELOPMENT     │
+└─────────────────────────────────────────────────────────┘
+```
+
+**States the panel can display:**
+
+| Condition | Verdict display |
+|---|---|
+| `status = ready_for_dev` | ✅ READY FOR DEVELOPMENT |
+| `status = review_required` | ⚠️ REVIEW REQUIRED |
+| `status = incomplete` (critical gaps) | ⛔ NOT READY FOR DEVELOPMENT |
+| `status = blocked` | 🔒 BLOCKED — [reason] |
+| `status = analyzing` | ⏳ ANALYZING… |
+
+The critical count and major count are **links** — clicking "3 critical risks" jumps directly to View 3 filtered to critical gaps only.
+
+The completeness percentage and confidence are **links** — clicking either opens a score breakdown popover (gap-penalty, NFR coverage per category, AI confidence distribution).
+
+**The panel updates in real time** via Supabase Realtime whenever the score or status changes (e.g. after a question is answered and partial re-evaluation fires). No page reload.
+
+**API:** `GET /api/requirements/[id]/summary` returns the panel data as a single flat object — no client-side aggregation:
+```typescript
+{
+  critical_count: number
+  major_count: number
+  minor_count: number
+  completeness: number
+  confidence: number
+  overall_score: number
+  status: RequirementStatus
+  blocked_reason: string | null
+}
+```
+
 ### View 1: Input
 - Textarea for pasting raw requirements (plain text or markdown)
 - "Analyze" button triggers pipeline
@@ -531,12 +572,6 @@ Three tabbed views at `projects/[id]/requirements/`:
 ### View 2: Structured Requirements
 - Requirement items grouped by type (functional / non-functional / constraint / assumption)
 - Each item shows: extracted requirement, source text snippet, attached gaps (severity badge)
-- Two scores shown at top of view: **Completeness** (0–100) and **Confidence** (0–100)
-  - Completeness bar with breakdown on hover: gap-penalty score, NFR coverage (per category), overall weighted score
-  - Confidence displayed as a secondary indicator — low confidence flags that the AI was uncertain about its analysis
-- **Status badge** shown prominently: `draft` / `analyzing` / `incomplete` / `review_required` / `ready_for_dev` / `blocked`
-  - `incomplete` renders with a red banner listing the unresolved critical gaps blocking progression
-  - `ready_for_dev` renders with a green banner
 - **"Mark ready for dev"** button: disabled with tooltip listing blocking gaps if status is `incomplete`; enabled only when status is `review_required` or all gaps resolved
 - Last-write-wins for concurrent edits in MVP — no conflict resolution UI
 
