@@ -71,7 +71,13 @@ softwareFactory_git/
 │   ├── supabase/                   # DB client + generated types
 │   └── requirements/
 │       ├── parser.ts               # Structure raw input
-│       ├── gap-detector.ts         # Gap detection logic
+│       ├── gap-detector.ts         # Gap detection orchestrator (runs rules + AI, merges results)
+│       ├── rules/                  # Rule-based checks (pure functions, no AI)
+│       │   ├── has-approval-role.ts
+│       │   ├── has-workflow-states.ts
+│       │   ├── has-nfrs.ts
+│       │   ├── has-error-handling.ts
+│       │   └── has-actors-defined.ts
 │       ├── scorer.ts               # Completeness scoring
 │       └── question-generator.ts   # Clarifying question generation
 └── components/
@@ -132,6 +138,8 @@ gaps (
   severity TEXT,                -- critical | major | minor
   category TEXT,                -- missing | ambiguous | conflicting | incomplete
   description TEXT,
+  source TEXT,                  -- "rule" (deterministic) | "ai" (contextual)
+  rule_id TEXT,                 -- nullable: name of the rule function if source = "rule"
   created_at
 )
 
@@ -193,11 +201,44 @@ Triggered by `POST /api/requirements/analyze`. Runs sequentially; each step writ
 - Links each item back to the original source text (traceability)
 - Response schema: `{ items: Array<{ type, title, description, priority, source_text }> }`
 
-**2. Gap Detection**
-- AI analyzes structured items against a requirements completeness rubric
+**2. Gap Detection** *(hybrid: rules first, then AI)*
+
+Gap detection runs in two layers. Rule-based checks fire first and produce deterministic gaps. AI analysis runs after and produces contextual gaps. Both produce the same `Gap` shape — they are merged before step 3.
+
+**Layer A — Rule-based checks (deterministic)**
+
+Implemented in `gap-detector.ts` as pure functions over the structured items array. Each rule either fires or doesn't — no probability, no "maybe". A fired rule always produces a gap with a fixed severity and description.
+
+Initial rule set:
+
+| Rule | Check | Severity |
+|---|---|---|
+| `hasApprovalRole` | At least one item defines who approves or signs off | `critical` |
+| `hasWorkflowStates` | At least one item defines system states or status transitions | `critical` |
+| `hasNonFunctionalRequirements` | At least one item is classified as `non-functional` | `major` |
+| `hasErrorHandling` | At least one item addresses failure, error, or exception behaviour | `major` |
+| `hasActorsDefined` | At least one item names a user role or system actor | `critical` |
+
+Rules are implemented as named, testable functions:
+```typescript
+// gap-detector.ts
+function hasApprovalRole(items: RequirementItem[]): boolean { ... }
+
+if (!hasApprovalRole(items)) {
+  addGap("missing", "No approval role defined", "critical")
+}
+```
+
+Rules are independently unit-testable with no AI calls. New rules are added by writing a function + a check — no prompt changes required.
+
+**Layer B — AI analysis (contextual)**
+
+- AI analyzes the full structured items list against a completeness rubric
+- Finds gaps that require reasoning: ambiguity, implicit conflicts, domain-specific omissions
 - Each gap classified by category (missing / ambiguous / conflicting / incomplete) and severity (critical / major / minor)
-- Runs in parallel across items for speed
 - Response schema: `{ gaps: Array<{ item_id, severity, category, description }> }`
+
+**Merge:** Rule-based gaps are tagged `source: "rule"`, AI gaps tagged `source: "ai"`. Both are stored in the `gaps` table. The `source` field is added to the schema (see Data Model). This allows future filtering, reporting, and rule auditing.
 
 **3. Question Generation**
 - One AI call per gap (N gaps = N calls, run in parallel)
@@ -275,9 +316,12 @@ Three tabbed views at `projects/[id]/requirements/`:
 
 | Layer | Approach |
 |---|---|
-| Unit | Core domain logic (`parser`, `gap-detector`, `scorer`) with static fixture inputs — no AI calls |
-| Integration | Pipeline API route with test Supabase instance + mock AI provider returning fixture JSON |
-| E2E | Playwright: submit input → structured output → gaps view |
+| Unit (rules) | Each rule function tested independently with fixture item arrays — zero AI calls, fully deterministic |
+| Unit (domain) | `parser`, `scorer`, `gap-detector` orchestrator with mock rule results + mock AI responses |
+| Integration | Full pipeline API route with test Supabase instance + mock AI provider returning fixture JSON |
+| E2E | Playwright: submit input → structured output → gaps view (includes rule-sourced gaps) |
+
+Rule tests are the most important unit tests in the system — they are the only place where "this is definitely missing" is asserted. Each rule function gets its own test file covering: fires correctly, does not fire when satisfied, edge cases.
 
 The mock AI provider returns deterministic fixture responses and implements the `AIProvider` interface — it makes the full pipeline testable without real AI calls or network access.
 
