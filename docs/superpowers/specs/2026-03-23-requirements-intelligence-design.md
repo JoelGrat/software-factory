@@ -140,6 +140,9 @@ gaps (
   description TEXT,
   source TEXT,                  -- "rule" (deterministic) | "ai" (contextual)
   rule_id TEXT,                 -- nullable: name of the rule function if source = "rule"
+  priority_score INTEGER,       -- impact × uncertainty (see Gap Prioritization)
+  question_generated BOOLEAN,   -- false until a question is generated for this gap
+  merged_into UUID,             -- nullable: if this gap was merged into another
   created_at
 )
 
@@ -240,8 +243,27 @@ Rules are independently unit-testable with no AI calls. New rules are added by w
 
 **Merge:** Rule-based gaps are tagged `source: "rule"`, AI gaps tagged `source: "ai"`. Both are stored in the `gaps` table. The `source` field is added to the schema (see Data Model). This allows future filtering, reporting, and rule auditing.
 
-**3. Question Generation**
-- One AI call per gap (N gaps = N calls, run in parallel)
+**3. Gap Prioritization** *(runs before question generation)*
+
+Not every gap warrants a question. Before generating questions, all gaps are scored and ranked.
+
+**Priority score formula:**
+```
+priority = impact × uncertainty
+
+impact:      critical=3, major=2, minor=1
+uncertainty: missing=3, ambiguous=2, conflicting=2, incomplete=1
+```
+
+Gaps are sorted by priority score descending. Only the **top 10 gaps** proceed to question generation. The rest are stored in the `gaps` table with `question_generated: false` — they remain visible in the UI but without a question attached.
+
+**Grouping similar gaps:** Before ranking, gaps that share the same `category` and `item_id` are merged into a single representative gap. This prevents the same underlying issue producing multiple questions. Merging is deterministic — the highest-severity gap in the group is kept; others are stored with `merged_into: <gap_id>`.
+
+The `gaps` table gains two fields: `priority_score INTEGER` and `question_generated BOOLEAN` (default false).
+
+**4. Question Generation**
+- Runs only for gaps where `question_generated` will be set to `true` (top 10 after prioritization)
+- One AI call per selected gap, run in parallel
 - Each call receives the gap and its linked requirement item as context
 - Each question assigned a `target_role` (ba / architect / po / dev) by the AI based on:
   - `ambiguous` → `ba`
@@ -250,12 +272,14 @@ Rules are independently unit-testable with no AI calls. New rules are added by w
 - The AI determines ba vs po for `missing`/`incomplete` based on whether the gap concerns product decisions (po) or requirements detail/process (ba)
 - Response schema per call: `{ question_text: string, target_role: "ba" | "architect" | "po" | "dev" }`
 
-**4. Investigation Task Creation**
+The user can explicitly request a question for any ungrouped gap via a "Generate question" action — this triggers a single on-demand AI call for that gap.
+
+**5. Investigation Task Creation**
 - Critical and major gaps automatically produce investigation tasks
 - Title, description, and priority pre-filled from gap context
 - Status defaults to `open`
 
-**5. Completeness Scoring**
+**6. Completeness Scoring**
 - Produces a score 0–100 using an equal-weight average across 4 dimensions (25 points each):
 
   | Dimension | How scored |
@@ -293,11 +317,14 @@ Three tabbed views at `projects/[id]/requirements/`:
 - Last-write-wins for concurrent edits in MVP — no conflict resolution UI
 
 ### View 3: Gaps & Questions
-- Prioritized list of all detected gaps (critical → major → minor)
-- Each gap expands to show:
+- Default view shows **top 10 gaps with questions** only (sorted by priority score)
+- "Show all gaps" toggle reveals the full list including low-priority and merged gaps
+- Each gap with a question expands to show:
   - Clarifying question with target role badge (BA / Architect / PO / Dev)
   - Inline answer input field (for stakeholder responses)
   - Linked investigation task with status badge
+- Each gap without a question shows a "Generate question" button (on-demand, single AI call)
+- Merged gaps are shown collapsed under their representative gap with a count badge ("+ 2 similar")
 
 **Note on collaboration:** Supabase Realtime is used in MVP for pipeline progress only. Concurrent editing of requirement items uses last-write-wins — the last save overwrites silently. Real-time collaborative editing is deferred to a future phase.
 
