@@ -17,7 +17,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   const result = await runPipeline(id, req.raw_input, user.id, db, ai)
 
   if (result.success) {
-    const { data: project } = await db.from('requirements').select('project_id').eq('id', params.id).single()
+    const { data: project } = await db.from('requirements').select('project_id').eq('id', id).single()
     if (project?.project_id) {
       void classifyAndSeedDomain(project.project_id, req.raw_input, db, ai)
     }
