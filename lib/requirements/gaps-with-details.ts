@@ -36,7 +36,9 @@ export function buildGapsWithDetails(
   tasks: InvestigationTask[]
 ): GapWithDetails[] {
   const questionByGapId = new Map(questions.map(q => [q.gap_id, q]))
-  const taskByGapId = new Map(tasks.map(t => [t.linked_gap_id ?? '', t]))
+  const taskByGapId = new Map(
+    tasks.filter(t => t.linked_gap_id !== null).map(t => [t.linked_gap_id!, t])
+  )
   const mergedCountById = new Map<string, number>()
 
   for (const gap of gaps) {
