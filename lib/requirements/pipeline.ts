@@ -27,7 +27,11 @@ async function writeAudit(
   actorId: string | null,
   diff: Record<string, unknown>
 ) {
-  await db.from('audit_log').insert({ entity_type: entityType, entity_id: entityId, action, actor_id: actorId, diff })
+  try {
+    await db.from('audit_log').insert({ entity_type: entityType, entity_id: entityId, action, actor_id: actorId, diff })
+  } catch {
+    // audit failures must never abort the pipeline
+  }
 }
 
 export async function runPipeline(
@@ -181,6 +185,7 @@ export async function runPipeline(
   } catch (err) {
     await writeAudit(db, 'requirements', requirementId, 'updated', actorId, { step: 'score', error: String(err) })
     steps.score = 'error'
+    await db.from('requirements').update({ status: 'draft', updated_at: new Date().toISOString() }).eq('id', requirementId)
     return { success: false, steps, error: `Score failed: ${String(err)}` }
   }
 

@@ -3,17 +3,22 @@ import { runPipeline } from '@/lib/requirements/pipeline'
 import { MockAIProvider } from '@/lib/ai/adapters/mock'
 
 /** Minimal Supabase client stub */
-function makeDbStub() {
+function makeDbStub(throwOnTable?: string) {
   const inserts: Record<string, unknown[]> = {}
   let statusValue = 'draft'
+  let idCounter = 0
 
   const chainable = (table: string) => ({
     insert: (data: unknown) => {
+      if (throwOnTable && table === throwOnTable) {
+        throw new Error(`Stub forced error on table: ${table}`)
+      }
       inserts[table] = inserts[table] ?? []
       ;(inserts[table] as unknown[]).push(data)
+      const rows = Array.isArray(data) ? data.map(() => ({ id: `fake-id-${++idCounter}` })) : [{ id: `fake-id-${++idCounter}` }]
       return {
-        select: () => ({ data: [{ id: 'fake-id' }], error: null }),
-        data: [{ id: 'fake-id' }],
+        select: () => ({ data: rows, error: null }),
+        data: rows,
         error: null,
       }
     },
@@ -62,5 +67,14 @@ describe('runPipeline', () => {
     const result = await runPipeline('req-1', 'some input', 'user-1', db, mock)
     expect(result.success).toBe(false)
     expect(result.steps.parse).toBe('error')
+  })
+
+  it('returns failure when score step throws', async () => {
+    const mock = new MockAIProvider()
+    mock.setDefaultResponse(JSON.stringify({ items: [] }))
+    const db = makeDbStub('completeness_scores') as unknown as Parameters<typeof runPipeline>[3]
+    const result = await runPipeline('req-1', 'some input', 'user-1', db, mock)
+    expect(result.success).toBe(false)
+    expect(result.steps.score).toBe('error')
   })
 })
