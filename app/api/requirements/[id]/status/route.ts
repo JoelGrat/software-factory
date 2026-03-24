@@ -10,6 +10,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()
+  if (!body.status || typeof body.status !== 'string') {
+    return NextResponse.json({ error: 'status is required' }, { status: 400 })
+  }
   const newStatus: RequirementStatus = body.status
   const blockedReason: string | null = body.blocked_reason ?? null
 
@@ -34,11 +37,12 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     }
   }
 
-  await db.from('requirements').update({
+  const { error: updateError } = await db.from('requirements').update({
     status: newStatus,
     blocked_reason: newStatus === 'blocked' ? blockedReason : null,
     updated_at: new Date().toISOString(),
   }).eq('id', id)
+  if (updateError) return NextResponse.json({ error: 'Failed to update status' }, { status: 500 })
 
   await db.from('audit_log').insert({
     entity_type: 'requirements',

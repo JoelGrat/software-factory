@@ -15,7 +15,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       .eq('requirement_id', id)
       .order('scored_at', { ascending: false })
       .limit(1)
-      .single(),
+      .maybeSingle(),
     db.from('gaps').select('severity, resolved_at, merged_into').eq('requirement_id', id),
   ])
 

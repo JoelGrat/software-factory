@@ -11,20 +11,25 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()
+  if (!body.status || typeof body.status !== 'string') {
+    return NextResponse.json({ error: 'status is required' }, { status: 400 })
+  }
   const newStatus: TaskStatus = body.status
 
   const { data: task } = await db.from('investigation_tasks').select('*').eq('id', id).single()
   if (!task) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  await db.from('investigation_tasks').update({ status: newStatus }).eq('id', id)
+  const { error: taskUpdateError } = await db.from('investigation_tasks').update({ status: newStatus }).eq('id', id)
+  if (taskUpdateError) return NextResponse.json({ error: 'Failed to update task' }, { status: 500 })
 
   if (newStatus === 'resolved' && task.linked_gap_id) {
     await db.from('gaps').update({ resolved_at: new Date().toISOString(), resolution_source: 'task_resolved' }).eq('id', task.linked_gap_id)
   }
 
-  const [{ data: allGaps }, { data: allItems }] = await Promise.all([
+  const [{ data: allGaps }, { data: allItems }, { data: currentReq }] = await Promise.all([
     db.from('gaps').select('*').eq('requirement_id', task.requirement_id),
     db.from('requirement_items').select('*').eq('requirement_id', task.requirement_id),
+    db.from('requirements').select('status').eq('id', task.requirement_id).single(),
   ])
 
   const gapsForScoring = (allGaps ?? []).map(g => ({
@@ -42,7 +47,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   })
 
   const newReqStatus = computeStatusFromScore(allGaps ?? [])
-  await db.from('requirements').update({ status: newReqStatus, updated_at: new Date().toISOString() }).eq('id', task.requirement_id)
+  if (currentReq?.status !== 'blocked') {
+    await db.from('requirements').update({ status: newReqStatus, updated_at: new Date().toISOString() }).eq('id', task.requirement_id)
+  }
   await db.from('audit_log').insert({
     entity_type: 'investigation_tasks', entity_id: id, action: 'updated',
     actor_id: user.id, diff: { status: newStatus, gap_resolved: newStatus === 'resolved' && !!task.linked_gap_id },

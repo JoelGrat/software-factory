@@ -13,6 +13,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()
+  if (!body.answer || typeof body.answer !== 'string') {
+    return NextResponse.json({ error: 'answer is required' }, { status: 400 })
+  }
   const answer: string = body.answer
 
   const { data: question } = await db
@@ -28,15 +31,17 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const raw = await ai.complete(prompt, { responseSchema: EVALUATE_ANSWER_SCHEMA })
   const evaluation = parseStructuredResponse<{ resolved: boolean; rationale: string }>(raw, EVALUATE_ANSWER_SCHEMA)
 
-  await db.from('questions').update({ answer, status: 'answered', answered_at: new Date().toISOString() }).eq('id', id)
+  const { error: questionUpdateError } = await db.from('questions').update({ answer, status: 'answered', answered_at: new Date().toISOString() }).eq('id', id)
+  if (questionUpdateError) return NextResponse.json({ error: 'Failed to update question' }, { status: 500 })
 
   if (evaluation.resolved) {
     await db.from('gaps').update({ resolved_at: new Date().toISOString(), resolution_source: 'question_answered' }).eq('id', question.gap_id)
   }
 
-  const [{ data: allGaps }, { data: allItems }] = await Promise.all([
+  const [{ data: allGaps }, { data: allItems }, { data: currentReq }] = await Promise.all([
     db.from('gaps').select('*').eq('requirement_id', question.requirement_id),
     db.from('requirement_items').select('*').eq('requirement_id', question.requirement_id),
+    db.from('requirements').select('status').eq('id', question.requirement_id).single(),
   ])
 
   const gapsForScoring = (allGaps ?? []).map(g => ({
@@ -54,7 +59,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   })
 
   const newStatus = computeStatusFromScore(allGaps ?? [])
-  await db.from('requirements').update({ status: newStatus, updated_at: new Date().toISOString() }).eq('id', question.requirement_id)
+  if (currentReq?.status !== 'blocked') {
+    await db.from('requirements').update({ status: newStatus, updated_at: new Date().toISOString() }).eq('id', question.requirement_id)
+  }
   await db.from('audit_log').insert({
     entity_type: 'questions', entity_id: id, action: 'updated',
     actor_id: user.id, diff: { answered: true, gap_resolved: evaluation.resolved },
