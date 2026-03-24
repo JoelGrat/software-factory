@@ -18,7 +18,7 @@ export async function extractGapPattern(
       .eq('category', gap.category)
       .eq('severity', gap.severity)
       .eq('description_template', gap.description)
-      .or(`project_id.eq.${projectId},project_id.is.null`)
+      .or(projectId ? `project_id.eq.${projectId},project_id.is.null` : 'project_id.is.null')
       .limit(1)
 
     if (existing && existing.length > 0) {

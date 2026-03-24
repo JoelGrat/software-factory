@@ -18,7 +18,8 @@ export async function extractResolutionPattern(
       .select('id')
       .eq('category', gap.category)
       .eq('severity', gap.severity)
-      .or(`project_id.eq.${projectId},project_id.is.null`)
+      .eq('description_template', gap.description)
+      .or(projectId ? `project_id.eq.${projectId},project_id.is.null` : 'project_id.is.null')
       .limit(1)
 
     if (!patterns || patterns.length === 0) return
