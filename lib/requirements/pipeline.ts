@@ -10,7 +10,7 @@ import { computeStatusFromScore } from '@/lib/requirements/re-evaluator'
 export interface PipelineResult {
   success: boolean
   steps: {
-    parse: 'ok' | 'error'
+    parse: 'ok' | 'error' | 'skipped'
     gaps: 'ok' | 'error' | 'skipped'
     questions: 'ok' | 'error' | 'skipped'
     tasks: 'ok' | 'error' | 'skipped'
