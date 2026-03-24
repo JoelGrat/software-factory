@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server'
-import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/supabase/server'
 import type { RequirementSummary } from '@/lib/supabase/types'
+
+interface GapRow { severity: string; resolved_at: string | null; merged_into: string | null }
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const db = createServerSupabaseClient()
+  const db = createClient()
   const { data: { user } } = await db.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -21,7 +23,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
   if (!req) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  const activeGaps = (gaps ?? []).filter(g => !g.resolved_at && !g.merged_into)
+  const activeGaps = ((gaps ?? []) as GapRow[]).filter(g => !g.resolved_at && !g.merged_into)
   const summary: RequirementSummary = {
     critical_count: activeGaps.filter(g => g.severity === 'critical').length,
     major_count: activeGaps.filter(g => g.severity === 'major').length,

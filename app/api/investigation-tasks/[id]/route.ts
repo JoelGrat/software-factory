@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server'
-import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/supabase/server'
 import { computeScore } from '@/lib/requirements/scorer'
 import { computeStatusFromScore } from '@/lib/requirements/re-evaluator'
-import type { TaskStatus } from '@/lib/supabase/types'
+import type { TaskStatus, Gap } from '@/lib/supabase/types'
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const db = createServerSupabaseClient()
+  const db = createClient()
   const { data: { user } } = await db.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -32,7 +32,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     db.from('requirements').select('status').eq('id', task.requirement_id).single(),
   ])
 
-  const gapsForScoring = (allGaps ?? []).map(g => ({
+  const gapsForScoring = ((allGaps ?? []) as Gap[]).map(g => ({
     item_id: g.item_id, severity: g.severity, category: g.category,
     description: g.description, source: g.source, rule_id: g.rule_id,
     priority_score: g.priority_score, confidence: g.confidence, question_generated: g.question_generated,

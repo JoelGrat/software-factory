@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server'
-import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/supabase/server'
 import { validateStatusTransition, checkReadyForDevGate } from '@/lib/requirements/status-validator'
 import type { RequirementStatus } from '@/lib/supabase/types'
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const db = createServerSupabaseClient()
+  const db = createClient()
   const { data: { user } } = await db.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 

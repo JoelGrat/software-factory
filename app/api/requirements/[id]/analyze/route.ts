@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server'
-import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/supabase/server'
 import { getProvider } from '@/lib/ai/registry'
 import { runPipeline } from '@/lib/requirements/pipeline'
 import { classifyAndSeedDomain } from '@/lib/requirements/knowledge/domain-classifier'
 
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const db = createServerSupabaseClient()
+  const db = createClient()
   const { data: { user } } = await db.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
