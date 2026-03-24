@@ -47,9 +47,8 @@ describe('detectGaps', () => {
     mock.setDefaultResponse(JSON.stringify({ gaps: [] }))
     const { gaps } = await detectGaps(minimalItems, mock)
     const criticalMissing = gaps.find(g => g.severity === 'critical' && g.category === 'missing')
-    if (criticalMissing) {
-      expect(criticalMissing.priority_score).toBe(9) // 3 × 3
-    }
+    expect(criticalMissing).toBeDefined()
+    expect(criticalMissing!.priority_score).toBe(9) // 3 × 3
   })
 
   it('returns mergedPairs when duplicate gaps exist', async () => {
