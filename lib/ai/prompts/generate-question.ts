@@ -24,7 +24,8 @@ Gap description: ${gapDescription}${itemContext}
 Target role assignment rules:
 - "ambiguous" gaps → target_role: "ba"
 - "missing"/"incomplete" with product/business decision → target_role: "po"
-- "missing"/"incomplete" with process/detail/technical → target_role: "ba"
+- "missing"/"incomplete" with process/requirements detail → target_role: "ba"
+- "missing"/"incomplete" with implementation/technical detail → target_role: "dev"
 - "conflicting" with technical concern → target_role: "architect"
 - "conflicting" with business rules → target_role: "po"
 

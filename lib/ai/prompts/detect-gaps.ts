@@ -6,7 +6,7 @@ export const DETECT_GAPS_SCHEMA: Record<string, unknown> = {
       items: {
         type: 'object',
         properties: {
-          item_id: { type: 'string', nullable: true },
+          item_id: { type: 'string' },
           severity: { type: 'string', enum: ['critical', 'major', 'minor'] },
           category: { type: 'string', enum: ['missing', 'ambiguous', 'conflicting', 'incomplete'] },
           description: { type: 'string' },
@@ -25,7 +25,7 @@ export function buildDetectGapsPrompt(itemsJson: string): string {
 Review the structured requirement items below. Identify gaps that require reasoning — ambiguity, implicit conflicts, domain-specific omissions, incomplete specifications.
 
 For each gap:
-- item_id: the item ID this gap relates to, or null for document-level gaps
+- item_id: always set to null (the caller maps gaps to items after parsing)
 - severity: "critical" (blocks development), "major" (significant risk), or "minor" (worth noting)
 - category: "missing" (not mentioned), "ambiguous" (unclear meaning), "conflicting" (contradicts another item), or "incomplete" (mentioned but not fully specified)
 - description: 1-2 sentences explaining the gap

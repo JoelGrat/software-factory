@@ -11,7 +11,7 @@ export const PARSE_REQUIREMENTS_SCHEMA: Record<string, unknown> = {
           description: { type: 'string' },
           priority: { type: 'string', enum: ['high', 'medium', 'low'] },
           source_text: { type: 'string' },
-          nfr_category: { type: 'string', enum: ['security', 'performance', 'auditability'], nullable: true },
+          nfr_category: { type: 'string', enum: ['security', 'performance', 'auditability'] },
         },
         required: ['type', 'title', 'description', 'priority', 'source_text'],
       },
