@@ -1,5 +1,5 @@
 'use client'
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import type { RequirementItem, RequirementStatus } from '@/lib/supabase/types'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -25,19 +25,24 @@ export function ViewStructured({ items, gaps, status, blockedGapDescriptions, on
   const [marking, setMarking] = useState(false)
   const [markError, setMarkError] = useState<string | null>(null)
 
-  const activeGapsByItemId = new Map<string, typeof gaps[number][]>()
-  for (const gap of gaps) {
-    if (!gap.resolved_at && !gap.merged_into && gap.item_id) {
-      const list = activeGapsByItemId.get(gap.item_id) ?? []
-      list.push(gap)
-      activeGapsByItemId.set(gap.item_id, list)
+  const activeGapsByItemId = useMemo(() => {
+    const map = new Map<string, typeof gaps[number][]>()
+    for (const gap of gaps) {
+      if (!gap.resolved_at && !gap.merged_into && gap.item_id) {
+        const list = map.get(gap.item_id) ?? []
+        list.push(gap)
+        map.set(gap.item_id, list)
+      }
     }
-  }
+    return map
+  }, [gaps])
 
-  const grouped = TYPE_ORDER.map(type => ({
-    type,
-    items: items.filter(i => i.type === type),
-  })).filter(g => g.items.length > 0)
+  const grouped = useMemo(() =>
+    TYPE_ORDER.map(type => ({
+      type,
+      items: items.filter(i => i.type === type),
+    })).filter(g => g.items.length > 0),
+  [items])
 
   const canMarkReady = status === 'review_required' || status === 'ready_for_dev'
   const isReady = status === 'ready_for_dev'

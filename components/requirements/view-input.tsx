@@ -42,9 +42,7 @@ export function ViewInput({ requirementId, initialRawInput, onAnalysisComplete }
         }
       })
       .subscribe()
-    const cleanup = () => { void supabase.removeChannel(channel) }
-    cleanupRef.current = cleanup
-    return cleanup
+    return () => { void supabase.removeChannel(channel) }
   }
 
   async function handleAnalyze() {
@@ -54,9 +52,16 @@ export function ViewInput({ requirementId, initialRawInput, onAnalysisComplete }
     setAnalyzing(true)
 
     const unsubscribe = subscribeToProgress()
+    let cleaned = false
+    const doCleanup = () => {
+      if (cleaned) return
+      cleaned = true
+      unsubscribe()
+      cleanupRef.current = null
+    }
+    cleanupRef.current = doCleanup
 
     try {
-      // Save raw_input first — surface errors rather than silently proceeding
       const saveRes = await fetch(`/api/requirements/${requirementId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -78,8 +83,7 @@ export function ViewInput({ requirementId, initialRawInput, onAnalysisComplete }
     } catch (err) {
       setError(String(err))
     } finally {
-      unsubscribe()
-      cleanupRef.current = null
+      doCleanup()
       setAnalyzing(false)
     }
   }
