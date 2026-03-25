@@ -39,8 +39,8 @@ export function Workspace({ requirementId, initialRawInput, initialItems, initia
     }
   }, [requirementId])
 
-  function handleAnalysisComplete() {
-    void refreshData()
+  async function handleAnalysisComplete() {
+    await refreshData()
     setActiveTab('structured')
   }
 
@@ -54,6 +54,8 @@ export function Workspace({ requirementId, initialRawInput, initialItems, initia
       const data = await res.json()
       throw new Error(data.error ?? 'Failed to update status')
     }
+    setStatus('ready_for_dev')
+    void refreshData()
   }
 
   const activeGaps = gaps.filter(g => !g.resolved_at && !g.merged_into)
@@ -71,7 +73,7 @@ export function Workspace({ requirementId, initialRawInput, initialItems, initia
     <div>
       <RiskSummaryPanel
         requirementId={requirementId}
-        initialSummary={initialSummary}
+        initialSummary={{ ...initialSummary, status }}
         onCriticalClick={() => setActiveTab('gaps')}
         onMajorClick={() => setActiveTab('gaps')}
         onScoreClick={() => setActiveTab('gaps')}

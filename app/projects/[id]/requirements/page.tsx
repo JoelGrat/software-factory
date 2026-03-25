@@ -34,11 +34,12 @@ export default async function RequirementsPage({ params }: Props) {
     .maybeSingle()
 
   if (!req) {
-    const { data: created } = await db
+    const { data: created, error: insertError } = await db
       .from('requirements')
       .insert({ project_id: projectId, title: 'Requirements', raw_input: '', status: 'draft' })
       .select('id, title, raw_input, status, blocked_reason')
       .single()
+    if (insertError) console.error('Failed to create requirement:', insertError.message)
     req = created
   }
 
