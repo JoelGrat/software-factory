@@ -1,5 +1,5 @@
 'use client'
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 
@@ -21,7 +21,12 @@ export function ViewInput({ requirementId, initialRawInput, onAnalysisComplete }
   const [analyzing, setAnalyzing] = useState(false)
   const [completedSteps, setCompletedSteps] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
-  const channelRef = useRef<ReturnType<ReturnType<typeof createClient>['channel']> | null>(null)
+  const cleanupRef = useRef<(() => void) | null>(null)
+
+  // Ensure channel is cleaned up if component unmounts mid-analysis
+  useEffect(() => {
+    return () => { cleanupRef.current?.() }
+  }, [])
 
   function subscribeToProgress() {
     const supabase = createClient()
@@ -37,8 +42,9 @@ export function ViewInput({ requirementId, initialRawInput, onAnalysisComplete }
         }
       })
       .subscribe()
-    channelRef.current = channel
-    return () => { void supabase.removeChannel(channel) }
+    const cleanup = () => { void supabase.removeChannel(channel) }
+    cleanupRef.current = cleanup
+    return cleanup
   }
 
   async function handleAnalyze() {
@@ -47,17 +53,21 @@ export function ViewInput({ requirementId, initialRawInput, onAnalysisComplete }
     setCompletedSteps([])
     setAnalyzing(true)
 
-    // Save raw_input first
-    await fetch(`/api/requirements/${requirementId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ raw_input: text }),
-    })
-
-    // Subscribe to progress events
     const unsubscribe = subscribeToProgress()
 
     try {
+      // Save raw_input first — surface errors rather than silently proceeding
+      const saveRes = await fetch(`/api/requirements/${requirementId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ raw_input: text }),
+      })
+      if (!saveRes.ok) {
+        const saveData = await saveRes.json().catch(() => ({}))
+        setError((saveData as { error?: string }).error ?? 'Failed to save requirements text')
+        return
+      }
+
       const res = await fetch(`/api/requirements/${requirementId}/analyze`, { method: 'POST' })
       const data = await res.json()
       if (!res.ok || !data.success) {
@@ -69,6 +79,7 @@ export function ViewInput({ requirementId, initialRawInput, onAnalysisComplete }
       setError(String(err))
     } finally {
       unsubscribe()
+      cleanupRef.current = null
       setAnalyzing(false)
     }
   }
