@@ -17,12 +17,11 @@ interface Props {
   gaps: Array<{ id: string; item_id: string | null; severity: string; resolved_at: string | null; merged_into: string | null }>
   status: RequirementStatus
   blockedGapDescriptions: string[]
-  requirementId: string
   onMarkReady: () => Promise<void>
   onViewGap?: () => void
 }
 
-export function ViewStructured({ items, gaps, status, blockedGapDescriptions, requirementId, onMarkReady, onViewGap }: Props) {
+export function ViewStructured({ items, gaps, status, blockedGapDescriptions, onMarkReady, onViewGap }: Props) {
   const [marking, setMarking] = useState(false)
   const [markError, setMarkError] = useState<string | null>(null)
 
@@ -63,7 +62,7 @@ export function ViewStructured({ items, gaps, status, blockedGapDescriptions, re
           {!canMarkReady && blockedGapDescriptions.length > 0 && (
             <div className="mb-2 text-xs text-red-600 max-w-xs">
               Blocked by {blockedGapDescriptions.length} critical gap{blockedGapDescriptions.length > 1 ? 's' : ''}.{' '}
-              <button onClick={onViewGap} className="underline">View gaps</button>
+              {onViewGap && <button onClick={onViewGap} className="underline">View gaps</button>}
             </div>
           )}
           <Button
