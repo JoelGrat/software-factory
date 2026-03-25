@@ -5,8 +5,8 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 
 interface DecisionForm {
-  decision: string
-  rationale: string
+  decision?: string
+  rationale?: string
 }
 
 interface Props {
@@ -105,7 +105,7 @@ export function ViewGaps({ requirementId, gaps, onUpdate }: Props) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-sm text-gray-500">
-          Showing {topGaps.length} of {allNonMerged.length} gap{allNonMerged.length !== 1 ? 's' : ''}
+          Showing {displayedGaps.length} of {allNonMerged.length} gap{allNonMerged.length !== 1 ? 's' : ''}
         </p>
         {allNonMerged.length > 10 && (
           <button
@@ -123,8 +123,9 @@ export function ViewGaps({ requirementId, gaps, onUpdate }: Props) {
           className={`border rounded-lg overflow-hidden ${gap.resolved_at ? 'opacity-60' : ''}`}
         >
           {/* Gap header */}
-          <div
-            className="flex items-start justify-between gap-3 p-4 cursor-pointer hover:bg-gray-50"
+          <button
+            type="button"
+            className="w-full flex items-start justify-between gap-3 p-4 hover:bg-gray-50 text-left"
             onClick={() => setExpandedGapId(expandedGapId === gap.id ? null : gap.id)}
           >
             <div className="flex-1 min-w-0">
@@ -143,7 +144,7 @@ export function ViewGaps({ requirementId, gaps, onUpdate }: Props) {
               )}
             </div>
             <span className="text-gray-400 text-sm shrink-0">{expandedGapId === gap.id ? '▲' : '▼'}</span>
-          </div>
+          </button>
 
           {/* Expanded body */}
           {expandedGapId === gap.id && !gap.resolved_at && (
@@ -171,7 +172,9 @@ export function ViewGaps({ requirementId, gaps, onUpdate }: Props) {
                     </p>
                   ) : (
                     <>
+                      <label htmlFor={`answer-${gap.id}`} className="sr-only">Answer</label>
                       <textarea
+                        id={`answer-${gap.id}`}
                         value={answers[gap.id] ?? ''}
                         onChange={e => setAnswers(prev => ({ ...prev, [gap.id]: e.target.value }))}
                         placeholder="Type the stakeholder's answer here…"
@@ -215,8 +218,9 @@ export function ViewGaps({ requirementId, gaps, onUpdate }: Props) {
                 <div className="border rounded-lg p-4 bg-white space-y-3">
                   <h4 className="text-sm font-semibold">Record Decision</h4>
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Decision *</label>
+                    <label htmlFor={`decision-${gap.id}`} className="block text-xs font-medium text-gray-600 mb-1">Decision *</label>
                     <textarea
+                      id={`decision-${gap.id}`}
                       rows={2}
                       value={decisionForms[gap.id]?.decision ?? ''}
                       onChange={e => setDecisionForms(prev => ({
@@ -228,8 +232,9 @@ export function ViewGaps({ requirementId, gaps, onUpdate }: Props) {
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Rationale *</label>
+                    <label htmlFor={`rationale-${gap.id}`} className="block text-xs font-medium text-gray-600 mb-1">Rationale *</label>
                     <textarea
+                      id={`rationale-${gap.id}`}
                       rows={2}
                       value={decisionForms[gap.id]?.rationale ?? ''}
                       onChange={e => setDecisionForms(prev => ({
@@ -249,7 +254,10 @@ export function ViewGaps({ requirementId, gaps, onUpdate }: Props) {
                     </Button>
                     <Button
                       variant="ghost"
-                      onClick={() => setShowDecision(null)}
+                      onClick={() => {
+                        setShowDecision(null)
+                        setErrors(prev => ({ ...prev, [gap.id]: '' }))
+                      }}
                     >
                       Cancel
                     </Button>
