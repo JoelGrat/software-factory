@@ -17,4 +17,13 @@ describe('AI provider registry', () => {
     process.env.AI_PROVIDER = 'unknown-provider'
     expect(() => getProvider()).toThrow('Unknown AI_PROVIDER: unknown-provider')
   })
+
+  it('complete() returns a CompletionResult with provider=mock', async () => {
+    process.env.AI_PROVIDER = 'mock'
+    const provider = getProvider()
+    const result = await provider.complete('hello')
+    expect(result.provider).toBe('mock')
+    expect(typeof result.content).toBe('string')
+    expect(typeof result.latencyMs).toBe('number')
+  })
 })
