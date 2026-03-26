@@ -1,3 +1,5 @@
+// lib/supabase/types.ts
+
 export type RequirementStatus =
   | 'draft'
   | 'analyzing'
@@ -6,14 +8,17 @@ export type RequirementStatus =
   | 'ready_for_dev'
   | 'blocked'
 
-export type GapSeverity = 'critical' | 'major' | 'minor'
-export type GapCategory = 'missing' | 'ambiguous' | 'conflicting' | 'incomplete'
-export type GapSource = 'rule' | 'ai' | 'pattern'
-export type NfrCategory = 'security' | 'performance' | 'auditability'
-export type TargetRole = 'ba' | 'architect' | 'po' | 'dev'
-export type TaskStatus = 'open' | 'in-progress' | 'resolved' | 'dismissed'
+export type RequirementDomain = 'saas' | 'fintech' | 'workflow' | 'general'
+
+export type GapSeverity  = 'critical' | 'major' | 'minor'
+export type GapCategory  = 'missing' | 'ambiguous' | 'conflicting' | 'incomplete'
+export type GapSource    = 'rule' | 'ai' | 'relation'
+export type RelationType = 'depends_on' | 'conflicts_with' | 'refines'
+export type NfrCategory  = 'security' | 'performance' | 'auditability'
+export type TargetRole   = 'ba' | 'architect' | 'po' | 'dev'
+export type TaskStatus   = 'open' | 'in-progress' | 'resolved' | 'dismissed'
 export type QuestionStatus = 'open' | 'answered' | 'dismissed'
-export type ItemType = 'functional' | 'non-functional' | 'constraint' | 'assumption'
+export type ItemType     = 'functional' | 'non-functional' | 'constraint' | 'assumption'
 
 export interface Project {
   id: string
@@ -27,6 +32,7 @@ export interface Requirement {
   project_id: string
   title: string
   raw_input: string
+  domain: RequirementDomain | null
   status: RequirementStatus
   blocked_reason: string | null
   created_at: string
@@ -45,6 +51,15 @@ export interface RequirementItem {
   created_at: string
 }
 
+export interface RequirementRelation {
+  id: string
+  source_id: string
+  target_id: string
+  type: RelationType
+  detected_by: 'rule' | 'ai'
+  created_at: string
+}
+
 export interface Gap {
   id: string
   requirement_id: string
@@ -56,10 +71,27 @@ export interface Gap {
   rule_id: string | null
   priority_score: number
   confidence: number
+  validated: boolean
+  validated_by: string | null
   question_generated: boolean
   merged_into: string | null
   resolved_at: string | null
-  resolution_source: 'question_answered' | 'task_resolved' | 'decision_recorded' | null
+  resolution_source:
+    | 'question_answered'
+    | 'task_resolved'
+    | 'decision_recorded'
+    | 'risk_accepted'
+    | 'dismissed'
+    | null
+  created_at: string
+}
+
+export interface RiskAcceptance {
+  id: string
+  gap_id: string
+  accepted_by: string
+  rationale: string
+  expires_at: string | null
   created_at: string
 }
 
@@ -90,7 +122,7 @@ export interface AuditLog {
   id: string
   entity_type: string
   entity_id: string
-  action: 'created' | 'updated' | 'deleted' | 'analyzed' | 'scored'
+  action: 'created' | 'updated' | 'deleted' | 'analyzed' | 'scored' | 'risk_accepted'
   actor_id: string | null
   diff: Record<string, unknown> | null
   created_at: string
@@ -107,68 +139,80 @@ export interface DecisionLog {
   created_at: string
 }
 
+export interface AiUsageLog {
+  id: string
+  requirement_id: string | null
+  pipeline_step: string
+  provider: string
+  model: string
+  input_tokens: number
+  output_tokens: number
+  latency_ms: number
+  retry_count: number
+  created_at: string
+}
+
+export interface KnowledgeCase {
+  id: string
+  project_id: string | null
+  requirement_item_snapshot: Record<string, unknown>
+  gap_snapshot: Record<string, unknown>
+  resolution_snapshot: Record<string, unknown>
+  context_tags: string[]
+  embedding: number[] | null
+  created_at: string
+}
+
+export interface CaseFeedback {
+  id: string
+  case_id: string
+  user_id: string
+  helpful: boolean
+  used: boolean
+  overridden: boolean
+  created_at: string
+}
+
 export interface CompletenessScore {
   id: string
   requirement_id: string
-  overall_score: number
-  completeness: number
+  // Primary signals (shown in UI)
+  blocking_count: number
+  high_risk_count: number
+  coverage_pct: number
+  // Secondary (internal)
+  internal_score: number
   nfr_score: number
-  confidence: number
+  // Risk
+  complexity_score: number
+  risk_flags: string[]
+  // Metadata
+  gap_density: number
   breakdown: ScoreBreakdown
   scored_at: string
 }
 
 export interface ScoreBreakdown {
-  completeness: number
+  blocking_count: number
+  high_risk_count: number
+  coverage_pct: number
+  internal_score: number
   nfr_score: number
-  overall: number
-  confidence: number
-  gap_counts: { critical: number; major: number; minor: number }
+  gap_density: number
+  complexity_score: number
+  risk_flags: string[]
+  gap_counts: { critical: number; major: number; minor: number; unvalidated: number }
   nfr_coverage: { security: boolean; performance: boolean; auditability: boolean }
 }
 
-export interface GapPattern {
-  id: string
-  project_id: string | null
-  category: GapCategory
-  severity: GapSeverity
-  description_template: string
-  occurrence_count: number
-  last_seen_at: string
-  created_at: string
-}
-
-export interface ResolutionPattern {
-  id: string
-  gap_pattern_id: string
-  project_id: string | null
-  resolution_summary: string
-  source_decision_id: string | null
-  use_count: number
-  created_at: string
-}
-
-export interface DomainTemplate {
-  id: string
-  project_id: string | null
-  domain: string
-  name: string
-  requirement_areas: RequirementAreas
-  created_at: string
-}
-
-export interface RequirementAreas {
-  functional: string[]
-  nfr: NfrCategory[]
-}
-
 export interface RequirementSummary {
-  critical_count: number
-  major_count: number
-  minor_count: number
-  completeness: number
-  confidence: number
-  overall_score: number
+  blocking_count: number
+  high_risk_count: number
+  coverage_pct: number
+  unvalidated_count: number
+  internal_score: number
+  complexity_score: number
+  risk_flags: string[]
   status: RequirementStatus
   blocked_reason: string | null
 }
