@@ -14,7 +14,6 @@ export default async function RequirementsPage({ params }: Props) {
   const { data: { user } } = await db.auth.getUser()
   if (!user) redirect('/login')
 
-  // Verify project ownership
   const { data: project } = await db
     .from('projects')
     .select('id, name')
@@ -24,7 +23,6 @@ export default async function RequirementsPage({ params }: Props) {
 
   if (!project) redirect('/projects')
 
-  // Get or create requirement for this project
   let { data: req } = await db
     .from('requirements')
     .select('id, title, raw_input, status, blocked_reason')
@@ -45,7 +43,6 @@ export default async function RequirementsPage({ params }: Props) {
 
   if (!req) redirect('/projects')
 
-  // Load workspace data in parallel
   const [
     { data: items },
     { data: gaps },
@@ -79,25 +76,35 @@ export default async function RequirementsPage({ params }: Props) {
   }
 
   return (
-    <main className="max-w-4xl mx-auto py-8 px-4">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <p className="text-sm text-gray-500 mb-1">
-            <a href="/projects" className="hover:underline">Projects</a>
-            {' / '}
+    <main className="min-h-screen" style={{ background: 'var(--bg-base)' }}>
+      <header style={{ borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-surface)' }}>
+        <div className="max-w-5xl mx-auto px-6 py-4 flex items-center gap-3">
+          <a
+            href="/projects"
+            className="text-xs uppercase tracking-widest transition-colors"
+            style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-jetbrains)' }}
+          >
+            Projects
+          </a>
+          <span style={{ color: 'var(--border-strong)' }}>/</span>
+          <span className="text-xs uppercase tracking-widest" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-jetbrains)' }}>
             {project.name}
-          </p>
-          <h1 className="text-2xl font-bold">{req.title}</h1>
+          </span>
         </div>
-      </div>
+      </header>
 
-      <Workspace
-        requirementId={req.id}
-        initialRawInput={req.raw_input ?? ''}
-        initialItems={items ?? []}
-        initialGaps={gapsWithDetails}
-        initialSummary={summary}
-      />
+      <div className="max-w-5xl mx-auto px-6 py-8">
+        <h1 className="text-2xl font-bold mb-8" style={{ fontFamily: 'var(--font-syne)', color: 'var(--text-primary)' }}>
+          {req.title}
+        </h1>
+        <Workspace
+          requirementId={req.id}
+          initialRawInput={req.raw_input ?? ''}
+          initialItems={items ?? []}
+          initialGaps={gapsWithDetails}
+          initialSummary={summary}
+        />
+      </div>
     </main>
   )
 }

@@ -33,24 +33,30 @@ export function CreateProjectForm() {
   }
 
   if (!open) {
-    return (
-      <Button onClick={() => setOpen(true)}>+ New Project</Button>
-    )
+    return <Button onClick={() => setOpen(true)}>+ New Project</Button>
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex items-center gap-3 mt-4">
+    <form onSubmit={handleSubmit} className="flex items-center gap-2">
       <input
         autoFocus
         value={name}
         onChange={e => setName(e.target.value)}
         placeholder="Project name"
         required
-        className="border rounded px-3 py-2 text-sm w-64"
+        className="rounded-lg px-3 py-2 text-sm outline-none w-56 transition-all"
+        style={{
+          background: 'var(--bg-elevated)',
+          border: '1px solid var(--border-default)',
+          color: 'var(--text-primary)',
+          fontFamily: 'var(--font-dm-sans)',
+        }}
+        onFocus={e => { e.currentTarget.style.borderColor = 'var(--border-accent)' }}
+        onBlur={e => { e.currentTarget.style.borderColor = 'var(--border-default)' }}
       />
       <Button type="submit" loading={loading}>Create</Button>
       <Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
-      {error && <p className="text-red-600 text-sm">{error}</p>}
+      {error && <p className="text-xs" style={{ color: 'var(--danger)' }}>{error}</p>}
     </form>
   )
 }

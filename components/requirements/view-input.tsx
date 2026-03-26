@@ -4,10 +4,10 @@ import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 
 const STEP_LABELS: Record<string, string> = {
-  parse:     '✓ Requirements parsed',
-  gaps:      '✓ Gaps detected',
-  questions: '✓ Questions generated',
-  tasks:     '✓ Investigation tasks created',
+  parse:     'Requirements parsed',
+  gaps:      'Gaps detected',
+  questions: 'Questions generated',
+  tasks:     'Investigation tasks created',
 }
 
 interface Props {
@@ -23,7 +23,6 @@ export function ViewInput({ requirementId, initialRawInput, onAnalysisComplete }
   const [error, setError] = useState<string | null>(null)
   const cleanupRef = useRef<(() => void) | null>(null)
 
-  // Ensure channel is cleaned up if component unmounts mid-analysis
   useEffect(() => {
     return () => { cleanupRef.current?.() }
   }, [])
@@ -94,11 +93,21 @@ export function ViewInput({ requirementId, initialRawInput, onAnalysisComplete }
         value={text}
         onChange={e => setText(e.target.value)}
         disabled={analyzing}
-        placeholder="Paste your requirements here — plain text, bullet points, user stories, or meeting notes..."
-        className="w-full h-64 border rounded-lg px-3 py-2 font-mono text-sm resize-y focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60"
+        placeholder="Paste requirements here — plain text, bullet points, user stories, or meeting notes…"
+        className="w-full h-72 rounded-xl px-5 py-4 text-sm resize-y outline-none transition-all disabled:opacity-40"
+        style={{
+          background: 'var(--bg-surface)',
+          border: '1px solid var(--border-default)',
+          color: 'var(--text-primary)',
+          fontFamily: 'var(--font-jetbrains)',
+          fontSize: '13px',
+          lineHeight: '1.7',
+        }}
+        onFocus={e => { e.currentTarget.style.borderColor = 'var(--border-accent)' }}
+        onBlur={e => { e.currentTarget.style.borderColor = 'var(--border-default)' }}
       />
 
-      <div className="flex items-start gap-6">
+      <div className="flex items-center gap-6">
         <Button
           onClick={handleAnalyze}
           loading={analyzing}
@@ -108,17 +117,34 @@ export function ViewInput({ requirementId, initialRawInput, onAnalysisComplete }
         </Button>
 
         {analyzing && completedSteps.length > 0 && (
-          <ul className="text-sm space-y-1">
+          <ul className="space-y-1.5">
             {completedSteps.map(step => (
-              <li key={step} className="text-green-700">{STEP_LABELS[step] ?? `✓ ${step}`}</li>
+              <li key={step} className="flex items-center gap-2 text-xs" style={{ color: 'var(--success)', fontFamily: 'var(--font-syne)' }}>
+                <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none">
+                  <path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+                {STEP_LABELS[step] ?? step}
+              </li>
             ))}
-            <li className="text-blue-600 animate-pulse">Processing…</li>
+            <li className="flex items-center gap-2 text-xs animate-pulse" style={{ color: 'var(--accent)', fontFamily: 'var(--font-syne)' }}>
+              <svg className="w-3 h-3 animate-spin" viewBox="0 0 12 12" fill="none">
+                <circle cx="6" cy="6" r="4" stroke="currentColor" strokeWidth="1.5" strokeDasharray="6 6" />
+              </svg>
+              Processing…
+            </li>
           </ul>
         )}
       </div>
 
       {error && (
-        <div className="border border-red-300 bg-red-50 rounded p-3 text-red-700 text-sm">
+        <div
+          className="rounded-lg px-4 py-3 text-sm"
+          style={{
+            background: 'var(--danger-soft)',
+            border: '1px solid rgba(255,69,69,0.2)',
+            color: 'var(--danger)',
+          }}
+        >
           {error}
         </div>
       )}

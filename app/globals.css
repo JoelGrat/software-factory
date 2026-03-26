@@ -3,25 +3,68 @@
 @tailwind utilities;
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg-base: #07090E;
+  --bg-surface: #0C0F18;
+  --bg-elevated: #111524;
+  --bg-overlay: #161A2C;
+  --bg-hover: rgba(255, 255, 255, 0.03);
+
+  --border-subtle: #141826;
+  --border-default: #1E2236;
+  --border-strong: #2C3050;
+  --border-accent: rgba(79, 112, 255, 0.3);
+
+  --text-primary: #DCE0F0;
+  --text-secondary: #7B82A0;
+  --text-muted: #404463;
+  --text-link: #7B97FF;
+
+  --accent: #4F70FF;
+  --accent-hover: #6B87FF;
+  --accent-soft: rgba(79, 112, 255, 0.1);
+
+  --success: #00D87A;
+  --success-soft: rgba(0, 216, 122, 0.08);
+  --warning: #F5A200;
+  --warning-soft: rgba(245, 162, 0, 0.08);
+  --danger: #FF4545;
+  --danger-soft: rgba(255, 69, 69, 0.08);
+
+  --background: var(--bg-base);
+  --foreground: var(--text-primary);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
+* { box-sizing: border-box; }
+
+html { background-color: var(--bg-base); }
 
 body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  color: var(--text-primary);
+  background-color: var(--bg-base);
+  font-family: var(--font-dm-sans), -apple-system, BlinkMacSystemFont, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-syne), var(--font-dm-sans), sans-serif;
+  letter-spacing: -0.01em;
+}
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-surface); }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #3D4468; }
+
+::selection { background: rgba(79, 112, 255, 0.25); color: var(--text-primary); }
+
 @layer utilities {
-  .text-balance {
-    text-wrap: balance;
+  .text-balance { text-wrap: balance; }
+
+  .bg-grid {
+    background-image:
+      linear-gradient(var(--border-subtle) 1px, transparent 1px),
+      linear-gradient(90deg, var(--border-subtle) 1px, transparent 1px);
+    background-size: 40px 40px;
   }
 }

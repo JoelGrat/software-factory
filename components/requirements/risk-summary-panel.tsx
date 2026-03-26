@@ -5,12 +5,12 @@ import type { RequirementSummary } from '@/lib/supabase/types'
 import { Spinner } from '@/components/ui/spinner'
 
 const STATUS_CONFIG = {
-  draft:            { icon: '📝', label: 'DRAFT',                     cls: 'border-gray-200 bg-gray-50' },
-  analyzing:        { icon: '⏳', label: 'ANALYZING…',                cls: 'border-blue-200 bg-blue-50' },
-  incomplete:       { icon: '⛔', label: 'NOT READY FOR DEVELOPMENT', cls: 'border-red-300 bg-red-50' },
-  review_required:  { icon: '⚠️',  label: 'REVIEW REQUIRED',           cls: 'border-yellow-300 bg-yellow-50' },
-  ready_for_dev:    { icon: '✅', label: 'READY FOR DEVELOPMENT',     cls: 'border-green-300 bg-green-50' },
-  blocked:          { icon: '🔒', label: 'BLOCKED',                   cls: 'border-red-400 bg-red-100' },
+  draft:            { label: 'DRAFT',                     dotColor: 'var(--text-muted)',    barColor: 'var(--border-default)' },
+  analyzing:        { label: 'ANALYZING',                 dotColor: 'var(--accent)',        barColor: 'var(--accent)' },
+  incomplete:       { label: 'NOT READY FOR DEV',         dotColor: 'var(--danger)',        barColor: 'var(--danger)' },
+  review_required:  { label: 'REVIEW REQUIRED',           dotColor: 'var(--warning)',       barColor: 'var(--warning)' },
+  ready_for_dev:    { label: 'READY FOR DEVELOPMENT',     dotColor: 'var(--success)',       barColor: 'var(--success)' },
+  blocked:          { label: 'BLOCKED',                   dotColor: 'var(--danger)',        barColor: 'var(--danger)' },
 }
 
 interface Props {
@@ -49,35 +49,69 @@ export function RiskSummaryPanel({ requirementId, initialSummary, onCriticalClic
   const isAnalyzing = summary.status === 'analyzing'
 
   return (
-    <div className={`border rounded-lg px-4 py-3 mb-6 flex flex-wrap items-center gap-x-6 gap-y-2 ${cfg.cls}`}>
-      {isAnalyzing && <Spinner size="sm" />}
-      <span className="font-semibold text-sm">{cfg.icon} {summary.status === 'blocked' ? `${cfg.label} — ${summary.blocked_reason ?? ''}` : cfg.label}</span>
-
-      {!isAnalyzing && summary.status !== 'draft' && (
-        <>
-          <button
-            onClick={onCriticalClick}
-            className="text-sm text-red-700 hover:underline font-medium"
+    <div
+      className="rounded-xl mb-6 overflow-hidden"
+      style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)' }}
+    >
+      <div
+        className="h-0.5 w-full"
+        style={{ background: cfg.barColor, opacity: 0.7 }}
+      />
+      <div className="px-5 py-3.5 flex flex-wrap items-center gap-x-6 gap-y-2">
+        <div className="flex items-center gap-2.5">
+          {isAnalyzing ? (
+            <Spinner size="sm" />
+          ) : (
+            <div
+              className="w-2 h-2 rounded-full"
+              style={{
+                background: cfg.dotColor,
+                boxShadow: `0 0 6px ${cfg.dotColor}`,
+              }}
+            />
+          )}
+          <span
+            className="text-xs font-semibold tracking-widest uppercase"
+            style={{ color: cfg.dotColor, fontFamily: 'var(--font-syne)' }}
           >
-            🔴 {summary.critical_count} critical
-          </button>
-          <button
-            onClick={onMajorClick}
-            className="text-sm text-orange-700 hover:underline font-medium"
-          >
-            ⚠️ {summary.major_count} major
-          </button>
-          <button
-            onClick={onScoreClick}
-            className="text-sm text-gray-700 hover:underline"
-          >
-            📉 {summary.overall_score}% overall
-          </button>
-          <span className="text-sm text-gray-500">
-            Confidence: {summary.confidence}%
+            {summary.status === 'blocked' ? `${cfg.label} — ${summary.blocked_reason ?? ''}` : cfg.label}
           </span>
-        </>
-      )}
+        </div>
+
+        {!isAnalyzing && summary.status !== 'draft' && (
+          <>
+            <div className="h-3 w-px" style={{ background: 'var(--border-strong)' }} />
+            <button
+              onClick={onCriticalClick}
+              className="text-xs font-medium transition-opacity hover:opacity-70"
+              style={{ color: 'var(--danger)', fontFamily: 'var(--font-syne)' }}
+            >
+              {summary.critical_count} critical
+            </button>
+            <button
+              onClick={onMajorClick}
+              className="text-xs font-medium transition-opacity hover:opacity-70"
+              style={{ color: 'var(--warning)', fontFamily: 'var(--font-syne)' }}
+            >
+              {summary.major_count} major
+            </button>
+            <div className="h-3 w-px" style={{ background: 'var(--border-strong)' }} />
+            <button
+              onClick={onScoreClick}
+              className="text-xs transition-opacity hover:opacity-70"
+              style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-jetbrains)' }}
+            >
+              {summary.overall_score}% complete
+            </button>
+            <span
+              className="text-xs"
+              style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-jetbrains)' }}
+            >
+              {summary.confidence}% confidence
+            </span>
+          </>
+        )}
+      </div>
     </div>
   )
 }
