@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(cp -r /c/Users/joelg/software-factory/app /c/Users/joelg/softwareFactory_git/)",
+      "Bash(cp /c/Users/joelg/software-factory/next.config.mjs /c/Users/joelg/softwareFactory_git/)",
+      "Bash(cp /c/Users/joelg/software-factory/next-env.d.ts /c/Users/joelg/softwareFactory_git/)",
+      "Bash(cp /c/Users/joelg/software-factory/package.json /c/Users/joelg/softwareFactory_git/)",
+      "Bash(cp /c/Users/joelg/software-factory/package-lock.json /c/Users/joelg/softwareFactory_git/)",
+      "Bash(cp /c/Users/joelg/software-factory/.eslintrc.json /c/Users/joelg/softwareFactory_git/)",
+      "Bash(cp /c/Users/joelg/software-factory/.gitignore /c/Users/joelg/softwareFactory_git/)",
+      "Bash(npm install:*)",
+      "Bash(npm run:*)",
+      "Bash(git:*)",
+      "Bash(npx supabase:*)",
+      "Bash(npm test:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx vitest:*)",
+      "Skill(update-config)",
+      "Bash(supabase --version)",
+      "Bash(ls -la /c/Users/joelg/softwareFactory_git/.env*)",
+      "Bash(mkdir -p \"C:/Users/joelg/softwareFactory_git/app/api/requirements/[id]/analyze\")",
+      "Bash(mkdir -p \"C:/Users/joelg/softwareFactory_git/app/api/requirements/[id]/status\")",
+      "Bash(mkdir -p \"C:/Users/joelg/softwareFactory_git/app/api/requirements/[id]/summary\")",
+      "Bash(mkdir -p \"C:/Users/joelg/softwareFactory_git/app/api/questions/[id]\")",
+      "Bash(mkdir -p \"C:/Users/joelg/softwareFactory_git/app/api/investigation-tasks/[id]\")",
+      "Bash(sed -i 's/import { createServerSupabaseClient } from ''''@\\\\/lib\\\\/supabase\\\\/server''''/import { createClient } from ''''@\\\\/lib\\\\/supabase\\\\/server''''/g' app/api/investigation-tasks/[id]/route.ts app/api/questions/[id]/route.ts \"app/api/requirements/[id]/analyze/route.ts\" \"app/api/requirements/[id]/status/route.ts\" \"app/api/requirements/[id]/summary/route.ts\")",
+      "Bash(sed -i 's/createServerSupabaseClient\\(\\)/createClient\\(\\)/g' app/api/investigation-tasks/[id]/route.ts app/api/questions/[id]/route.ts \"app/api/requirements/[id]/analyze/route.ts\" \"app/api/requirements/[id]/status/route.ts\" \"app/api/requirements/[id]/summary/route.ts\")",
+      "Bash(find lib:*)",
+      "Bash(ls -la /c/Users/joelg/softwareFactory_git/app/api/requirements/[id]/)",
+      "Bash(mkdir -p \"C:/Users/joelg/softwareFactory_git/app/api/requirements/[id]/decisions\")",
+      "Bash(mkdir -p \"C:/Users/joelg/softwareFactory_git/app/api/gaps/[id]/question\")"
+    ]
+  }
+}
