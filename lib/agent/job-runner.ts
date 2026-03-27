@@ -24,10 +24,10 @@ export async function runJob(
 }
 
 async function runPlanningPhase(jobId: string, db: SupabaseClient, ai: AIProvider, executor: IExecutor) {
-  await db.from('jobs').update({ status: 'plan_loop' }).eq('id', jobId)
-  await logProgress(db, jobId, 'planning', 'Planning started — reading project structure...', 'info')
-
   try {
+    await db.from('jobs').update({ status: 'plan_loop' }).eq('id', jobId)
+    await logProgress(db, jobId, 'planning', 'Planning started — reading project structure...', 'info')
+
     const { project, items } = await loadJobContext(jobId, db)
 
     await logProgress(db, jobId, 'planning', 'File tree loaded — generating implementation plan...', 'info')
@@ -53,10 +53,10 @@ async function runPlanningPhase(jobId: string, db: SupabaseClient, ai: AIProvide
 }
 
 async function runCodingPhase(jobId: string, db: SupabaseClient, ai: AIProvider, executor: IExecutor) {
-  await db.from('jobs').update({ status: 'coding' }).eq('id', jobId)
-  await logProgress(db, jobId, 'coding', 'Coding started...', 'info')
-
   try {
+    await db.from('jobs').update({ status: 'coding' }).eq('id', jobId)
+    await logProgress(db, jobId, 'coding', 'Coding started...', 'info')
+
     const { project, items } = await loadJobContext(jobId, db)
 
     const { data: planRow } = await db.from('agent_plans').select('*').eq('job_id', jobId).single()
