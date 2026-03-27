@@ -1,7 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { getProvider } from '@/lib/ai/registry'
 import { MockAIProvider } from '@/lib/ai/adapters/mock'
-import { parseStructuredResponse } from '@/lib/ai/provider'
 
 describe('AI provider registry', () => {
   afterEach(() => {
@@ -18,16 +17,13 @@ describe('AI provider registry', () => {
     process.env.AI_PROVIDER = 'unknown-provider'
     expect(() => getProvider()).toThrow('Unknown AI_PROVIDER: unknown-provider')
   })
-})
 
-describe('parseStructuredResponse', () => {
-  it('returns raw string when no schema provided', () => {
-    const input = 'hello world'
-    const result = parseStructuredResponse(input)
-    expect(result).toBe(input)
-  })
-
-  it('throws on invalid JSON when schema is provided', () => {
-    expect(() => parseStructuredResponse('not-json', {})).toThrow('invalid JSON')
+  it('complete() returns a CompletionResult with provider=mock', async () => {
+    process.env.AI_PROVIDER = 'mock'
+    const provider = getProvider()
+    const result = await provider.complete('hello')
+    expect(result.provider).toBe('mock')
+    expect(typeof result.content).toBe('string')
+    expect(typeof result.latencyMs).toBe('number')
   })
 })
