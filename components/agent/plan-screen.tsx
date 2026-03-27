@@ -1,4 +1,5 @@
 'use client'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import type { AgentPlan, PlanTask } from '@/lib/supabase/types'
 
@@ -10,22 +11,40 @@ interface Props {
 
 export function PlanScreen({ jobId, projectId, plan }: Props) {
   const router = useRouter()
+  const [approving, setApproving] = useState(false)
+  const [approveError, setApproveError] = useState<string | null>(null)
 
   async function approvePlan() {
-    const res = await fetch(`/api/jobs/${jobId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'approve_plan' }),
-    })
-    if (res.ok) router.push(`/projects/${projectId}/jobs/${jobId}/execution`)
+    setApproving(true)
+    setApproveError(null)
+    try {
+      const res = await fetch(`/api/jobs/${jobId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'approve_plan' }),
+      })
+      if (!res.ok) {
+        setApproveError('Failed to approve plan. Please try again.')
+        return
+      }
+      router.push(`/projects/${projectId}/jobs/${jobId}/execution`)
+    } catch {
+      setApproveError('Failed to approve plan. Please try again.')
+    } finally {
+      setApproving(false)
+    }
   }
 
   async function cancel() {
-    await fetch(`/api/jobs/${jobId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'cancel' }),
-    })
+    try {
+      await fetch(`/api/jobs/${jobId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'cancel' }),
+      })
+    } catch {
+      // best-effort cancel — navigate away regardless
+    }
     router.push(`/projects/${projectId}/requirements`)
   }
 
@@ -96,19 +115,23 @@ export function PlanScreen({ jobId, projectId, plan }: Props) {
         </div>
 
         {/* Actions */}
-        <div style={{ display: 'flex', gap: '1rem' }}>
-          <button
-            onClick={approvePlan}
-            style={{ padding: '0.75rem 2rem', background: 'var(--accent)', color: '#000', borderRadius: '8px', fontSize: '14px', fontWeight: 600, cursor: 'pointer', border: 'none', fontFamily: 'var(--font-jetbrains)' }}
-          >
-            Approve Plan → Start Coding
-          </button>
-          <button
-            onClick={cancel}
-            style={{ padding: '0.75rem 1.5rem', background: 'transparent', color: 'var(--text-muted)', borderRadius: '8px', fontSize: '14px', cursor: 'pointer', border: '1px solid var(--border-subtle)' }}
-          >
-            Cancel
-          </button>
+        <div style={{ display: 'flex', gap: '1rem', flexDirection: 'column' }}>
+          <div style={{ display: 'flex', gap: '1rem' }}>
+            <button
+              onClick={approvePlan}
+              disabled={approving}
+              style={{ padding: '0.75rem 2rem', background: 'var(--accent)', color: '#000', borderRadius: '8px', fontSize: '14px', fontWeight: 600, cursor: approving ? 'not-allowed' : 'pointer', border: 'none', fontFamily: 'var(--font-jetbrains)', opacity: approving ? 0.7 : 1 }}
+            >
+              {approving ? 'Approving...' : 'Approve Plan → Start Coding'}
+            </button>
+            <button
+              onClick={cancel}
+              style={{ padding: '0.75rem 1.5rem', background: 'transparent', color: 'var(--text-muted)', borderRadius: '8px', fontSize: '14px', cursor: 'pointer', border: '1px solid var(--border-subtle)' }}
+            >
+              Cancel
+            </button>
+          </div>
+          {approveError && <p style={{ color: '#ef4444', fontSize: '12px', marginTop: '0.75rem', fontFamily: 'var(--font-jetbrains)' }}>{approveError}</p>}
         </div>
       </div>
     </div>
