@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { AIProvider } from '@/lib/ai/provider'
+import type { AIProvider, CompletionResult } from '@/lib/ai/provider'
 import { parseRequirements } from '@/lib/requirements/parser'
 import { detectGaps } from '@/lib/requirements/gap-detector'
 import { generateQuestions } from '@/lib/requirements/question-generator'
@@ -17,6 +17,43 @@ export interface PipelineResult {
     score: 'ok' | 'error' | 'skipped'
   }
   error?: string
+}
+
+async function writeAiUsage(
+  db: SupabaseClient,
+  requirementId: string,
+  step: string,
+  result: CompletionResult
+) {
+  try {
+    await db.from('ai_usage_log').insert({
+      requirement_id: requirementId,
+      pipeline_step: step,
+      provider: result.provider,
+      model: result.model,
+      input_tokens: result.inputTokens,
+      output_tokens: result.outputTokens,
+      latency_ms: result.latencyMs,
+      retry_count: result.retryCount,
+    })
+  } catch {
+    // usage logging must never abort the pipeline
+  }
+}
+
+function loggingProvider(
+  ai: AIProvider,
+  db: SupabaseClient,
+  requirementId: string,
+  step: string
+): AIProvider {
+  return {
+    async complete(prompt, options) {
+      const result = await ai.complete(prompt, options)
+      await writeAiUsage(db, requirementId, step, result)
+      return result
+    },
+  }
 }
 
 async function writeAudit(
@@ -51,7 +88,7 @@ export async function runPipeline(
   // Step 1: Parse
   let parsedItems
   try {
-    parsedItems = await parseRequirements(rawInput, ai)
+    parsedItems = await parseRequirements(rawInput, loggingProvider(ai, db, requirementId, 'parse'))
     await db.from('requirement_items').delete().eq('requirement_id', requirementId)
     if (parsedItems.length > 0) {
       await db.from('requirement_items').insert(
@@ -72,7 +109,7 @@ export async function runPipeline(
   let insertedGapIds: string[] = []
 
   try {
-    const detection = await detectGaps(parsedItems, null, ai)
+    const detection = await detectGaps(parsedItems, null, loggingProvider(ai, db, requirementId, 'detect_gaps'))
     allGaps = detection.gaps
     mergedPairs = detection.mergedPairs
 
@@ -119,7 +156,7 @@ export async function runPipeline(
 
   // Step 4: Questions (top 10)
   try {
-    const questions = await generateQuestions(allGaps, mergedIndices, parsedItems, ai)
+    const questions = await generateQuestions(allGaps, mergedIndices, parsedItems, loggingProvider(ai, db, requirementId, 'generate_questions'))
     if (questions.length > 0 && insertedGapIds.length > 0) {
       await db.from('questions').insert(
         questions.map(q => ({
