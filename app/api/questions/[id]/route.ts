@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getProvider } from '@/lib/ai/registry'
-import { parseStructuredResponse } from '@/lib/ai/provider'
 import { buildEvaluateAnswerPrompt, EVALUATE_ANSWER_SCHEMA } from '@/lib/ai/prompts/evaluate-answer'
 import { computeScore } from '@/lib/requirements/scorer'
 import { computeStatusFromScore } from '@/lib/requirements/re-evaluator'
@@ -29,8 +28,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const ai = getProvider()
   const gapDescription = (question.gaps as { description: string } | null)?.description ?? ''
   const prompt = buildEvaluateAnswerPrompt(gapDescription, question.question_text, answer)
-  const raw = await ai.complete(prompt, { responseSchema: EVALUATE_ANSWER_SCHEMA })
-  const evaluation = parseStructuredResponse<{ resolved: boolean; rationale: string }>(raw, EVALUATE_ANSWER_SCHEMA)
+  const result = await ai.complete(prompt, { responseSchema: EVALUATE_ANSWER_SCHEMA })
+  const evaluation = JSON.parse(result.content) as { resolved: boolean; rationale: string }
 
   const { error: questionUpdateError } = await db.from('questions').update({ answer, status: 'answered', answered_at: new Date().toISOString() }).eq('id', id)
   if (questionUpdateError) return NextResponse.json({ error: 'Failed to update question' }, { status: 500 })
@@ -48,15 +47,16 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const gapsForScoring = ((allGaps ?? []) as Gap[]).map(g => ({
     item_id: g.item_id, severity: g.severity, category: g.category,
     description: g.description, source: g.source, rule_id: g.rule_id,
-    priority_score: g.priority_score, confidence: g.confidence, question_generated: g.question_generated,
+    priority_score: g.priority_score, confidence: g.confidence,
+    validated: g.validated, question_generated: g.question_generated,
   }))
 
   const score = computeScore(gapsForScoring, new Set(), allItems ?? [])
   await db.from('completeness_scores').insert({
     requirement_id: question.requirement_id,
-    overall_score: score.overall_score, completeness: score.completeness,
-    nfr_score: score.nfr_score, confidence: score.confidence,
-    breakdown: score.breakdown, scored_at: new Date().toISOString(),
+    blocking_count: score.blocking_count, high_risk_count: score.high_risk_count,
+    coverage_pct: score.coverage_pct, internal_score: score.internal_score,
+    nfr_score: score.nfr_score, breakdown: score.breakdown, scored_at: new Date().toISOString(),
   })
 
   const newStatus = computeStatusFromScore(allGaps ?? [])

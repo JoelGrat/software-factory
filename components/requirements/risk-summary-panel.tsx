@@ -86,14 +86,14 @@ export function RiskSummaryPanel({ requirementId, initialSummary, onCriticalClic
               className="text-xs font-medium transition-opacity hover:opacity-70"
               style={{ color: 'var(--danger)', fontFamily: 'var(--font-syne)' }}
             >
-              {summary.critical_count} critical
+              {summary.blocking_count} critical
             </button>
             <button
               onClick={onMajorClick}
               className="text-xs font-medium transition-opacity hover:opacity-70"
               style={{ color: 'var(--warning)', fontFamily: 'var(--font-syne)' }}
             >
-              {summary.major_count} major
+              {summary.high_risk_count} major
             </button>
             <div className="h-3 w-px" style={{ background: 'var(--border-strong)' }} />
             <button
@@ -101,14 +101,8 @@ export function RiskSummaryPanel({ requirementId, initialSummary, onCriticalClic
               className="text-xs transition-opacity hover:opacity-70"
               style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-jetbrains)' }}
             >
-              {summary.overall_score}% complete
+              {summary.coverage_pct}% coverage
             </button>
-            <span
-              className="text-xs"
-              style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-jetbrains)' }}
-            >
-              {summary.confidence}% confidence
-            </span>
           </>
         )}
       </div>

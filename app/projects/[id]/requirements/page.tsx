@@ -54,7 +54,7 @@ export default async function RequirementsPage({ params }: Props) {
     db.from('gaps').select('*').eq('requirement_id', req.id),
     db.from('questions').select('*').eq('requirement_id', req.id),
     db.from('investigation_tasks').select('*').eq('requirement_id', req.id),
-    db.from('completeness_scores').select('overall_score, completeness, nfr_score, confidence').eq('requirement_id', req.id).order('scored_at', { ascending: false }).limit(1).maybeSingle(),
+    db.from('completeness_scores').select('blocking_count, high_risk_count, coverage_pct, internal_score, complexity_score, risk_flags').eq('requirement_id', req.id).order('scored_at', { ascending: false }).limit(1).maybeSingle(),
   ])
 
   const gapsWithDetails = buildGapsWithDetails(
@@ -65,12 +65,13 @@ export default async function RequirementsPage({ params }: Props) {
 
   const activeGaps = ((gaps ?? []) as Gap[]).filter(g => !g.resolved_at && !g.merged_into)
   const summary: RequirementSummary = {
-    critical_count: activeGaps.filter(g => g.severity === 'critical').length,
-    major_count: activeGaps.filter(g => g.severity === 'major').length,
-    minor_count: activeGaps.filter(g => g.severity === 'minor').length,
-    completeness: latestScore?.completeness ?? 0,
-    confidence: latestScore?.confidence ?? 0,
-    overall_score: latestScore?.overall_score ?? 0,
+    blocking_count: latestScore?.blocking_count ?? activeGaps.filter(g => g.severity === 'critical').length,
+    high_risk_count: latestScore?.high_risk_count ?? activeGaps.filter(g => g.severity === 'major').length,
+    coverage_pct: latestScore?.coverage_pct ?? 0,
+    unvalidated_count: activeGaps.filter(g => !g.validated).length,
+    internal_score: latestScore?.internal_score ?? 0,
+    complexity_score: latestScore?.complexity_score ?? 0,
+    risk_flags: (latestScore?.risk_flags as string[]) ?? [],
     status: req.status,
     blocked_reason: req.blocked_reason,
   }

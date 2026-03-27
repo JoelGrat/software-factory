@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import type { RequirementSummary } from '@/lib/supabase/types'
 
-interface GapRow { severity: string; resolved_at: string | null; merged_into: string | null }
+interface GapRow { severity: string; resolved_at: string | null; merged_into: string | null; validated: boolean | null }
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -13,24 +13,25 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const [{ data: req }, { data: latestScore }, { data: gaps }] = await Promise.all([
     db.from('requirements').select('status, blocked_reason').eq('id', id).single(),
     db.from('completeness_scores')
-      .select('overall_score, completeness, nfr_score, confidence')
+      .select('blocking_count, high_risk_count, coverage_pct, internal_score, complexity_score, risk_flags')
       .eq('requirement_id', id)
       .order('scored_at', { ascending: false })
       .limit(1)
       .maybeSingle(),
-    db.from('gaps').select('severity, resolved_at, merged_into').eq('requirement_id', id),
+    db.from('gaps').select('severity, resolved_at, merged_into, validated').eq('requirement_id', id),
   ])
 
   if (!req) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
   const activeGaps = ((gaps ?? []) as GapRow[]).filter(g => !g.resolved_at && !g.merged_into)
   const summary: RequirementSummary = {
-    critical_count: activeGaps.filter(g => g.severity === 'critical').length,
-    major_count: activeGaps.filter(g => g.severity === 'major').length,
-    minor_count: activeGaps.filter(g => g.severity === 'minor').length,
-    completeness: latestScore?.completeness ?? 0,
-    confidence: latestScore?.confidence ?? 0,
-    overall_score: latestScore?.overall_score ?? 0,
+    blocking_count: latestScore?.blocking_count ?? activeGaps.filter(g => g.severity === 'critical').length,
+    high_risk_count: latestScore?.high_risk_count ?? activeGaps.filter(g => g.severity === 'major').length,
+    coverage_pct: latestScore?.coverage_pct ?? 0,
+    unvalidated_count: activeGaps.filter(g => g.validated === false).length,
+    internal_score: latestScore?.internal_score ?? 0,
+    complexity_score: latestScore?.complexity_score ?? 0,
+    risk_flags: (latestScore?.risk_flags as string[]) ?? [],
     status: req.status,
     blocked_reason: req.blocked_reason,
   }

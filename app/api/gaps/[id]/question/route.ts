@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getProvider } from '@/lib/ai/registry'
-import { parseStructuredResponse } from '@/lib/ai/provider'
 import { buildGenerateQuestionPrompt, GENERATE_QUESTION_SCHEMA } from '@/lib/ai/prompts/generate-question'
 import type { TargetRole } from '@/lib/supabase/types'
 
@@ -20,8 +19,8 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
 
   const ai = getProvider()
   const prompt = buildGenerateQuestionPrompt(gap.description, gap.category, null)
-  const raw = await ai.complete(prompt, { responseSchema: GENERATE_QUESTION_SCHEMA })
-  const parsed = parseStructuredResponse<{ question_text: string; target_role: TargetRole }>(raw, GENERATE_QUESTION_SCHEMA)
+  const result = await ai.complete(prompt, { responseSchema: GENERATE_QUESTION_SCHEMA })
+  const parsed = JSON.parse(result.content) as { question_text: string; target_role: TargetRole }
 
   const { data: question, error } = await db
     .from('questions')

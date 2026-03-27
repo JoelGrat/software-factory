@@ -35,15 +35,16 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const gapsForScoring = ((allGaps ?? []) as Gap[]).map(g => ({
     item_id: g.item_id, severity: g.severity, category: g.category,
     description: g.description, source: g.source, rule_id: g.rule_id,
-    priority_score: g.priority_score, confidence: g.confidence, question_generated: g.question_generated,
+    priority_score: g.priority_score, confidence: g.confidence,
+    validated: g.validated, question_generated: g.question_generated,
   }))
 
   const score = computeScore(gapsForScoring, new Set(), allItems ?? [])
   await db.from('completeness_scores').insert({
     requirement_id: task.requirement_id,
-    overall_score: score.overall_score, completeness: score.completeness,
-    nfr_score: score.nfr_score, confidence: score.confidence,
-    breakdown: score.breakdown, scored_at: new Date().toISOString(),
+    blocking_count: score.blocking_count, high_risk_count: score.high_risk_count,
+    coverage_pct: score.coverage_pct, internal_score: score.internal_score,
+    nfr_score: score.nfr_score, breakdown: score.breakdown, scored_at: new Date().toISOString(),
   })
 
   const newReqStatus = computeStatusFromScore(allGaps ?? [])

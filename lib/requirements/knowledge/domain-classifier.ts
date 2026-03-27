@@ -1,6 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { AIProvider } from '@/lib/ai/provider'
-import { parseStructuredResponse } from '@/lib/ai/provider'
 import { buildClassifyDomainPrompt, CLASSIFY_DOMAIN_SCHEMA } from '@/lib/ai/prompts/classify-domain'
 
 export async function classifyAndSeedDomain(
@@ -11,8 +10,8 @@ export async function classifyAndSeedDomain(
 ): Promise<void> {
   try {
     const prompt = buildClassifyDomainPrompt(rawInput)
-    const raw = await ai.complete(prompt, { responseSchema: CLASSIFY_DOMAIN_SCHEMA })
-    const { domain, confidence } = parseStructuredResponse<{ domain: string; confidence: number }>(raw, CLASSIFY_DOMAIN_SCHEMA)
+    const result = await ai.complete(prompt, { responseSchema: CLASSIFY_DOMAIN_SCHEMA })
+    const { domain, confidence } = JSON.parse(result.content) as { domain: string; confidence: number }
 
     if (confidence < 50) return // not confident enough to seed a template
 

@@ -7,7 +7,7 @@ export interface ParsedItem {
   title: string
   description: string
   priority: 'high' | 'medium' | 'low'
-  source_text: string
+  source_text: string | null
   nfr_category: NfrCategory | null
 }
 
