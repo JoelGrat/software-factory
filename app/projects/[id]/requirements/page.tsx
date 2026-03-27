@@ -16,7 +16,7 @@ export default async function RequirementsPage({ params }: Props) {
 
   const { data: project } = await db
     .from('projects')
-    .select('id, name')
+    .select('id, name, target_path')
     .eq('id', projectId)
     .eq('owner_id', user.id)
     .single()
@@ -100,6 +100,8 @@ export default async function RequirementsPage({ params }: Props) {
         </h1>
         <Workspace
           requirementId={req.id}
+          projectId={projectId}
+          targetPath={project.target_path ?? null}
           initialRawInput={req.raw_input ?? ''}
           initialItems={items ?? []}
           initialGaps={gapsWithDetails}
