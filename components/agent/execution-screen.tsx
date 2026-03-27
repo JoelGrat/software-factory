@@ -132,9 +132,11 @@ export function ExecutionScreen({ jobId, projectId, initialJob, initialLogs }: P
         </div>
 
         {/* Failure state */}
-        {isFailed && job.error && (
+        {isFailed && (
           <div style={{ marginTop: '1.5rem', padding: '1rem', background: 'rgba(239,68,68,0.1)', border: '1px solid #ef4444', borderRadius: '8px' }}>
-            <p style={{ color: '#ef4444', fontSize: '13px', fontFamily: 'var(--font-jetbrains)' }}>{job.error}</p>
+            <p style={{ color: '#ef4444', fontSize: '13px', fontFamily: 'var(--font-jetbrains)' }}>
+              {job.error ?? 'Job failed or was cancelled.'}
+            </p>
             <button
               onClick={async () => {
                 await fetch(`/api/jobs/${jobId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'retry' }) })
