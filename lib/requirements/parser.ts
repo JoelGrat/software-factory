@@ -17,3 +17,9 @@ export async function parseRequirements(rawInput: string, ai: AIProvider): Promi
   const parsed = JSON.parse(result.content) as { items: ParsedItem[] }
   return parsed.items
 }
+
+// Multi-iteration parse with self-critique — used by pipeline
+export async function parseRequirementsWithLoop(rawInput: string, ai: AIProvider): Promise<ParsedItem[]> {
+  const { runRequirementsLoop } = await import('@/lib/agent/agents/requirements.agent')
+  return runRequirementsLoop(rawInput, ai)
+}
