@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import type { Job, LogEntry, JobStatus } from '@/lib/supabase/types'
@@ -42,10 +42,12 @@ export function ExecutionScreen({ jobId, projectId, initialJob, initialLogs }: P
   const router = useRouter()
   const [job, setJob] = useState<Job>(initialJob)
   const [logs, setLogs] = useState<LogEntry[]>(initialLogs)
-  const db = createClient()
+  const [retryLoading, setRetryLoading] = useState(false)
+  const [retryError, setRetryError] = useState<string | null>(null)
+  const dbRef = useRef(createClient())
 
   useEffect(() => {
-    const jobChannel = db
+    const jobChannel = dbRef.current
       .channel(`job-${jobId}`)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'jobs', filter: `id=eq.${jobId}` }, payload => {
         const updated = payload.new as Job
@@ -59,7 +61,7 @@ export function ExecutionScreen({ jobId, projectId, initialJob, initialLogs }: P
       })
       .subscribe()
 
-    const logsChannel = db
+    const logsChannel = dbRef.current
       .channel(`logs-${jobId}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'job_logs', filter: `job_id=eq.${jobId}` }, payload => {
         setLogs(prev => [...prev, payload.new as LogEntry])
@@ -67,12 +69,29 @@ export function ExecutionScreen({ jobId, projectId, initialJob, initialLogs }: P
       .subscribe()
 
     return () => {
-      db.removeChannel(jobChannel)
-      db.removeChannel(logsChannel)
+      dbRef.current.removeChannel(jobChannel)
+      dbRef.current.removeChannel(logsChannel)
     }
   }, [jobId, projectId, router])
 
   const isFailed = job.status === 'failed' || job.status === 'cancelled'
+
+  async function handleRetry() {
+    setRetryLoading(true)
+    setRetryError(null)
+    try {
+      const res = await fetch(`/api/jobs/${jobId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'retry' }),
+      })
+      if (!res.ok) setRetryError('Failed to retry. Please try again.')
+    } catch {
+      setRetryError('Failed to retry. Please try again.')
+    } finally {
+      setRetryLoading(false)
+    }
+  }
 
   return (
     <div style={{ background: 'var(--bg-base)', minHeight: '100vh', padding: '2rem' }}>
@@ -138,13 +157,13 @@ export function ExecutionScreen({ jobId, projectId, initialJob, initialLogs }: P
               {job.error ?? 'Job failed or was cancelled.'}
             </p>
             <button
-              onClick={async () => {
-                await fetch(`/api/jobs/${jobId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'retry' }) })
-              }}
-              style={{ marginTop: '0.75rem', padding: '0.5rem 1rem', background: 'var(--accent)', color: '#000', borderRadius: '6px', fontSize: '13px', cursor: 'pointer', border: 'none' }}
+              onClick={handleRetry}
+              disabled={retryLoading}
+              style={{ marginTop: '0.75rem', padding: '0.5rem 1rem', background: 'var(--accent)', color: '#000', borderRadius: '6px', fontSize: '13px', cursor: retryLoading ? 'not-allowed' : 'pointer', border: 'none', opacity: retryLoading ? 0.6 : 1 }}
             >
-              Retry
+              {retryLoading ? 'Retrying...' : 'Retry'}
             </button>
+            {retryError && <p style={{ color: '#ef4444', fontSize: '12px', marginTop: '0.5rem', fontFamily: 'var(--font-jetbrains)' }}>{retryError}</p>}
           </div>
         )}
 
