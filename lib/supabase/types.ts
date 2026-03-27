@@ -214,3 +214,72 @@ export interface RequirementSummary {
   status: RequirementStatus
   blocked_reason: string | null
 }
+
+// ── Agent Loop ────────────────────────────────────────────────────────────────
+
+export type JobStatus =
+  | 'pending'
+  | 'plan_loop'
+  | 'awaiting_plan_approval'
+  | 'coding'
+  | 'awaiting_review'
+  | 'done'
+  | 'failed'
+  | 'cancelled'
+
+export type LogPhase = 'requirements' | 'planning' | 'coding' | 'system'
+export type LogLevel = 'info' | 'warn' | 'error' | 'success'
+
+export interface Job {
+  id: string
+  project_id: string
+  requirement_id: string
+  status: JobStatus
+  branch_name: string | null
+  iteration_count: number
+  error: string | null
+  created_at: string
+  completed_at: string | null
+}
+
+export interface PlanTask {
+  id: string
+  title: string
+  description: string
+  files: string[]
+  dependencies: string[]
+}
+
+export interface AgentPlan {
+  id: string
+  job_id: string
+  tasks: PlanTask[]
+  files_to_create: string[]
+  files_to_modify: string[]
+  test_approach: string
+  branch_name: string
+  created_at: string
+}
+
+export interface FileChange {
+  path: string
+  content: string
+  operation: 'create' | 'modify' | 'delete'
+}
+
+export interface TestResult {
+  success: boolean
+  passed: number
+  failed: number
+  errors: string[]
+  raw_output: string
+}
+
+export interface LogEntry {
+  id: string
+  job_id: string
+  phase: LogPhase
+  level: LogLevel
+  message: string
+  created_at: string
+}
