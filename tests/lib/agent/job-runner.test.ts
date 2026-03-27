@@ -26,7 +26,7 @@ function makeDb(tables: Record<string, unknown> = {}) {
     update: vi.fn().mockReturnThis(),
     in: vi.fn().mockReturnThis(),
   })
-  return { from: vi.fn((t: string) => fromImpl(t)) } as unknown as Parameters<typeof runJob>[3]
+  return { from: vi.fn((t: string) => fromImpl(t)) } as unknown as Parameters<typeof runJob>[2]
 }
 
 const JOB = { id: 'job-1', project_id: 'proj-1', requirement_id: 'req-1', status: 'plan_loop', branch_name: null, iteration_count: 0, error: null, created_at: '', completed_at: null }
