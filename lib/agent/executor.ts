@@ -86,7 +86,7 @@ export class LocalExecutor implements IExecutor {
   private parseTestOutput(raw: string, success: boolean): TestResult {
     const passedMatch = raw.match(/(\d+)\s+passed/)
     const failedMatch = raw.match(/(\d+)\s+failed/)
-    const passed = passedMatch ? parseInt(passedMatch[1]) : (success ? 1 : 0)
+    const passed = passedMatch ? parseInt(passedMatch[1]) : 0
     const failed = failedMatch ? parseInt(failedMatch[1]) : 0
 
     const errorLines = raw.split('\n').filter(l =>
@@ -97,7 +97,11 @@ export class LocalExecutor implements IExecutor {
   }
 
   async createBranch(projectPath: string, branchName: string): Promise<void> {
-    await execAsync(`git checkout -b ${branchName}`, { cwd: projectPath })
+    // Validate branch name: only allow alphanumerics, hyphens, underscores, forward slashes
+    if (!/^[a-zA-Z0-9/_-]+$/.test(branchName)) {
+      throw new Error(`Invalid branch name: ${branchName}`)
+    }
+    await execAsync(`git checkout -b "${branchName}"`, { cwd: projectPath })
   }
 
   async getGitDiff(projectPath: string): Promise<string> {
