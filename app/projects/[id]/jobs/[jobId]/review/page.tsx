@@ -16,13 +16,14 @@ export default async function ReviewPage({ params }: Props) {
 
   const { data: job } = await db
     .from('jobs')
-    .select('*, projects!inner(owner_id, target_path)')
+    .select('*, projects!inner(owner_id, name, target_path)')
     .eq('id', jobId)
     .single()
 
   if (!job || (job.projects as { owner_id: string }).owner_id !== user.id) redirect('/projects')
   if (job.status !== 'awaiting_review' && job.status !== 'done') redirect(`/projects/${projectId}/jobs/${jobId}/execution`)
 
+  const projectName = (job.projects as { name: string }).name
   const targetPath = (job.projects as { target_path?: string }).target_path ?? null
   let diff = ''
   if (targetPath) {
@@ -52,6 +53,7 @@ export default async function ReviewPage({ params }: Props) {
     <ReviewScreen
       jobId={jobId}
       projectId={projectId}
+      projectName={projectName}
       job={job as Job}
       diff={diff}
       testResult={testResult}

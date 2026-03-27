@@ -15,7 +15,7 @@ export default async function PlanPage({ params }: Props) {
 
   const { data: job } = await db
     .from('jobs')
-    .select('*, projects!inner(owner_id)')
+    .select('*, projects!inner(owner_id, name)')
     .eq('id', jobId)
     .single()
 
@@ -25,5 +25,6 @@ export default async function PlanPage({ params }: Props) {
   const { data: plan } = await db.from('agent_plans').select('*').eq('job_id', jobId).single()
   if (!plan) redirect(`/projects/${projectId}/jobs/${jobId}/execution`)
 
-  return <PlanScreen jobId={jobId} projectId={projectId} plan={plan as AgentPlan} />
+  const projectName = (job.projects as { name: string }).name
+  return <PlanScreen jobId={jobId} projectId={projectId} projectName={projectName} plan={plan as AgentPlan} />
 }

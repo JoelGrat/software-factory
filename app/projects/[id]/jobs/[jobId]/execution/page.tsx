@@ -15,7 +15,7 @@ export default async function ExecutionPage({ params }: Props) {
 
   const { data: job } = await db
     .from('jobs')
-    .select('*, projects!inner(owner_id)')
+    .select('*, projects!inner(owner_id, name)')
     .eq('id', jobId)
     .single()
 
@@ -30,10 +30,12 @@ export default async function ExecutionPage({ params }: Props) {
     .eq('job_id', jobId)
     .order('created_at', { ascending: true })
 
+  const projectName = (job.projects as { name: string }).name
   return (
     <ExecutionScreen
       jobId={jobId}
       projectId={projectId}
+      projectName={projectName}
       initialJob={job as Job}
       initialLogs={(logs ?? []) as LogEntry[]}
     />
