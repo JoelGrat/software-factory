@@ -1,12 +1,9 @@
+// lib/requirements/gap-detector.ts
 import type { AIProvider } from '@/lib/ai/provider'
 import { buildDetectGapsPrompt, DETECT_GAPS_SCHEMA } from '@/lib/ai/prompts/detect-gaps'
 import type { ParsedItem } from '@/lib/requirements/parser'
-import { hasApprovalRole } from '@/lib/requirements/rules/has-approval-role'
-import { hasWorkflowStates } from '@/lib/requirements/rules/has-workflow-states'
-import { hasNonFunctionalRequirements } from '@/lib/requirements/rules/has-nfrs'
-import { hasErrorHandling } from '@/lib/requirements/rules/has-error-handling'
-import { hasActorsDefined } from '@/lib/requirements/rules/has-actors-defined'
-import type { GapCategory, GapSeverity, GapSource } from '@/lib/supabase/types'
+import { selectRulePack } from '@/lib/requirements/rules/index'
+import type { GapCategory, GapSeverity, GapSource, RequirementDomain } from '@/lib/supabase/types'
 
 export interface DetectedGap {
   item_id: string | null
@@ -17,6 +14,7 @@ export interface DetectedGap {
   rule_id: string | null
   priority_score: number
   confidence: number
+  validated: boolean   // rule + relation = true; ai = false
   question_generated: boolean
 }
 
@@ -30,53 +28,35 @@ export interface GapDetectionResult {
   mergedPairs: MergedPair[]
 }
 
-const IMPACT: Record<GapSeverity, number> = { critical: 3, major: 2, minor: 1 }
+const IMPACT: Record<GapSeverity, number>      = { critical: 3, major: 2, minor: 1 }
 const UNCERTAINTY: Record<GapCategory, number> = { missing: 3, ambiguous: 2, conflicting: 2, incomplete: 1 }
 
 function priorityScore(severity: GapSeverity, category: GapCategory): number {
   return IMPACT[severity] * UNCERTAINTY[category]
 }
 
-function makeRuleGap(
-  category: GapCategory,
-  severity: GapSeverity,
-  description: string,
-  rule_id: string
-): DetectedGap {
-  return {
-    item_id: null,
-    severity,
-    category,
-    description,
-    source: 'rule',
-    rule_id,
-    priority_score: priorityScore(severity, category),
-    confidence: 100,
-    question_generated: false,
-  }
-}
-
-function runRules(items: ParsedItem[]): DetectedGap[] {
+function runRules(items: ParsedItem[], domain: RequirementDomain | null): DetectedGap[] {
+  const pack = selectRulePack(domain)
   const gaps: DetectedGap[] = []
-  if (!hasActorsDefined(items)) {
-    gaps.push(makeRuleGap('missing', 'critical', 'No user roles or system actors are defined.', 'hasActorsDefined'))
-  }
-  if (!hasApprovalRole(items)) {
-    gaps.push(makeRuleGap('missing', 'critical', 'No approval or sign-off role is defined.', 'hasApprovalRole'))
-  }
-  if (!hasWorkflowStates(items)) {
-    gaps.push(makeRuleGap('missing', 'critical', 'No system states or status transitions are defined.', 'hasWorkflowStates'))
-  }
-  if (!hasNonFunctionalRequirements(items)) {
-    gaps.push(makeRuleGap('missing', 'major', 'No non-functional requirements are specified.', 'hasNonFunctionalRequirements'))
-  }
-  if (!hasErrorHandling(items)) {
-    gaps.push(makeRuleGap('missing', 'major', 'No error handling or failure scenarios are addressed.', 'hasErrorHandling'))
+  for (const rule of pack) {
+    if (!rule.check(items)) {
+      gaps.push({
+        item_id: null,
+        severity: rule.severity,
+        category: rule.category,
+        description: rule.description,
+        source: 'rule',
+        rule_id: rule.id,
+        priority_score: priorityScore(rule.severity, rule.category),
+        confidence: 100,
+        validated: true,   // deterministic check — auto-validated
+        question_generated: false,
+      })
+    }
   }
   return gaps
 }
 
-/** Group gaps by category+item_id. Within each group the highest-severity gap survives; others are recorded as merged. */
 function computeMerges(gaps: DetectedGap[]): MergedPair[] {
   const groups = new Map<string, number[]>()
   gaps.forEach((gap, idx) => {
@@ -98,8 +78,12 @@ function computeMerges(gaps: DetectedGap[]): MergedPair[] {
   return pairs
 }
 
-export async function detectGaps(items: ParsedItem[], ai: AIProvider): Promise<GapDetectionResult> {
-  const ruleGaps = runRules(items)
+export async function detectGaps(
+  items: ParsedItem[],
+  domain: RequirementDomain | null,
+  ai: AIProvider
+): Promise<GapDetectionResult> {
+  const ruleGaps = runRules(items, domain)
 
   const itemsJson = JSON.stringify(items.map((item, i) => ({ id: `item-${i}`, ...item })))
   const prompt = buildDetectGapsPrompt(itemsJson)
@@ -121,6 +105,7 @@ export async function detectGaps(items: ParsedItem[], ai: AIProvider): Promise<G
     rule_id: null,
     priority_score: priorityScore(g.severity, g.category),
     confidence: g.confidence,
+    validated: false,   // AI suggestion — requires human validation
     question_generated: false,
   }))
 

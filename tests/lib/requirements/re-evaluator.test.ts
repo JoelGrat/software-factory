@@ -13,6 +13,8 @@ const makeGap = (overrides: Partial<Gap> = {}): Gap => ({
   rule_id: 'x',
   priority_score: 9,
   confidence: 100,
+  validated: false,
+  validated_by: null,
   question_generated: false,
   merged_into: null,
   resolved_at: null,

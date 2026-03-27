@@ -12,6 +12,7 @@ const makeGap = (severity: 'critical' | 'major' | 'minor', idx: number): Detecte
   priority_score: 9,
   confidence: 100,
   question_generated: false,
+  validated: true,
 })
 
 describe('createTasks', () => {

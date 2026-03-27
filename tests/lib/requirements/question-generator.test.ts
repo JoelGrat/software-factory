@@ -12,6 +12,7 @@ const makeGap = (i: number, severity: 'critical' | 'major' | 'minor' = 'critical
   rule_id: 'x',
   priority_score: severity === 'critical' ? 9 : severity === 'major' ? 6 : 1,
   confidence: 100,
+  validated: false,
   question_generated: false,
 })
 

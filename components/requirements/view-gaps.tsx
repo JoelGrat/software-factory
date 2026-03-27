@@ -139,8 +139,8 @@ export function ViewGaps({ requirementId, gaps, onUpdate }: Props) {
                 {gap.resolved_at && <Badge variant="answered" label="Resolved" />}
               </div>
               <p className="text-sm text-gray-800">{gap.description}</p>
-              {gap.source === 'pattern' && (
-                <p className="text-xs text-indigo-600 mt-1">Seen in previous requirements</p>
+              {gap.source === 'relation' && (
+                <p className="text-xs text-indigo-600 mt-1">Detected via requirement relations</p>
               )}
             </div>
             <span className="text-gray-400 text-sm shrink-0">{expandedGapId === gap.id ? '▲' : '▼'}</span>

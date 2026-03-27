@@ -3,10 +3,11 @@ import type { ParsedItem } from '@/lib/requirements/parser'
 import type { ScoreBreakdown } from '@/lib/supabase/types'
 
 export interface ComputedScore {
-  completeness: number
+  blocking_count: number
+  high_risk_count: number
+  coverage_pct: number
+  internal_score: number
   nfr_score: number
-  overall_score: number
-  confidence: number
   breakdown: ScoreBreakdown
 }
 
@@ -26,8 +27,9 @@ export function computeScore(
   const criticalCount = activeGaps.filter(g => g.severity === 'critical').length
   const majorCount = activeGaps.filter(g => g.severity === 'major').length
   const minorCount = activeGaps.filter(g => g.severity === 'minor').length
+  const unvalidatedCount = activeGaps.filter(g => !g.validated).length
 
-  const completeness = Math.max(0, 100 - criticalCount * 20 - majorCount * 10 - minorCount * 3)
+  const coverage_pct = Math.max(0, 100 - criticalCount * 20 - majorCount * 10 - minorCount * 3)
 
   const nfrCoverage = {
     security: items.some(i => i.type === 'non-functional' && i.nfr_category === 'security'),
@@ -42,22 +44,20 @@ export function computeScore(
     (nfrCoverage.performance ? NFR_WEIGHTS.performance : 0) +
     (nfrCoverage.auditability ? NFR_WEIGHTS.auditability : 0)
 
-  const overall_score = Math.round(completeness * 0.7 + nfr_score * 0.3)
-
-  const aiGaps = activeGaps.filter(g => g.source === 'ai')
-  const confidence =
-    aiGaps.length === 0
-      ? 100
-      : Math.round(aiGaps.reduce((sum, g) => sum + g.confidence, 0) / aiGaps.length)
+  const internal_score = Math.round(coverage_pct * 0.7 + nfr_score * 0.3)
 
   const breakdown: ScoreBreakdown = {
-    completeness,
+    blocking_count: criticalCount,
+    high_risk_count: majorCount,
+    coverage_pct,
+    internal_score,
     nfr_score,
-    overall: overall_score,
-    confidence,
-    gap_counts: { critical: criticalCount, major: majorCount, minor: minorCount },
+    gap_density: activeGaps.length > 0 ? activeGaps.length / Math.max(items.length, 1) : 0,
+    complexity_score: 0,
+    risk_flags: [],
+    gap_counts: { critical: criticalCount, major: majorCount, minor: minorCount, unvalidated: unvalidatedCount },
     nfr_coverage: nfrCoverage,
   }
 
-  return { completeness, nfr_score, overall_score, confidence, breakdown }
+  return { blocking_count: criticalCount, high_risk_count: majorCount, coverage_pct, internal_score, nfr_score, breakdown }
 }

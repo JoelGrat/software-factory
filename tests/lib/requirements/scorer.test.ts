@@ -32,14 +32,14 @@ const noGaps: DetectedGap[] = []
 const noMergedPairs = new Set<number>()
 
 describe('computeScore', () => {
-  it('returns 100 completeness and 100 nfr when no gaps and all NFR categories covered', () => {
+  it('returns 100 coverage_pct and 100 nfr when no gaps and all NFR categories covered', () => {
     const result = computeScore(noGaps, noMergedPairs, [nfrItem, secItem, auditItem])
-    expect(result.completeness).toBe(100)
+    expect(result.coverage_pct).toBe(100)
     expect(result.nfr_score).toBe(100)
-    expect(result.overall_score).toBe(100)
+    expect(result.internal_score).toBe(100)
   })
 
-  it('deducts 20 per critical gap', () => {
+  it('deducts 20 per critical gap from coverage_pct', () => {
     const critGap: DetectedGap = {
       item_id: null,
       severity: 'critical',
@@ -50,9 +50,11 @@ describe('computeScore', () => {
       priority_score: 9,
       confidence: 100,
       question_generated: false,
+      validated: true,
     }
     const result = computeScore([critGap], noMergedPairs, [nfrItem, secItem, auditItem])
-    expect(result.completeness).toBe(80)
+    expect(result.coverage_pct).toBe(80)
+    expect(result.blocking_count).toBe(1)
   })
 
   it('deducts 10 per major gap and 3 per minor gap', () => {
@@ -66,6 +68,7 @@ describe('computeScore', () => {
       priority_score: 6,
       confidence: 80,
       question_generated: false,
+      validated: false,
     }
     const minorGap: DetectedGap = {
       item_id: null,
@@ -77,9 +80,11 @@ describe('computeScore', () => {
       priority_score: 1,
       confidence: 60,
       question_generated: false,
+      validated: false,
     }
     const result = computeScore([majorGap, minorGap], noMergedPairs, [])
-    expect(result.completeness).toBe(87) // 100 - 10 - 3
+    expect(result.coverage_pct).toBe(87) // 100 - 10 - 3
+    expect(result.high_risk_count).toBe(1)
   })
 
   it('skips merged gaps in scoring', () => {
@@ -93,14 +98,16 @@ describe('computeScore', () => {
       priority_score: 9,
       confidence: 100,
       question_generated: false,
+      validated: true,
     }
     // Index 0 is merged — should not count
     const mergedIndices = new Set([0])
     const result = computeScore([critGap], mergedIndices, [])
-    expect(result.completeness).toBe(100) // merged gap excluded
+    expect(result.coverage_pct).toBe(100) // merged gap excluded
+    expect(result.blocking_count).toBe(0)
   })
 
-  it('clamps completeness at 0', () => {
+  it('clamps coverage_pct at 0', () => {
     const critGaps = Array.from({ length: 6 }, (_, i): DetectedGap => ({
       item_id: null,
       severity: 'critical',
@@ -111,9 +118,10 @@ describe('computeScore', () => {
       priority_score: 9,
       confidence: 100,
       question_generated: false,
+      validated: true,
     }))
     const result = computeScore(critGaps, noMergedPairs, [])
-    expect(result.completeness).toBe(0)
+    expect(result.coverage_pct).toBe(0)
   })
 
   it('computes nfr_score as partial coverage', () => {
@@ -121,12 +129,12 @@ describe('computeScore', () => {
     expect(result.nfr_score).toBe(33)
   })
 
-  it('computes overall_score as 70% completeness + 30% nfr', () => {
-    const result = computeScore(noGaps, noMergedPairs, [nfrItem, secItem]) // 67 nfr, 100 completeness
-    expect(result.overall_score).toBe(Math.round(100 * 0.7 + 67 * 0.3))
+  it('computes internal_score as 70% coverage_pct + 30% nfr', () => {
+    const result = computeScore(noGaps, noMergedPairs, [nfrItem, secItem]) // 67 nfr, 100 coverage
+    expect(result.internal_score).toBe(Math.round(100 * 0.7 + 67 * 0.3))
   })
 
-  it('computes confidence as average of AI-sourced gap confidences', () => {
+  it('breakdown.gap_counts.unvalidated counts unvalidated gaps', () => {
     const aiGap1: DetectedGap = {
       item_id: null,
       severity: 'minor',
@@ -137,6 +145,7 @@ describe('computeScore', () => {
       priority_score: 1,
       confidence: 80,
       question_generated: false,
+      validated: false,
     }
     const aiGap2: DetectedGap = {
       item_id: null,
@@ -148,12 +157,13 @@ describe('computeScore', () => {
       priority_score: 2,
       confidence: 60,
       question_generated: false,
+      validated: false,
     }
     const result = computeScore([aiGap1, aiGap2], noMergedPairs, [])
-    expect(result.confidence).toBe(70) // (80+60)/2
+    expect(result.breakdown.gap_counts.unvalidated).toBe(2)
   })
 
-  it('returns confidence 100 when all gaps are rule-sourced', () => {
+  it('returns breakdown.gap_counts.unvalidated = 0 when all gaps are rule-sourced', () => {
     const ruleGap: DetectedGap = {
       item_id: null,
       severity: 'critical',
@@ -164,8 +174,9 @@ describe('computeScore', () => {
       priority_score: 9,
       confidence: 100,
       question_generated: false,
+      validated: true,
     }
     const result = computeScore([ruleGap], noMergedPairs, [])
-    expect(result.confidence).toBe(100)
+    expect(result.breakdown.gap_counts.unvalidated).toBe(0)
   })
 })

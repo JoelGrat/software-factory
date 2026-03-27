@@ -6,7 +6,8 @@ const baseGap = (overrides: Partial<Gap> = {}): Gap => ({
   id: 'g1', requirement_id: 'r1', item_id: null,
   severity: 'critical', category: 'missing', description: 'desc',
   source: 'rule', rule_id: null, priority_score: 9,
-  confidence: 100, question_generated: false, merged_into: null,
+  confidence: 100, validated: false, validated_by: null,
+  question_generated: false, merged_into: null,
   resolved_at: null, resolution_source: null, created_at: '2026-01-01',
   ...overrides,
 })

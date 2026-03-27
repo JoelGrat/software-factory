@@ -72,7 +72,7 @@ export async function runPipeline(
   let insertedGapIds: string[] = []
 
   try {
-    const detection = await detectGaps(parsedItems, ai)
+    const detection = await detectGaps(parsedItems, null, ai)
     allGaps = detection.gaps
     mergedPairs = detection.mergedPairs
 
@@ -90,6 +90,7 @@ export async function runPipeline(
           rule_id: g.rule_id,
           priority_score: g.priority_score,
           confidence: g.confidence,
+          validated: g.validated,
           question_generated: false,
           merged_into: null,
         }))
@@ -169,10 +170,11 @@ export async function runPipeline(
     const score = computeScore(allGaps, mergedIndices, parsedItems)
     await db.from('completeness_scores').insert({
       requirement_id: requirementId,
-      overall_score: score.overall_score,
-      completeness: score.completeness,
+      blocking_count: score.blocking_count,
+      high_risk_count: score.high_risk_count,
+      coverage_pct: score.coverage_pct,
+      internal_score: score.internal_score,
       nfr_score: score.nfr_score,
-      confidence: score.confidence,
       breakdown: score.breakdown,
       scored_at: new Date().toISOString(),
     })
@@ -180,7 +182,7 @@ export async function runPipeline(
     const { data: freshGaps } = await db.from('gaps').select('*').eq('requirement_id', requirementId)
     const newStatus = computeStatusFromScore(freshGaps ?? [])
     await db.from('requirements').update({ status: newStatus, updated_at: new Date().toISOString() }).eq('id', requirementId)
-    await writeAudit(db, 'requirements', requirementId, 'scored', actorId, { score: score.overall_score, status: newStatus })
+    await writeAudit(db, 'requirements', requirementId, 'scored', actorId, { score: score.internal_score, status: newStatus })
     steps.score = 'ok'
   } catch (err) {
     await writeAudit(db, 'requirements', requirementId, 'updated', actorId, { step: 'score', error: String(err) })
