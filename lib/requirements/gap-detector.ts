@@ -1,5 +1,4 @@
 import type { AIProvider } from '@/lib/ai/provider'
-import { parseStructuredResponse } from '@/lib/ai/provider'
 import { buildDetectGapsPrompt, DETECT_GAPS_SCHEMA } from '@/lib/ai/prompts/detect-gaps'
 import type { ParsedItem } from '@/lib/requirements/parser'
 import { hasApprovalRole } from '@/lib/requirements/rules/has-approval-role'
@@ -104,14 +103,14 @@ export async function detectGaps(items: ParsedItem[], ai: AIProvider): Promise<G
 
   const itemsJson = JSON.stringify(items.map((item, i) => ({ id: `item-${i}`, ...item })))
   const prompt = buildDetectGapsPrompt(itemsJson)
-  const raw = await ai.complete(prompt, { responseSchema: DETECT_GAPS_SCHEMA })
-  const parsed = parseStructuredResponse<{ gaps: Array<{
+  const result = await ai.complete(prompt, { responseSchema: DETECT_GAPS_SCHEMA })
+  const parsed = JSON.parse(result.content) as { gaps: Array<{
     item_id?: string | null
     severity: GapSeverity
     category: GapCategory
     description: string
     confidence: number
-  }> }>(raw, DETECT_GAPS_SCHEMA)
+  }> }
 
   const aiGaps: DetectedGap[] = parsed.gaps.map(g => ({
     item_id: g.item_id ?? null,

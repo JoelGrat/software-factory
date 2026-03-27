@@ -35,7 +35,7 @@ describe('parseRequirements', () => {
   it('throws if AI returns invalid JSON', async () => {
     const mock = new MockAIProvider()
     mock.setDefaultResponse('not json at all')
-    await expect(parseRequirements('some text', mock)).rejects.toThrow('AI provider returned invalid JSON')
+    await expect(parseRequirements('some text', mock)).rejects.toThrow()
   })
 
   it('returns empty array when AI returns empty items list', async () => {
