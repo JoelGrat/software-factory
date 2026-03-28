@@ -1,15 +1,20 @@
 'use client'
 import { useState, useMemo } from 'react'
 import type { RequirementItem, RequirementStatus } from '@/lib/supabase/types'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
 
 const TYPE_ORDER: RequirementItem['type'][] = ['functional', 'non-functional', 'constraint', 'assumption']
-const TYPE_LABELS: Record<RequirementItem['type'], string> = {
-  functional: 'Functional Requirements',
-  'non-functional': 'Non-Functional Requirements',
-  constraint: 'Constraints',
-  assumption: 'Assumptions',
+
+const TYPE_CONFIG: Record<RequirementItem['type'], { label: string; icon: string; color: string }> = {
+  functional:       { label: 'Functional',       icon: 'check_box',        color: '#818cf8' },
+  'non-functional': { label: 'Non-Functional',   icon: 'speed',            color: '#34d399' },
+  constraint:       { label: 'Constraints',      icon: 'block',            color: '#f59e0b' },
+  assumption:       { label: 'Assumptions',      icon: 'help_outline',     color: '#94a3b8' },
+}
+
+const PRIORITY_STYLES: Record<string, string> = {
+  high:   'text-error',
+  medium: 'text-amber-400',
+  low:    'text-slate-500',
 }
 
 interface Props {
@@ -59,69 +64,127 @@ export function ViewStructured({ items, gaps, status, blockedGapDescriptions, on
     }
   }
 
+  if (items.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center">
+        <span className="material-symbols-outlined text-slate-600 mb-4" style={{ fontSize: '40px' }}>edit_note</span>
+        <p className="text-slate-400 text-sm">No requirements yet.</p>
+        <p className="text-slate-600 text-xs mt-1">Generate them from the Vision step.</p>
+      </div>
+    )
+  }
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
+      {/* Header row */}
       <div className="flex items-start justify-between">
-        <p className="text-sm text-gray-500">{items.length} requirement item{items.length !== 1 ? 's' : ''} extracted</p>
+        <p className="text-sm text-slate-500 font-mono">{items.length} item{items.length !== 1 ? 's' : ''}</p>
         <div className="text-right">
           {!canMarkReady && blockedGapDescriptions.length > 0 && (
-            <div className="mb-2 text-xs text-red-600 max-w-xs">
+            <p className="mb-2 text-xs text-error max-w-xs">
               Blocked by {blockedGapDescriptions.length} critical gap{blockedGapDescriptions.length > 1 ? 's' : ''}.{' '}
-              {onViewGap && <button onClick={onViewGap} className="underline">View gaps</button>}
-            </div>
+              {onViewGap && <button onClick={onViewGap} className="underline opacity-70 hover:opacity-100">View gaps</button>}
+            </p>
           )}
-          <Button
-            variant={isReady ? 'secondary' : 'primary'}
+          <button
             disabled={!canMarkReady || marking}
-            loading={marking}
             onClick={handleMarkReady}
+            className={[
+              'px-5 py-2 rounded-lg text-sm font-headline font-bold flex items-center gap-2 transition-all',
+              isReady
+                ? 'bg-[#22c55e]/10 text-[#22c55e] border border-[#22c55e]/30'
+                : canMarkReady
+                  ? 'bg-gradient-to-br from-primary to-primary-container text-on-primary-container shadow-[0_4px_20px_rgba(189,194,255,0.15)] hover:scale-[1.02] active:scale-95'
+                  : 'bg-surface-container text-slate-500 border border-white/5 cursor-not-allowed',
+            ].join(' ')}
           >
-            {isReady ? '✓ Ready for Development' : 'Mark Ready for Dev'}
-          </Button>
-          {markError && <p className="text-red-600 text-xs mt-1">{markError}</p>}
+            {marking ? (
+              <>
+                <span className="material-symbols-outlined animate-spin" style={{ fontSize: '16px' }}>progress_activity</span>
+                Saving...
+              </>
+            ) : isReady ? (
+              <>
+                <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>check_circle</span>
+                Ready for Development
+              </>
+            ) : (
+              'Mark Ready for Dev'
+            )}
+          </button>
+          {markError && <p className="text-error text-xs mt-1 font-mono">{markError}</p>}
         </div>
       </div>
 
-      {grouped.map(({ type, items: typeItems }) => (
-        <section key={type}>
-          <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
-            {TYPE_LABELS[type]} ({typeItems.length})
-          </h3>
-          <ul className="space-y-2">
-            {typeItems.map(item => {
-              const itemGaps = activeGapsByItemId.get(item.id) ?? []
-              return (
-                <li key={item.id} className="border rounded-lg p-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1 flex-wrap">
-                        <span className="font-medium text-sm">{item.title}</span>
-                        <Badge variant={item.priority} label={item.priority} />
-                        {item.nfr_category && <Badge variant={item.nfr_category} />}
+      {/* Grouped sections */}
+      {grouped.map(({ type, items: typeItems }) => {
+        const cfg = TYPE_CONFIG[type]
+        return (
+          <section key={type}>
+            <div className="flex items-center gap-2 mb-3">
+              <span className="material-symbols-outlined" style={{ fontSize: '16px', color: cfg.color }}>{cfg.icon}</span>
+              <h3 className="text-[10px] font-bold uppercase tracking-widest font-headline" style={{ color: cfg.color }}>
+                {cfg.label}
+              </h3>
+              <span className="text-[10px] font-mono text-slate-600 ml-1">({typeItems.length})</span>
+            </div>
+
+            <ul className="space-y-2">
+              {typeItems.map(item => {
+                const itemGaps = activeGapsByItemId.get(item.id) ?? []
+                const hasCritical = itemGaps.some(g => g.severity === 'critical')
+
+                return (
+                  <li
+                    key={item.id}
+                    className={[
+                      'rounded-xl p-4 border transition-all',
+                      hasCritical
+                        ? 'bg-error/5 border-error/20'
+                        : 'bg-surface-container border-white/5',
+                    ].join(' ')}
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                          <span className="font-semibold text-sm text-on-surface">{item.title}</span>
+                          <span className={`text-[10px] font-bold uppercase font-headline ${PRIORITY_STYLES[item.priority] ?? 'text-slate-500'}`}>
+                            {item.priority}
+                          </span>
+                          {item.nfr_category && (
+                            <span className="text-[10px] font-mono text-slate-500 bg-surface-container-high rounded px-1.5 py-0.5">
+                              {item.nfr_category}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm text-slate-400 leading-relaxed">{item.description}</p>
                       </div>
-                      <p className="text-sm text-gray-600">{item.description}</p>
-                      {item.source_text && (
-                        <p className="text-xs text-gray-400 mt-1 italic">"{item.source_text}"</p>
+
+                      {itemGaps.length > 0 && (
+                        <div className="flex flex-col gap-1 flex-shrink-0 items-end">
+                          {itemGaps.map(gap => (
+                            <span
+                              key={gap.id}
+                              className={[
+                                'text-[10px] font-bold uppercase font-headline px-2 py-0.5 rounded',
+                                gap.severity === 'critical' ? 'bg-error/10 text-error' :
+                                gap.severity === 'major' ? 'bg-amber-400/10 text-amber-400' :
+                                'bg-slate-500/10 text-slate-400',
+                              ].join(' ')}
+                            >
+                              {gap.severity}
+                            </span>
+                          ))}
+                        </div>
                       )}
                     </div>
-                    {itemGaps.length > 0 && (
-                      <div className="flex flex-wrap gap-1 shrink-0">
-                        {itemGaps.map(gap => (
-                          <Badge key={gap.id} variant={gap.severity as 'critical' | 'major' | 'minor'} />
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </li>
-              )
-            })}
-          </ul>
-        </section>
-      ))}
-
-      {items.length === 0 && (
-        <p className="text-gray-400 text-center py-8">No structured items yet. Run analysis first.</p>
-      )}
+                  </li>
+                )
+              })}
+            </ul>
+          </section>
+        )
+      })}
     </div>
   )
 }

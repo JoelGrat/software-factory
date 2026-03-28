@@ -4,24 +4,22 @@ import type { RequirementItem, RequirementStatus } from '@/lib/supabase/types'
 import type { GapWithDetails } from '@/lib/requirements/gaps-with-details'
 import type { RequirementSummary } from '@/lib/supabase/types'
 import { RiskSummaryPanel } from '@/components/requirements/risk-summary-panel'
-import { ViewInput } from '@/components/requirements/view-input'
 import { ViewStructured } from '@/components/requirements/view-structured'
 import { ViewGaps } from '@/components/requirements/view-gaps'
 
-type Tab = 'input' | 'structured' | 'gaps'
+type Tab = 'structured' | 'gaps'
 
 interface Props {
   requirementId: string
   projectId: string
   targetPath: string | null
-  initialRawInput: string
   initialItems: RequirementItem[]
   initialGaps: GapWithDetails[]
   initialSummary: RequirementSummary
 }
 
-export function Workspace({ requirementId, projectId, targetPath, initialRawInput, initialItems, initialGaps, initialSummary }: Props) {
-  const [activeTab, setActiveTab] = useState<Tab>('input')
+export function Workspace({ requirementId, projectId, targetPath, initialItems, initialGaps, initialSummary }: Props) {
+  const [activeTab, setActiveTab] = useState<Tab>('structured')
   const [items, setItems] = useState<RequirementItem[]>(initialItems)
   const [gaps, setGaps] = useState<GapWithDetails[]>(initialGaps)
   const [status, setStatus] = useState<RequirementStatus>(initialSummary.status as RequirementStatus)
@@ -39,11 +37,6 @@ export function Workspace({ requirementId, projectId, targetPath, initialRawInpu
       setStatus(reqData.status)
     }
   }, [requirementId])
-
-  async function handleAnalysisComplete() {
-    await refreshData()
-    setActiveTab('structured')
-  }
 
   async function handleMarkReady() {
     const res = await fetch(`/api/requirements/${requirementId}/status`, {
@@ -84,8 +77,7 @@ export function Workspace({ requirementId, projectId, targetPath, initialRawInpu
     .map(g => g.description)
 
   const tabs: { id: Tab; label: string }[] = [
-    { id: 'input', label: 'Input' },
-    { id: 'structured', label: `Structured (${items.length})` },
+    { id: 'structured', label: `Requirements (${items.length})` },
     { id: 'gaps', label: `Gaps (${activeGaps.length})` },
   ]
 
@@ -134,14 +126,6 @@ export function Workspace({ requirementId, projectId, targetPath, initialRawInpu
           </button>
         )}
       </div>
-
-      {activeTab === 'input' && (
-        <ViewInput
-          requirementId={requirementId}
-          initialRawInput={initialRawInput}
-          onAnalysisComplete={handleAnalysisComplete}
-        />
-      )}
 
       {activeTab === 'structured' && (
         <ViewStructured

@@ -112,7 +112,6 @@ export default async function RequirementsPage({ params }: Props) {
         requirementId={req.id}
         projectId={projectId}
         targetPath={project.target_path ?? null}
-        initialRawInput={req.raw_input ?? ''}
         initialItems={items ?? []}
         initialGaps={gapsWithDetails}
         initialSummary={summary}
