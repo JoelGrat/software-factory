@@ -29,8 +29,9 @@ export const PLANNER_SCHEMA: Record<string, unknown> = {
     files_to_modify: { type: 'array', items: { type: 'string' } },
     test_approach: { type: 'string' },
     branch_name: { type: 'string' },
+    spec_markdown: { type: 'string' },
   },
-  required: ['tasks', 'files_to_create', 'files_to_modify', 'test_approach', 'branch_name'],
+  required: ['tasks', 'files_to_create', 'files_to_modify', 'test_approach', 'branch_name', 'spec_markdown'],
 }
 
 export function buildFileRequestPrompt(requirements: ParsedItem[], fileTree: string[]): string {
@@ -63,6 +64,7 @@ Rules:
 - branch_name: git branch name in format "sf/<6-char-req-id>-<short-slug>" e.g. "sf/abc123-add-auth"
 - For every file created or modified, include a corresponding test file
 - tasks must be ordered so dependencies come before dependents
+- spec_markdown: a complete implementation specification in Markdown. Include: (1) Overview — what is being built and why; (2) Architecture & technical decisions; (3) For each task — goal, files affected, and numbered implementation steps; (4) Testing strategy. This will be saved as SPEC.md in the project. Be detailed and concrete.
 
 Return ONLY valid JSON. No commentary.
 

@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { PlanScreen } from '@/components/agent/plan-screen'
+import { PlanLoading } from '@/components/agent/plan-loading'
 import type { AgentPlan } from '@/lib/supabase/types'
 
 interface Props {
@@ -20,11 +21,19 @@ export default async function PlanPage({ params }: Props) {
     .single()
 
   if (!job || (job.projects as { owner_id: string }).owner_id !== user.id) redirect('/projects')
-  if (job.status !== 'awaiting_plan_approval') redirect(`/projects/${projectId}/jobs/${jobId}/execution`)
+
+  const projectName = (job.projects as { name: string }).name
+
+  if (job.status === 'plan_loop' || job.status === 'pending') {
+    return <PlanLoading jobId={jobId} projectId={projectId} projectName={projectName} />
+  }
+
+  if (job.status !== 'awaiting_plan_approval') {
+    redirect(`/projects/${projectId}/jobs/${jobId}/execution`)
+  }
 
   const { data: plan } = await db.from('agent_plans').select('*').eq('job_id', jobId).single()
   if (!plan) redirect(`/projects/${projectId}/jobs/${jobId}/execution`)
 
-  const projectName = (job.projects as { name: string }).name
   return <PlanScreen jobId={jobId} projectId={projectId} projectName={projectName} plan={plan as AgentPlan} />
 }

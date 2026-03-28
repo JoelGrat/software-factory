@@ -13,9 +13,10 @@ interface Props {
   requirementId: string
   gaps: GapWithDetails[]
   onUpdate: () => void   // called after any mutation to trigger parent re-fetch
+  onReanalyze?: () => Promise<void>
 }
 
-export function ViewGaps({ requirementId, gaps, onUpdate }: Props) {
+export function ViewGaps({ requirementId, gaps, onUpdate, onReanalyze }: Props) {
   const [showAll, setShowAll] = useState(false)
   const [expandedGapId, setExpandedGapId] = useState<string | null>(null)
   const [answers, setAnswers] = useState<Record<string, string>>({})
@@ -24,6 +25,8 @@ export function ViewGaps({ requirementId, gaps, onUpdate }: Props) {
   const [decisionForms, setDecisionForms] = useState<Record<string, DecisionForm>>({})
   const [savingDecision, setSavingDecision] = useState<string | null>(null)
   const [generatingQuestion, setGeneratingQuestion] = useState<string | null>(null)
+  const [analyzing, setAnalyzing] = useState(false)
+  const [analyzeError, setAnalyzeError] = useState<string | null>(null)
   const [errors, setErrors] = useState<Record<string, string>>({})
 
   // gaps arrive pre-sorted by priority_score desc from buildGapsWithDetails
@@ -101,21 +104,38 @@ export function ViewGaps({ requirementId, gaps, onUpdate }: Props) {
     }
   }
 
+  async function handleReanalyze() {
+    if (!onReanalyze) return
+    setAnalyzing(true)
+    setAnalyzeError(null)
+    try {
+      await onReanalyze()
+    } catch (err) {
+      setAnalyzeError(String(err))
+    } finally {
+      setAnalyzing(false)
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-gray-500">
-          Showing {displayedGaps.length} of {allNonMerged.length} gap{allNonMerged.length !== 1 ? 's' : ''}
+        <p className="text-sm text-slate-500 font-mono">
+          {allNonMerged.length} gap{allNonMerged.length !== 1 ? 's' : ''}
+          {allNonMerged.length > 10 && !showAll && ` — showing top 10`}
         </p>
-        {allNonMerged.length > 10 && (
-          <button
-            onClick={() => setShowAll(v => !v)}
-            className="text-sm text-blue-600 hover:underline"
-          >
-            {showAll ? 'Show top 10 only' : `Show all ${allNonMerged.length} gaps`}
-          </button>
-        )}
+        <div className="flex items-center gap-3">
+          {allNonMerged.length > 10 && (
+            <button
+              onClick={() => setShowAll(v => !v)}
+              className="text-xs text-slate-400 hover:text-slate-200 transition-colors"
+            >
+              {showAll ? 'Show top 10 only' : `Show all ${allNonMerged.length}`}
+            </button>
+          )}
+        </div>
       </div>
+      {analyzeError && <p className="text-xs text-error font-mono">{analyzeError}</p>}
 
       {displayedGaps.map(gap => (
         <div
@@ -274,7 +294,24 @@ export function ViewGaps({ requirementId, gaps, onUpdate }: Props) {
       ))}
 
       {displayedGaps.length === 0 && (
-        <p className="text-gray-400 text-center py-8">No gaps detected. Analysis not yet run or requirements are complete.</p>
+        <div className="flex flex-col items-center justify-center py-20 text-center">
+          <span className="material-symbols-outlined text-slate-600 mb-4" style={{ fontSize: '40px' }}>manage_search</span>
+          <p className="text-slate-400 text-sm">No gaps detected.</p>
+          <p className="text-slate-600 text-xs mt-1">Analysis not yet run or requirements are complete.</p>
+          {onReanalyze && (
+            <button
+              onClick={handleReanalyze}
+              disabled={analyzing}
+              className="mt-6 flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-headline font-bold transition-all disabled:opacity-40 bg-gradient-to-br from-primary to-primary-container text-on-primary-container shadow-[0_4px_20px_rgba(189,194,255,0.15)] hover:scale-[1.02] active:scale-95"
+            >
+              {analyzing
+                ? <span className="material-symbols-outlined animate-spin" style={{ fontSize: '16px' }}>progress_activity</span>
+                : <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>manage_search</span>
+              }
+              {analyzing ? 'Analyzing...' : 'Re-Run Gap Analysis'}
+            </button>
+          )}
+        </div>
       )}
     </div>
   )

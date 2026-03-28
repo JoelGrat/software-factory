@@ -41,6 +41,7 @@ async function runPlanningPhase(jobId: string, db: SupabaseClient, ai: AIProvide
       files_to_modify: plan.files_to_modify,
       test_approach: plan.test_approach,
       branch_name: plan.branch_name,
+      spec_markdown: plan.spec_markdown ?? null,
     })
 
     await db.from('jobs').update({ status: 'awaiting_plan_approval', branch_name: plan.branch_name }).eq('id', jobId)
@@ -68,6 +69,13 @@ async function runCodingPhase(jobId: string, db: SupabaseClient, ai: AIProvider,
       files_to_modify: planRow.files_to_modify,
       test_approach: planRow.test_approach,
       branch_name: planRow.branch_name,
+      spec_markdown: planRow.spec_markdown ?? null,
+    }
+
+    // Write SPEC.md to the project directory
+    if (plan.spec_markdown) {
+      await executor.writeFiles(project.target_path, [{ path: 'SPEC.md', content: plan.spec_markdown, operation: 'create' }])
+      await logProgress(db, jobId, 'coding', 'SPEC.md written to project directory', 'info')
     }
 
     let previousErrors: string[] = []

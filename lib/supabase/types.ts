@@ -261,6 +261,7 @@ export interface AgentPlan {
   files_to_modify: string[]
   test_approach: string
   branch_name: string
+  spec_markdown: string | null
   created_at: string
 }
 

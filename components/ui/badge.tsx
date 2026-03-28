@@ -10,7 +10,7 @@ const BADGE_STYLES: Record<string, { bg: string; color: string; border: string; 
   analyzing:       { bg: 'rgba(79,112,255,0.1)',   color: '#7B97FF',  border: 'rgba(79,112,255,0.2)',  label: 'Analyzing' },
   incomplete:      { bg: 'rgba(255,69,69,0.1)',    color: '#FF6B6B',  border: 'rgba(255,69,69,0.2)',   label: 'Incomplete' },
   review_required: { bg: 'rgba(245,162,0,0.1)',    color: '#F5A200',  border: 'rgba(245,162,0,0.2)',   label: 'Review Required' },
-  ready_for_dev:   { bg: 'rgba(0,216,122,0.1)',    color: '#00D87A',  border: 'rgba(0,216,122,0.2)',   label: 'Ready for Dev' },
+  ready_for_dev:   { bg: 'rgba(0,216,122,0.1)',    color: '#00D87A',  border: 'rgba(0,216,122,0.2)',   label: 'Ready for Planning' },
   blocked:         { bg: 'rgba(255,69,69,0.12)',   color: '#FF4545',  border: 'rgba(255,69,69,0.25)',  label: 'Blocked' },
   // Question status
   open:            { bg: 'rgba(79,112,255,0.1)',   color: '#7B97FF',  border: 'rgba(79,112,255,0.2)',  label: 'Open' },

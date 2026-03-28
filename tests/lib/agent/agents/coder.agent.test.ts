@@ -12,6 +12,7 @@ const plan = {
   files_to_modify: [],
   test_approach: 'Unit tests',
   branch_name: 'sf/abc-add-login',
+  spec_markdown: null,
 }
 
 describe('runCoderAgent', () => {
