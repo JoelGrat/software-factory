@@ -350,10 +350,19 @@ export function VisionScreen({
               <textarea
                 value={freeForm}
                 onChange={e => setFreeForm(e.target.value)}
-                onBlur={saveDraft}
+                onBlur={e => { e.currentTarget.style.borderColor = 'var(--border-default)'; saveDraft() }}
+                onFocus={e => { e.currentTarget.style.borderColor = 'var(--border-accent)' }}
                 placeholder="Describe what you're building — goals, key features, tech stack, target users, constraints..."
                 rows={14}
-                className="w-full bg-surface-container rounded-xl p-5 text-sm text-on-surface border border-white/5 focus:border-indigo-500/40 focus:outline-none resize-none font-mono leading-relaxed placeholder:text-slate-600 transition-colors"
+                className="w-full rounded-xl px-5 py-4 resize-none outline-none transition-all"
+                style={{
+                  background: 'var(--bg-surface)',
+                  border: '1px solid var(--border-default)',
+                  color: 'var(--text-primary)',
+                  fontFamily: 'var(--font-jetbrains)',
+                  fontSize: '13px',
+                  lineHeight: '1.7',
+                }}
               />
             )}
 
@@ -369,19 +378,36 @@ export function VisionScreen({
                       <textarea
                         value={structured[field.key]}
                         onChange={e => setStructured(prev => ({ ...prev, [field.key]: e.target.value }))}
-                        onBlur={saveDraft}
+                        onBlur={e => { e.currentTarget.style.borderColor = 'var(--border-default)'; saveDraft() }}
+                        onFocus={e => { e.currentTarget.style.borderColor = 'var(--border-accent)' }}
                         placeholder={field.placeholder}
                         rows={4}
-                        className="w-full bg-surface-container rounded-xl p-4 text-sm text-on-surface border border-white/5 focus:border-indigo-500/40 focus:outline-none resize-none placeholder:text-slate-600 transition-colors"
+                        className="w-full rounded-xl px-5 py-4 resize-none outline-none transition-all"
+                        style={{
+                          background: 'var(--bg-surface)',
+                          border: '1px solid var(--border-default)',
+                          color: 'var(--text-primary)',
+                          fontFamily: 'var(--font-jetbrains)',
+                          fontSize: '13px',
+                          lineHeight: '1.7',
+                        }}
                       />
                     ) : (
                       <input
                         type="text"
                         value={structured[field.key]}
                         onChange={e => setStructured(prev => ({ ...prev, [field.key]: e.target.value }))}
-                        onBlur={saveDraft}
+                        onBlur={e => { e.currentTarget.style.borderColor = 'var(--border-default)'; saveDraft() }}
+                        onFocus={e => { e.currentTarget.style.borderColor = 'var(--border-accent)' }}
                         placeholder={field.placeholder}
-                        className="w-full bg-surface-container rounded-xl px-4 py-3 text-sm text-on-surface border border-white/5 focus:border-indigo-500/40 focus:outline-none placeholder:text-slate-600 transition-colors"
+                        className="w-full rounded-xl px-5 py-3 outline-none transition-all"
+                        style={{
+                          background: 'var(--bg-surface)',
+                          border: '1px solid var(--border-default)',
+                          color: 'var(--text-primary)',
+                          fontFamily: 'var(--font-jetbrains)',
+                          fontSize: '13px',
+                        }}
                       />
                     )}
                   </div>
