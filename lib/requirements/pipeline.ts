@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { AIProvider, CompletionResult } from '@/lib/ai/provider'
-import { parseRequirements } from '@/lib/requirements/parser'
+import { parseRequirements, parseRequirementsWithLoop } from '@/lib/requirements/parser'
 import { detectGaps } from '@/lib/requirements/gap-detector'
 import { generateQuestions } from '@/lib/requirements/question-generator'
 import { createTasks } from '@/lib/requirements/task-creator'
@@ -88,7 +88,7 @@ export async function runPipeline(
   // Step 1: Parse
   let parsedItems
   try {
-    parsedItems = await parseRequirements(rawInput, loggingProvider(ai, db, requirementId, 'parse'))
+    parsedItems = await parseRequirementsWithLoop(rawInput, loggingProvider(ai, db, requirementId, 'parse'))
     await db.from('requirement_items').delete().eq('requirement_id', requirementId)
     if (parsedItems.length > 0) {
       await db.from('requirement_items').insert(

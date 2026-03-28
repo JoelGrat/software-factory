@@ -12,13 +12,15 @@ type Tab = 'input' | 'structured' | 'gaps'
 
 interface Props {
   requirementId: string
+  projectId: string
+  targetPath: string | null
   initialRawInput: string
   initialItems: RequirementItem[]
   initialGaps: GapWithDetails[]
   initialSummary: RequirementSummary
 }
 
-export function Workspace({ requirementId, initialRawInput, initialItems, initialGaps, initialSummary }: Props) {
+export function Workspace({ requirementId, projectId, targetPath, initialRawInput, initialItems, initialGaps, initialSummary }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('input')
   const [items, setItems] = useState<RequirementItem[]>(initialItems)
   const [gaps, setGaps] = useState<GapWithDetails[]>(initialGaps)
@@ -57,6 +59,25 @@ export function Workspace({ requirementId, initialRawInput, initialItems, initia
     void refreshData()
   }
 
+  async function handleRunAgent() {
+    if (!targetPath) {
+      alert('Set the project target path in project settings before running the agent.')
+      return
+    }
+    const res = await fetch('/api/jobs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requirement_id: requirementId }),
+    })
+    if (!res.ok) {
+      const err = await res.json()
+      alert(err.error ?? 'Failed to start agent')
+      return
+    }
+    const job = await res.json()
+    window.location.href = `/projects/${projectId}/jobs/${job.id}/execution`
+  }
+
   const activeGaps = gaps.filter(g => !g.resolved_at && !g.merged_into)
   const criticalGapDescriptions = activeGaps
     .filter(g => g.severity === 'critical')
@@ -78,24 +99,40 @@ export function Workspace({ requirementId, initialRawInput, initialItems, initia
         onScoreClick={() => setActiveTab('gaps')}
       />
 
-      <div className="flex gap-1 mb-6 p-1 rounded-lg" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', display: 'inline-flex' }}>
-        {tabs.map(tab => (
+      <div className="flex items-center gap-4 mb-6">
+        <div className="flex gap-1 p-1 rounded-lg" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', display: 'inline-flex' }}>
+          {tabs.map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className="px-4 py-2 rounded-md text-sm transition-all"
+              style={{
+                background: activeTab === tab.id ? 'var(--bg-elevated)' : 'transparent',
+                color: activeTab === tab.id ? 'var(--text-primary)' : 'var(--text-muted)',
+                fontFamily: 'var(--font-syne)',
+                fontWeight: activeTab === tab.id ? '600' : '400',
+                border: activeTab === tab.id ? '1px solid var(--border-default)' : '1px solid transparent',
+                letterSpacing: '0.01em',
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {status === 'ready_for_dev' && (
           <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className="px-4 py-2 rounded-md text-sm transition-all"
+            onClick={handleRunAgent}
+            className="px-4 py-2 rounded-lg text-sm font-medium transition-all"
             style={{
-              background: activeTab === tab.id ? 'var(--bg-elevated)' : 'transparent',
-              color: activeTab === tab.id ? 'var(--text-primary)' : 'var(--text-muted)',
-              fontFamily: 'var(--font-syne)',
-              fontWeight: activeTab === tab.id ? '600' : '400',
-              border: activeTab === tab.id ? '1px solid var(--border-default)' : '1px solid transparent',
-              letterSpacing: '0.01em',
+              background: 'var(--accent)',
+              color: '#000',
+              fontFamily: 'var(--font-jetbrains)',
             }}
           >
-            {tab.label}
+            Run Agent
           </button>
-        ))}
+        )}
       </div>
 
       {activeTab === 'input' && (

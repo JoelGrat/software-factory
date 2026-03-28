@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { buildGapsWithDetails } from '@/lib/requirements/gaps-with-details'
 import { Workspace } from '@/components/requirements/workspace'
+import { JobShell } from '@/components/agent/job-shell'
 import type { Gap, Question, InvestigationTask, RequirementSummary } from '@/lib/supabase/types'
 
 interface Props {
@@ -16,7 +17,7 @@ export default async function RequirementsPage({ params }: Props) {
 
   const { data: project } = await db
     .from('projects')
-    .select('id, name')
+    .select('id, name, target_path')
     .eq('id', projectId)
     .eq('owner_id', user.id)
     .single()
@@ -76,36 +77,52 @@ export default async function RequirementsPage({ params }: Props) {
     blocked_reason: req.blocked_reason,
   }
 
-  return (
-    <main className="min-h-screen" style={{ background: 'var(--bg-base)' }}>
-      <header style={{ borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-surface)' }}>
-        <div className="max-w-5xl mx-auto px-6 py-4 flex items-center gap-3">
-          <a
-            href="/projects"
-            className="text-xs uppercase tracking-widest transition-colors"
-            style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-jetbrains)' }}
-          >
-            Projects
-          </a>
-          <span style={{ color: 'var(--border-strong)' }}>/</span>
-          <span className="text-xs uppercase tracking-widest" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-jetbrains)' }}>
-            {project.name}
-          </span>
-        </div>
-      </header>
-
-      <div className="max-w-5xl mx-auto px-6 py-8">
-        <h1 className="text-2xl font-bold mb-8" style={{ fontFamily: 'var(--font-syne)', color: 'var(--text-primary)' }}>
-          {req.title}
-        </h1>
-        <Workspace
-          requirementId={req.id}
-          initialRawInput={req.raw_input ?? ''}
-          initialItems={items ?? []}
-          initialGaps={gapsWithDetails}
-          initialSummary={summary}
-        />
+  const sidebar = (
+    <div className="p-5 space-y-4">
+      <div className="p-3 bg-surface-container rounded-lg border border-outline-variant/10">
+        <div className="text-[10px] text-outline uppercase font-bold mb-1">Status</div>
+        <div className="text-sm font-semibold text-indigo-200 capitalize">{summary.status}</div>
       </div>
-    </main>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="p-3 bg-surface-container rounded-lg border border-outline-variant/10 text-center">
+          <div className="text-[10px] text-outline uppercase font-bold mb-1">Coverage</div>
+          <div className="text-xl font-bold font-headline text-indigo-100">{summary.coverage_pct}%</div>
+        </div>
+        <div className="p-3 bg-surface-container rounded-lg border border-outline-variant/10 text-center">
+          <div className="text-[10px] text-outline uppercase font-bold mb-1">Blocking</div>
+          <div className={`text-xl font-bold font-headline ${summary.blocking_count > 0 ? 'text-error' : 'text-[#22c55e]'}`}>
+            {summary.blocking_count}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+
+  const actionBarLeft = (
+    <div className="flex items-center gap-2">
+      <span className="material-symbols-outlined text-indigo-400 text-[18px]">assignment</span>
+      <span className="text-xs font-bold text-on-surface-variant">{req.title}</span>
+    </div>
+  )
+
+  return (
+    <JobShell
+      projectName={project.name}
+      projectId={projectId}
+      activeStep={1}
+      sidebar={sidebar}
+      sidebarTitle="Requirements Status"
+      actionBarLeft={actionBarLeft}
+    >
+      <Workspace
+        requirementId={req.id}
+        projectId={projectId}
+        targetPath={project.target_path ?? null}
+        initialRawInput={req.raw_input ?? ''}
+        initialItems={items ?? []}
+        initialGaps={gapsWithDetails}
+        initialSummary={summary}
+      />
+    </JobShell>
   )
 }
