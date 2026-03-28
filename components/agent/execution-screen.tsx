@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import type { Job, LogEntry, JobStatus } from '@/lib/supabase/types'
 import { JobShell } from '@/components/agent/job-shell'
+import { StepIndicator } from '@/components/agent/step-indicator'
 
 const PHASES: { key: string; label: string; icon: string; statuses: JobStatus[] }[] = [
   { key: 'planning', label: 'Planning', icon: 'manage_search', statuses: ['plan_loop', 'awaiting_plan_approval'] },
@@ -39,38 +40,6 @@ const logLevelIcon: Record<string, string> = {
   success: 'check_circle',
 }
 
-function StepIndicator({ current }: { current: 3 }) {
-  const steps = ['Requirement', 'Plan', 'Execution', 'Review']
-  return (
-    <div className="max-w-3xl mx-auto mb-10">
-      <div className="flex items-center justify-between relative">
-        <div className="absolute top-4 left-0 w-full h-px bg-outline-variant/20 z-0" />
-        {steps.map((label, i) => {
-          const num = i + 1
-          const done = num < current
-          const active = num === current
-          return (
-            <div key={label} className="relative z-10 flex flex-col items-center gap-2">
-              <div className={[
-                'flex items-center justify-center text-xs font-bold transition-all',
-                done
-                  ? 'w-8 h-8 rounded-full bg-primary text-on-primary'
-                  : active
-                    ? 'w-10 h-10 rounded-full bg-indigo-500 ring-4 ring-indigo-500/20 text-white text-sm shadow-[0_0_20px_rgba(189,194,255,0.3)]'
-                    : 'w-8 h-8 rounded-full bg-surface-container-high border border-outline-variant/30 text-on-surface-variant',
-              ].join(' ')}>
-                {done ? <span className="material-symbols-outlined text-sm">check</span> : `0${num}`}
-              </div>
-              <span className={`text-[10px] font-bold uppercase tracking-tighter ${active ? 'text-indigo-400' : done ? 'text-on-surface-variant' : 'text-outline'}`}>
-                {label}
-              </span>
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
 
 interface Props {
   jobId: string
@@ -152,7 +121,6 @@ export function ExecutionScreen({ jobId, projectId, projectName, initialJob, ini
   }
 
   const currentPhaseLabel = PHASES.find(p => p.statuses.includes(job.status as JobStatus))?.label ?? 'Processing'
-
   const sidebar = (
     <div className="flex flex-col h-full">
       {/* Live log feed */}
@@ -182,82 +150,58 @@ export function ExecutionScreen({ jobId, projectId, projectName, initialJob, ini
     </div>
   )
 
-  const actionBarLeft = (
-    <>
-      <div className="flex items-center gap-2">
-        <span className={`relative flex h-2 w-2 flex-shrink-0 ${!isFailed ? 'visible' : 'invisible'}`}>
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
-          <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-400" />
-        </span>
-        <span className="text-xs font-bold text-on-surface-variant uppercase tracking-widest">
-          {isFailed ? 'Failed' : currentPhaseLabel}
-        </span>
-      </div>
-      {job.status === 'coding' && (
-        <>
-          <div className="h-4 w-px bg-outline-variant/30" />
-          <span className="text-xs text-outline font-mono">Iteration {job.iteration_count} / 10</span>
-        </>
-      )}
-      {retryError && <span className="text-xs text-error ml-2">{retryError}</span>}
-    </>
-  )
-
-  const actionBarRight = (
-    <>
-      {!isFailed && (
-        <button
-          onClick={handleCancel}
-          className="text-xs font-bold text-outline hover:text-white transition-colors uppercase tracking-widest px-4"
-        >
-          Cancel
-        </button>
-      )}
-      {isFailed && (
-        <button
-          onClick={handleRetry}
-          disabled={retryLoading}
-          className="bg-gradient-to-br from-primary to-primary-container text-on-primary-container px-8 py-3 rounded-lg font-headline font-extrabold text-sm flex items-center gap-2 shadow-[0_4px_20px_rgba(189,194,255,0.2)] hover:scale-[1.02] transition-transform active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed disabled:scale-100"
-        >
-          {retryLoading ? 'Retrying...' : 'Retry'}
-          {!retryLoading && <span className="material-symbols-outlined text-[18px]">refresh</span>}
-        </button>
-      )}
-    </>
-  )
-
   return (
     <JobShell
       projectName={projectName}
       projectId={projectId}
       jobId={jobId}
-      activeStep={3}
       sidebar={sidebar}
       sidebarTitle={`Agent Activity Log (${logs.length})`}
-      actionBarLeft={actionBarLeft}
-      actionBarRight={actionBarRight}
     >
       <div className="max-w-4xl mx-auto space-y-8">
         <StepIndicator current={3} />
 
         {/* Header */}
-        <div>
-          <div className="flex items-center gap-3 mb-2">
-            {!isFailed && (
-              <span className="relative flex h-3 w-3">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
-                <span className="relative inline-flex rounded-full h-3 w-3 bg-indigo-400" />
-              </span>
-            )}
-            <h1 className="text-3xl font-extrabold font-headline tracking-tight text-white">
-              {isFailed ? 'Execution Failed' : 'Executing Plan'}
-            </h1>
+        <div className="flex items-start justify-between">
+          <div>
+            <div className="flex items-center gap-3 mb-2">
+              {!isFailed && (
+                <span className="relative flex h-3 w-3">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-indigo-400" />
+                </span>
+              )}
+              <h1 className="text-3xl font-extrabold font-headline tracking-tight text-white">
+                {isFailed ? 'Execution Failed' : 'Executing Plan'}
+              </h1>
+            </div>
+            <p className="text-on-surface-variant text-sm">
+              {isFailed
+                ? 'The agent encountered an error. Review the logs and retry.'
+                : `${currentPhaseLabel}${job.status === 'coding' ? ` — Iteration ${job.iteration_count} / 10` : ''}`}
+            </p>
           </div>
-          <p className="text-on-surface-variant text-sm">
-            {isFailed
-              ? 'The agent encountered an error. Review the logs and retry.'
-              : 'The agent is working through the implementation tasks.'}
-          </p>
+          {!isFailed && (
+            <button
+              onClick={handleCancel}
+              className="text-xs font-bold text-outline hover:text-white transition-colors uppercase tracking-widest px-4 py-2 flex-shrink-0 ml-6"
+            >
+              Cancel
+            </button>
+          )}
+          {isFailed && (
+            <div className="flex-shrink-0 ml-6 flex flex-col items-end gap-1">
+              <button
+                onClick={handleRetry}
+                disabled={retryLoading}
+                className="bg-gradient-to-br from-primary to-primary-container text-on-primary-container px-6 py-2.5 rounded-lg font-headline font-extrabold text-sm flex items-center gap-2 shadow-[0_4px_20px_rgba(189,194,255,0.2)] hover:scale-[1.02] transition-transform active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed disabled:scale-100"
+              >
+                {retryLoading ? 'Retrying...' : 'Retry'}
+                {!retryLoading && <span className="material-symbols-outlined text-[16px]">refresh</span>}
+              </button>
+              {retryError && <span className="text-[10px] text-error font-mono">{retryError}</span>}
+            </div>
+          )}
         </div>
 
         {/* Phase cards */}

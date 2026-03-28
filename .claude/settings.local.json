@@ -31,7 +31,16 @@
       "Bash(find lib:*)",
       "Bash(ls -la /c/Users/joelg/softwareFactory_git/app/api/requirements/[id]/)",
       "Bash(mkdir -p \"C:/Users/joelg/softwareFactory_git/app/api/requirements/[id]/decisions\")",
-      "Bash(mkdir -p \"C:/Users/joelg/softwareFactory_git/app/api/gaps/[id]/question\")"
+      "Bash(mkdir -p \"C:/Users/joelg/softwareFactory_git/app/api/gaps/[id]/question\")",
+      "Bash(wc:*)",
+      "Bash(ls:*)",
+      "Bash(grep -r \"Material\\\\|Icon\\\\|Symbol\\\\|lucide\\\\|react-icons\" /c/Users/joelg/softwareFactory_git/.worktrees/feat/plan-e-agent-loop/app --include=*.tsx --include=*.ts --include=*.html)",
+      "Bash(grep -r \"Material\\\\|Icon\\\\|Symbol\\\\|lucide\\\\|react-icons\" /c/Users/joelg/softwareFactory_git/.worktrees/feat/plan-e-agent-loop/components --include=*.tsx --include=*.ts)",
+      "Bash(xargs grep:*)",
+      "Bash(npx next:*)",
+      "Bash(node -e \"const {execSync} = require\\(''''child_process''''\\); try { execSync\\(''''npm run build 2>&1'''', {stdio:''''pipe''''}\\); } catch\\(e\\) { console.log\\(e.stdout?.toString\\(\\).slice\\(-3000\\)\\); }\")",
+      "Bash(cat app/projects/[id]/jobs/[jobId]/execution/page.tsx)",
+      "Bash(grep:*)"
     ]
   }
 }

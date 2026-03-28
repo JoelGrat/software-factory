@@ -3,39 +3,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import type { Job, TestResult } from '@/lib/supabase/types'
 import { JobShell } from '@/components/agent/job-shell'
-
-function StepIndicator({ current }: { current: 4 }) {
-  const steps = ['Requirement', 'Plan', 'Execution', 'Review']
-  return (
-    <div className="max-w-3xl mx-auto mb-10">
-      <div className="flex items-center justify-between relative">
-        <div className="absolute top-4 left-0 w-full h-px bg-outline-variant/20 z-0" />
-        {steps.map((label, i) => {
-          const num = i + 1
-          const done = num < current
-          const active = num === current
-          return (
-            <div key={label} className="relative z-10 flex flex-col items-center gap-2">
-              <div className={[
-                'flex items-center justify-center text-xs font-bold transition-all',
-                done
-                  ? 'w-8 h-8 rounded-full bg-primary text-on-primary'
-                  : active
-                    ? 'w-10 h-10 rounded-full bg-indigo-500 ring-4 ring-indigo-500/20 text-white text-sm shadow-[0_0_20px_rgba(189,194,255,0.3)]'
-                    : 'w-8 h-8 rounded-full bg-surface-container-high border border-outline-variant/30 text-on-surface-variant',
-              ].join(' ')}>
-                {done ? <span className="material-symbols-outlined text-sm">check</span> : `0${num}`}
-              </div>
-              <span className={`text-[10px] font-bold uppercase tracking-tighter ${active ? 'text-indigo-400' : done ? 'text-on-surface-variant' : 'text-outline'}`}>
-                {label}
-              </span>
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
+import { StepIndicator } from '@/components/agent/step-indicator'
 
 function DiffViewer({ diff }: { diff: string }) {
   if (!diff) return <p className="text-outline text-xs font-mono">No diff available.</p>
@@ -151,70 +119,19 @@ export function ReviewScreen({ jobId, projectId, projectName, job, diff, testRes
     </div>
   )
 
-  const actionBarLeft = (
-    <>
-      <div className="flex items-center gap-2">
-        <span className="material-symbols-outlined text-indigo-400 text-[18px]">account_tree</span>
-        <code className="text-xs font-mono text-on-surface-variant">{job.branch_name ?? 'no branch'}</code>
-      </div>
-      {testResult && (
-        <>
-          <div className="h-4 w-px bg-outline-variant/30" />
-          <div className="flex items-center gap-2">
-            <span className="material-symbols-outlined text-[#22c55e] text-[18px]">check_circle</span>
-            <span className="text-xs font-bold text-on-surface-variant">{testResult.passed} tests passed</span>
-          </div>
-        </>
-      )}
-      {isDone && (
-        <>
-          <div className="h-4 w-px bg-outline-variant/30" />
-          <span className="text-xs font-bold text-[#22c55e] flex items-center gap-1">
-            <span className="material-symbols-outlined text-[14px]">verified</span>
-            Approved
-          </span>
-        </>
-      )}
-      {actionError && <span className="text-xs text-error ml-2">{actionError}</span>}
-    </>
-  )
-
-  const actionBarRight = !isDone ? (
-    <>
-      <button
-        onClick={retry}
-        disabled={loading}
-        className="text-xs font-bold text-outline hover:text-white transition-colors uppercase tracking-widest px-4 disabled:opacity-60"
-      >
-        Retry Coding
-      </button>
-      <button
-        onClick={approve}
-        disabled={loading}
-        className="bg-gradient-to-br from-primary to-primary-container text-on-primary-container px-8 py-3 rounded-lg font-headline font-extrabold text-sm flex items-center gap-2 shadow-[0_4px_20px_rgba(189,194,255,0.2)] hover:scale-[1.02] transition-transform active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed disabled:scale-100"
-      >
-        {loading ? 'Working...' : 'Approve → Done'}
-        {!loading && <span className="material-symbols-outlined text-[18px]">verified</span>}
-      </button>
-    </>
-  ) : null
-
   return (
     <JobShell
       projectName={projectName}
       projectId={projectId}
       jobId={jobId}
-      activeStep={4}
       sidebar={sidebar}
       sidebarTitle="Review Summary"
-      actionBarLeft={actionBarLeft}
-      actionBarRight={actionBarRight ?? undefined}
     >
       <div className="max-w-4xl mx-auto space-y-8">
         <StepIndicator current={4} />
 
         {/* Header */}
-        <div className="flex justify-between items-end">
+        <div className="flex items-start justify-between">
           <div>
             <h1 className="text-3xl font-extrabold font-headline tracking-tight text-white mb-2">
               Review Changes
@@ -223,13 +140,34 @@ export function ReviewScreen({ jobId, projectId, projectName, job, diff, testRes
               Branch: <code className="font-mono text-indigo-300">{job.branch_name ?? 'not yet created'}</code>
             </p>
           </div>
-          {isDone && (
-            <div className="flex items-center gap-2 px-4 py-2 bg-[#22c55e]/10 rounded-lg border border-[#22c55e]/20">
-              <span className="material-symbols-outlined text-[#22c55e] text-[18px]">verified</span>
-              <span className="text-sm font-bold text-[#22c55e]">Approved</span>
-            </div>
-          )}
+          <div className="flex items-center gap-3 flex-shrink-0 ml-6">
+            {isDone ? (
+              <div className="flex items-center gap-2 px-4 py-2 bg-[#22c55e]/10 rounded-lg border border-[#22c55e]/20">
+                <span className="material-symbols-outlined text-[#22c55e] text-[18px]">verified</span>
+                <span className="text-sm font-bold text-[#22c55e]">Approved</span>
+              </div>
+            ) : (
+              <>
+                <button
+                  onClick={retry}
+                  disabled={loading}
+                  className="text-xs font-bold text-outline hover:text-white transition-colors uppercase tracking-widest px-4 py-2 disabled:opacity-60"
+                >
+                  Retry Coding
+                </button>
+                <button
+                  onClick={approve}
+                  disabled={loading}
+                  className="bg-gradient-to-br from-primary to-primary-container text-on-primary-container px-6 py-2.5 rounded-lg font-headline font-extrabold text-sm flex items-center gap-2 shadow-[0_4px_20px_rgba(189,194,255,0.2)] hover:scale-[1.02] transition-transform active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed disabled:scale-100"
+                >
+                  {loading ? 'Working...' : 'Approve → Done'}
+                  {!loading && <span className="material-symbols-outlined text-[16px]">verified</span>}
+                </button>
+              </>
+            )}
+          </div>
         </div>
+        {actionError && <p className="text-xs text-error font-mono -mt-4">{actionError}</p>}
 
         {/* Test results */}
         {testResult && (

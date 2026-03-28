@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { buildGapsWithDetails } from '@/lib/requirements/gaps-with-details'
 import { Workspace } from '@/components/requirements/workspace'
 import { JobShell } from '@/components/agent/job-shell'
+import { StepIndicator } from '@/components/agent/step-indicator'
 import type { Gap, Question, InvestigationTask, RequirementSummary } from '@/lib/supabase/types'
 
 interface Props {
@@ -15,13 +16,14 @@ export default async function RequirementsPage({ params }: Props) {
   const { data: { user } } = await db.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: project } = await db
+  const { data: project, error: projectError } = await db
     .from('projects')
     .select('id, name, target_path')
     .eq('id', projectId)
     .eq('owner_id', user.id)
     .single()
 
+  if (projectError) console.error('[requirements] project fetch failed:', projectError.message)
   if (!project) redirect('/projects')
 
   let { data: req } = await db
@@ -98,22 +100,14 @@ export default async function RequirementsPage({ params }: Props) {
     </div>
   )
 
-  const actionBarLeft = (
-    <div className="flex items-center gap-2">
-      <span className="material-symbols-outlined text-indigo-400 text-[18px]">assignment</span>
-      <span className="text-xs font-bold text-on-surface-variant">{req.title}</span>
-    </div>
-  )
-
   return (
     <JobShell
       projectName={project.name}
       projectId={projectId}
-      activeStep={1}
       sidebar={sidebar}
       sidebarTitle="Requirements Status"
-      actionBarLeft={actionBarLeft}
     >
+      <StepIndicator current={1} />
       <Workspace
         requirementId={req.id}
         projectId={projectId}

@@ -1,6 +1,20 @@
 import type { Metadata } from 'next'
-import { Syne, DM_Sans, JetBrains_Mono } from 'next/font/google'
+import { Manrope, Inter, Syne, DM_Sans, JetBrains_Mono } from 'next/font/google'
 import './globals.css'
+
+const manrope = Manrope({
+  subsets: ['latin'],
+  variable: '--font-manrope',
+  weight: ['400', '500', '600', '700', '800'],
+  display: 'swap',
+})
+
+const inter = Inter({
+  subsets: ['latin'],
+  variable: '--font-inter',
+  weight: ['400', '500', '600'],
+  display: 'swap',
+})
 
 const syne = Syne({
   subsets: ['latin'],
@@ -31,7 +45,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${syne.variable} ${dmSans.variable} ${jetbrainsMono.variable}`}>
+    <html lang="en" className={`${manrope.variable} ${inter.variable} ${syne.variable} ${dmSans.variable} ${jetbrainsMono.variable}`}>
       <body>{children}</body>
     </html>
   )

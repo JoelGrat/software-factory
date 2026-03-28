@@ -1,7 +1,9 @@
 import { redirect } from 'next/navigation'
-import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { CreateProjectForm } from '@/components/projects/create-project-form'
+import { ProjectList } from '@/components/projects/project-list'
+import { LeftNav } from '@/components/app/left-nav'
+import { ProfileAvatar } from '@/components/app/profile-avatar'
 
 export default async function ProjectsPage() {
   const db = createClient()
@@ -15,65 +17,45 @@ export default async function ProjectsPage() {
     .order('created_at', { ascending: false })
 
   return (
-    <main className="min-h-screen" style={{ background: 'var(--bg-base)' }}>
-      <div className="max-w-3xl mx-auto px-6 py-12">
-        <div className="flex items-center justify-between mb-10">
-          <div>
-            <p className="text-xs uppercase tracking-widest mb-1" style={{ color: 'var(--accent)', fontFamily: 'var(--font-jetbrains)' }}>
-              Software Factory
-            </p>
-            <h1 className="text-3xl font-bold" style={{ fontFamily: 'var(--font-syne)', color: 'var(--text-primary)' }}>
-              Projects
-            </h1>
-          </div>
-          <CreateProjectForm />
-        </div>
+    <div className="flex flex-col h-screen bg-[#0b1326] text-on-surface overflow-hidden">
+      {/* Top bar */}
+      <header className="w-full h-16 flex-shrink-0 flex items-center justify-between px-6 bg-[#0b1326] border-b border-white/5 z-50 font-headline antialiased tracking-tight">
+        <span className="text-xl font-bold text-indigo-400 tracking-tighter">FactoryOS</span>
 
-        {!projects?.length ? (
-          <div
-            className="rounded-xl p-12 text-center"
-            style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)' }}
-          >
-            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-              No projects yet. Create one to get started.
-            </p>
+        <div className="flex items-center gap-1">
+          <button className="p-2 text-slate-400 hover:bg-[#171f33] rounded-lg transition-all active:scale-95" title="Notifications">
+            <span className="material-symbols-outlined text-[20px]">notifications</span>
+          </button>
+          <button className="p-2 text-slate-400 hover:bg-[#171f33] rounded-lg transition-all active:scale-95" title="Settings">
+            <span className="material-symbols-outlined text-[20px]">settings</span>
+          </button>
+          <div className="w-px h-5 bg-white/10 mx-1" />
+          <ProfileAvatar />
+        </div>
+      </header>
+
+      {/* Body */}
+      <div className="flex flex-1 overflow-hidden">
+        <LeftNav />
+
+        <main className="flex-1 overflow-y-auto bg-[#0b1326] p-10">
+          <div className="max-w-3xl mx-auto">
+            <div className="flex items-center justify-between mb-10">
+              <div>
+                <p className="text-xs uppercase tracking-widest font-bold text-indigo-400 font-headline mb-1">
+                  Software Factory
+                </p>
+                <h1 className="text-3xl font-extrabold font-headline tracking-tight text-on-surface">
+                  Projects
+                </h1>
+              </div>
+              <CreateProjectForm />
+            </div>
+
+            <ProjectList projects={projects ?? []} />
           </div>
-        ) : (
-          <div className="space-y-2">
-            {projects.map(p => (
-              <Link
-                key={p.id}
-                href={`/projects/${p.id}/requirements`}
-                className="flex items-center justify-between px-5 py-4 rounded-xl group transition-all"
-                style={{
-                  background: 'var(--bg-surface)',
-                  border: '1px solid var(--border-subtle)',
-                }}
-                onMouseEnter={e => {
-                  const el = e.currentTarget as HTMLElement
-                  el.style.borderColor = 'var(--border-default)'
-                  el.style.background = 'var(--bg-elevated)'
-                }}
-                onMouseLeave={e => {
-                  const el = e.currentTarget as HTMLElement
-                  el.style.borderColor = 'var(--border-subtle)'
-                  el.style.background = 'var(--bg-surface)'
-                }}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-2 h-2 rounded-full" style={{ background: 'var(--accent)', boxShadow: '0 0 6px var(--accent)' }} />
-                  <span className="font-medium text-sm" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-syne)' }}>
-                    {p.name}
-                  </span>
-                </div>
-                <span className="text-xs font-mono" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-jetbrains)' }}>
-                  {new Date(p.created_at).toLocaleDateString()}
-                </span>
-              </Link>
-            ))}
-          </div>
-        )}
+        </main>
       </div>
-    </main>
+    </div>
   )
 }
