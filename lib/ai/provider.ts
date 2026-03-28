@@ -1,3 +1,5 @@
+// lib/ai/provider.ts
+
 export interface CompletionOptions {
   /** JSON Schema for structured output. When provided, adapter MUST return valid JSON string. */
   responseSchema?: Record<string, unknown>

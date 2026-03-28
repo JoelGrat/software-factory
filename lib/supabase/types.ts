@@ -1,3 +1,5 @@
+// lib/supabase/types.ts
+
 export type RequirementStatus =
   | 'draft'
   | 'analyzing'

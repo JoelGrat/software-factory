@@ -1,3 +1,5 @@
+// lib/ai/repair.ts
+
 /**
  * Attempts common JSON fixes on a raw string:
  * - Strips markdown code fences (```json ... ```)
