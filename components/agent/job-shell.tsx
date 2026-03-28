@@ -44,7 +44,7 @@ export function JobShell({ projectName, projectId, sidebar, sidebarTitle, childr
 
       {/* Body */}
       <div className="flex flex-1 overflow-hidden">
-        <LeftNav />
+        <LeftNav projectName={projectName} />
 
         {/* Main + right sidebar */}
         <div className="flex flex-1 overflow-hidden">
