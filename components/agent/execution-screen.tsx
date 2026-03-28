@@ -159,7 +159,7 @@ export function ExecutionScreen({ jobId, projectId, projectName, initialJob, ini
       sidebarTitle={`Agent Activity Log (${logs.length})`}
     >
       <div className="max-w-4xl mx-auto space-y-8">
-        <StepIndicator current={3} />
+        <StepIndicator current={4} />
 
         {/* Header */}
         <div className="flex items-start justify-between">

@@ -87,7 +87,7 @@ export function PlanScreen({ jobId, projectId, projectName, plan }: Props) {
       sidebarTitle="Plan Summary"
     >
       <div className="max-w-4xl mx-auto space-y-8">
-        <StepIndicator current={2} />
+        <StepIndicator current={3} />
 
         {/* Header */}
         <div className="flex items-start justify-between">

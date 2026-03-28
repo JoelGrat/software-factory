@@ -128,7 +128,7 @@ export function ReviewScreen({ jobId, projectId, projectName, job, diff, testRes
       sidebarTitle="Review Summary"
     >
       <div className="max-w-4xl mx-auto space-y-8">
-        <StepIndicator current={4} />
+        <StepIndicator current={5} />
 
         {/* Header */}
         <div className="flex items-start justify-between">

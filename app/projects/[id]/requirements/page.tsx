@@ -107,7 +107,7 @@ export default async function RequirementsPage({ params }: Props) {
       sidebar={sidebar}
       sidebarTitle="Requirements Status"
     >
-      <StepIndicator current={1} />
+      <StepIndicator current={2} />
       <Workspace
         requirementId={req.id}
         projectId={projectId}
