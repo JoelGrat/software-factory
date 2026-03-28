@@ -1,11 +1,9 @@
 // lib/agent/vision-generator.ts
+import Anthropic from '@anthropic-ai/sdk'
 import { createClient } from '@supabase/supabase-js'
-import { getProvider } from '@/lib/ai/registry'
-import { buildVisionPrompt } from '@/lib/agent/prompts/vision'
+import { buildVisionPrompt, VISION_SYSTEM_PROMPT } from '@/lib/agent/prompts/vision'
 import type { ProjectVision, RequirementItem } from '@/lib/supabase/types'
-import { repairAndParse } from '@/lib/ai/repair'
 
-// Uses service-role client (server-side only, never sent to browser)
 function getServiceClient() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -25,6 +23,23 @@ async function log(
   } catch { /* logging must never abort generation */ }
 }
 
+type ItemRow = Pick<RequirementItem, 'type' | 'title' | 'description' | 'priority'>
+
+function parseItem(line: string): ItemRow | null {
+  try {
+    const obj = JSON.parse(line.trim())
+    if (
+      typeof obj.type === 'string' &&
+      typeof obj.title === 'string' &&
+      typeof obj.description === 'string' &&
+      typeof obj.priority === 'string'
+    ) {
+      return obj as ItemRow
+    }
+  } catch { /* incomplete or invalid line */ }
+  return null
+}
+
 export async function generateVisionRequirements(
   projectId: string,
   vision: ProjectVision,
@@ -37,51 +52,85 @@ export async function generateVisionRequirements(
     await log(db, projectId, 'parsing', 'Parsing your vision...')
 
     const prompt = buildVisionPrompt(vision)
-    const provider = getProvider()
+    const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
 
-    await log(db, projectId, 'generating', 'Generating requirements with AI...')
+    await log(db, projectId, 'generating', 'Generating requirements...')
 
-    const result = await provider.complete(prompt, {
+    // Stream the response — insert each item the moment its line is complete
+    const stream = anthropic.messages.stream({
+      model: process.env.CLAUDE_MODEL ?? 'claude-opus-4-6',
+      max_tokens: 4096,
       temperature: 0,
-      maxTokens: 4096,
+      system: VISION_SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: prompt }],
     })
 
-    // Attempt JSON repair+parse for robustness
-    const parsed = repairAndParse(result.content)
-    if (!parsed) {
-      throw new Error('AI returned invalid JSON that could not be repaired')
+    let buffer = ''
+    let insertedCount = 0
+
+    for await (const event of stream) {
+      if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+        buffer += event.delta.text
+
+        // Each complete line may be a full JSON item
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? '' // last element is the incomplete current line
+
+        for (const line of lines) {
+          if (!line.trim()) continue
+          const item = parseItem(line)
+          if (!item) continue
+
+          await db.from('requirement_items').insert({
+            requirement_id: requirementId,
+            type:           item.type,
+            title:          item.title,
+            description:    item.description,
+            priority:       item.priority,
+            source_text:    null,
+            nfr_category:   null,
+          })
+          insertedCount++
+          await log(db, projectId, 'generating', `[${insertedCount}] ${item.title}`)
+        }
+      }
     }
 
-    const items = parsed as Array<Pick<RequirementItem, 'type' | 'title' | 'description' | 'priority'>>
-
-    if (!Array.isArray(items) || items.length === 0) {
-      throw new Error('AI returned no requirement items')
+    // Flush any remaining buffer (last line with no trailing newline)
+    if (buffer.trim()) {
+      const item = parseItem(buffer)
+      if (item) {
+        await db.from('requirement_items').insert({
+          requirement_id: requirementId,
+          type:           item.type,
+          title:          item.title,
+          description:    item.description,
+          priority:       item.priority,
+          source_text:    null,
+          nfr_category:   null,
+        })
+        insertedCount++
+      }
     }
 
-    await log(db, projectId, 'generating', `Inserting ${items.length} requirements...`)
+    if (insertedCount === 0) throw new Error('AI returned no requirement items')
 
-    // Insert one by one so Realtime fires per item
-    for (const item of items) {
-      await db.from('requirement_items').insert({
-        requirement_id: requirementId,
-        type:           item.type,
-        title:          item.title,
-        description:    item.description,
-        priority:       item.priority,
-        source_text:    null,
-        nfr_category:   null,
-      })
+    // Update raw_input summary
+    const { data: allItems } = await db
+      .from('requirement_items')
+      .select('type, title, description')
+      .eq('requirement_id', requirementId)
+
+    if (allItems) {
+      const summary = allItems
+        .map(i => `[${i.type.toUpperCase()}] ${i.title}: ${i.description}`)
+        .join('\n')
+      await db.from('requirements')
+        .update({ raw_input: summary, status: 'draft' })
+        .eq('id', requirementId)
     }
 
-    // Update raw_input with a formatted summary
-    const summary = items
-      .map(i => `[${i.type.toUpperCase()}] ${i.title}: ${i.description}`)
-      .join('\n')
-    await db.from('requirements')
-      .update({ raw_input: summary, status: 'draft' })
-      .eq('id', requirementId)
-
-    await log(db, projectId, 'system', `Done — ${items.length} requirements generated.`, 'success')
+    await log(db, projectId, 'system', `Done — ${insertedCount} requirements generated.`, 'success')
 
     await db.from('project_visions')
       .update({ status: 'done', error: null, updated_at: new Date().toISOString() })

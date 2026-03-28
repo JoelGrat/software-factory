@@ -42,7 +42,7 @@ export function Workspace({ requirementId, projectId, targetPath, isGenerating: 
       }
     }
 
-    const id = setInterval(poll, 1500)
+    const id = setInterval(poll, 800)
     return () => clearInterval(id)
   }, [generating, requirementId, projectId])
 

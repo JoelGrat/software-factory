@@ -14,17 +14,17 @@ export function buildVisionPrompt(vision: ProjectVision): string {
 
   return `You are a senior requirements analyst. Analyse the following project description and generate a comprehensive, structured list of software requirements.
 
-Return ONLY a JSON array of requirement objects. No prose, no markdown, no explanation — just the JSON array. Each object must have exactly these fields:
+Output each requirement as a separate JSON object on its own line (NDJSON — one object per line, no array wrapper, no commas between objects). Each object must have exactly these fields:
 - "type": one of "functional", "non-functional", "constraint", "assumption"
 - "title": short title, max 10 words
 - "description": 1-2 sentence explanation of the requirement
 - "priority": one of "high", "medium", "low"
 
-Generate 8-20 requirements covering functional features, non-functional quality attributes (performance, security, scalability), constraints, and key assumptions. Be specific and actionable.
+No prose, no markdown, no explanation — only the NDJSON lines. Generate 8-20 requirements covering functional features, non-functional quality attributes (performance, security, scalability), constraints, and key assumptions.
 
 PROJECT DESCRIPTION:
 ${content}`
 }
 
 export const VISION_SYSTEM_PROMPT =
-  'You are a senior requirements analyst. Return only valid JSON arrays. No prose, no markdown.'
+  'You are a senior requirements analyst. Output one JSON object per line (NDJSON). No prose, no markdown, no array wrapper.'
