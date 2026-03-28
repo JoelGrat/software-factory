@@ -1,7 +1,7 @@
 import type { RequirementStatus } from '@/lib/supabase/types'
 
 const VALID_TRANSITIONS: Record<RequirementStatus, RequirementStatus[]> = {
-  draft: ['analyzing'],
+  draft: ['analyzing', 'ready_for_dev'],
   analyzing: ['incomplete', 'review_required', 'ready_for_dev'],
   incomplete: ['review_required', 'ready_for_dev', 'blocked'],
   review_required: ['ready_for_dev', 'blocked'],

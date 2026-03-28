@@ -50,7 +50,7 @@ export function ViewStructured({ items, gaps, status, isGenerating, blockedGapDe
     })).filter(g => g.items.length > 0),
   [items])
 
-  const canMarkReady = status === 'review_required' || status === 'ready_for_dev'
+  const canMarkReady = (status === 'draft' || status === 'review_required') && items.length > 0
   const isReady = status === 'ready_for_dev'
 
   async function handleMarkReady() {
