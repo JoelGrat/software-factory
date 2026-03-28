@@ -1,9 +1,8 @@
 'use client'
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import type { RequirementItem, RequirementStatus } from '@/lib/supabase/types'
 import type { GapWithDetails } from '@/lib/requirements/gaps-with-details'
 import type { RequirementSummary } from '@/lib/supabase/types'
-import { createClient } from '@/lib/supabase/client'
 import { RiskSummaryPanel } from '@/components/requirements/risk-summary-panel'
 import { ViewStructured } from '@/components/requirements/view-structured'
 import { ViewGaps } from '@/components/requirements/view-gaps'
@@ -26,43 +25,26 @@ export function Workspace({ requirementId, projectId, targetPath, isGenerating: 
   const [gaps, setGaps] = useState<GapWithDetails[]>(initialGaps)
   const [status, setStatus] = useState<RequirementStatus>(initialSummary.status as RequirementStatus)
   const [generating, setGenerating] = useState(initialIsGenerating)
-  const dbRef = useRef(createClient())
 
-  // Live updates — always subscribe so we catch items even if status flipped to done during page load
+  // Poll for live updates while generating — reliable regardless of Realtime table config
   useEffect(() => {
-    const itemsChannel = dbRef.current
-      .channel(`req-items-${requirementId}`)
-      .on('postgres_changes', {
-        event: 'INSERT', schema: 'public', table: 'requirement_items',
-        filter: `requirement_id=eq.${requirementId}`,
-      }, payload => {
-        setItems(prev => {
-          const incoming = payload.new as RequirementItem
-          // deduplicate in case server-render already included this item
-          if (prev.some(i => i.id === incoming.id)) return prev
-          return [...prev, incoming]
-        })
-      })
-      .subscribe()
+    if (!generating) return
 
-    const visionChannel = dbRef.current
-      .channel(`req-vision-${projectId}`)
-      .on('postgres_changes', {
-        event: 'UPDATE', schema: 'public', table: 'project_visions',
-        filter: `project_id=eq.${projectId}`,
-      }, payload => {
-        const updated = payload.new as { status: string }
-        if (updated.status === 'done' || updated.status === 'failed') {
-          setGenerating(false)
-        }
-      })
-      .subscribe()
-
-    return () => {
-      dbRef.current.removeChannel(itemsChannel)
-      dbRef.current.removeChannel(visionChannel)
+    const poll = async () => {
+      const [itemsRes, visionRes] = await Promise.all([
+        fetch(`/api/requirements/${requirementId}/items`),
+        fetch(`/api/projects/${projectId}/vision`),
+      ])
+      if (itemsRes.ok) setItems(await itemsRes.json())
+      if (visionRes.ok) {
+        const v = await visionRes.json()
+        if (v.status === 'done' || v.status === 'failed') setGenerating(false)
+      }
     }
-  }, [requirementId, projectId])
+
+    const id = setInterval(poll, 1500)
+    return () => clearInterval(id)
+  }, [generating, requirementId, projectId])
 
   const refreshData = useCallback(async () => {
     const [itemsRes, gapsRes, reqRes] = await Promise.all([
