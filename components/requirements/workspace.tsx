@@ -1,8 +1,9 @@
 'use client'
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import type { RequirementItem, RequirementStatus } from '@/lib/supabase/types'
 import type { GapWithDetails } from '@/lib/requirements/gaps-with-details'
 import type { RequirementSummary } from '@/lib/supabase/types'
+import { createClient } from '@/lib/supabase/client'
 import { RiskSummaryPanel } from '@/components/requirements/risk-summary-panel'
 import { ViewStructured } from '@/components/requirements/view-structured'
 import { ViewGaps } from '@/components/requirements/view-gaps'
@@ -13,16 +14,52 @@ interface Props {
   requirementId: string
   projectId: string
   targetPath: string | null
+  isGenerating: boolean
   initialItems: RequirementItem[]
   initialGaps: GapWithDetails[]
   initialSummary: RequirementSummary
 }
 
-export function Workspace({ requirementId, projectId, targetPath, initialItems, initialGaps, initialSummary }: Props) {
+export function Workspace({ requirementId, projectId, targetPath, isGenerating: initialIsGenerating, initialItems, initialGaps, initialSummary }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('structured')
   const [items, setItems] = useState<RequirementItem[]>(initialItems)
   const [gaps, setGaps] = useState<GapWithDetails[]>(initialGaps)
   const [status, setStatus] = useState<RequirementStatus>(initialSummary.status as RequirementStatus)
+  const [generating, setGenerating] = useState(initialIsGenerating)
+  const dbRef = useRef(createClient())
+
+  // Live updates during generation
+  useEffect(() => {
+    if (!initialIsGenerating) return
+
+    const itemsChannel = dbRef.current
+      .channel(`req-items-${requirementId}`)
+      .on('postgres_changes', {
+        event: 'INSERT', schema: 'public', table: 'requirement_items',
+        filter: `requirement_id=eq.${requirementId}`,
+      }, payload => {
+        setItems(prev => [...prev, payload.new as RequirementItem])
+      })
+      .subscribe()
+
+    const visionChannel = dbRef.current
+      .channel(`req-vision-${projectId}`)
+      .on('postgres_changes', {
+        event: 'UPDATE', schema: 'public', table: 'project_visions',
+        filter: `project_id=eq.${projectId}`,
+      }, payload => {
+        const updated = payload.new as { status: string }
+        if (updated.status === 'done' || updated.status === 'failed') {
+          setGenerating(false)
+        }
+      })
+      .subscribe()
+
+    return () => {
+      dbRef.current.removeChannel(itemsChannel)
+      dbRef.current.removeChannel(visionChannel)
+    }
+  }, [requirementId, projectId, initialIsGenerating])
 
   const refreshData = useCallback(async () => {
     const [itemsRes, gapsRes, reqRes] = await Promise.all([
@@ -83,6 +120,18 @@ export function Workspace({ requirementId, projectId, targetPath, initialItems, 
 
   return (
     <div>
+      {/* Generating banner */}
+      {generating && (
+        <div className="flex items-center gap-3 mb-6 px-4 py-3 rounded-xl bg-indigo-500/10 border border-indigo-500/20">
+          <span className="relative flex h-2.5 w-2.5 flex-shrink-0">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
+            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-indigo-400" />
+          </span>
+          <span className="text-sm text-indigo-300 font-headline font-semibold">Generating requirements...</span>
+          <span className="text-xs text-indigo-400/60 font-mono ml-auto">{items.length} added so far</span>
+        </div>
+      )}
+
       <RiskSummaryPanel
         requirementId={requirementId}
         initialSummary={{ ...initialSummary, status }}
@@ -132,6 +181,7 @@ export function Workspace({ requirementId, projectId, targetPath, initialItems, 
           items={items}
           gaps={gaps}
           status={status}
+          isGenerating={generating}
           blockedGapDescriptions={criticalGapDescriptions}
           onMarkReady={handleMarkReady}
           onViewGap={() => setActiveTab('gaps')}

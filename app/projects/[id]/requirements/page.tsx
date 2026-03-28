@@ -52,12 +52,14 @@ export default async function RequirementsPage({ params }: Props) {
     { data: questions },
     { data: tasks },
     { data: latestScore },
+    { data: vision },
   ] = await Promise.all([
     db.from('requirement_items').select('*').eq('requirement_id', req.id).order('created_at', { ascending: true }),
     db.from('gaps').select('*').eq('requirement_id', req.id),
     db.from('questions').select('*').eq('requirement_id', req.id),
     db.from('investigation_tasks').select('*').eq('requirement_id', req.id),
     db.from('completeness_scores').select('blocking_count, high_risk_count, coverage_pct, internal_score, complexity_score, risk_flags').eq('requirement_id', req.id).order('scored_at', { ascending: false }).limit(1).maybeSingle(),
+    db.from('project_visions').select('status').eq('project_id', projectId).maybeSingle(),
   ])
 
   const gapsWithDetails = buildGapsWithDetails(
@@ -112,6 +114,7 @@ export default async function RequirementsPage({ params }: Props) {
         requirementId={req.id}
         projectId={projectId}
         targetPath={project.target_path ?? null}
+        isGenerating={vision?.status === 'generating'}
         initialItems={items ?? []}
         initialGaps={gapsWithDetails}
         initialSummary={summary}

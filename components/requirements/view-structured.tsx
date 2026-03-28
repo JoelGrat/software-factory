@@ -21,12 +21,13 @@ interface Props {
   items: RequirementItem[]
   gaps: Array<{ id: string; item_id: string | null; severity: string; resolved_at: string | null; merged_into: string | null }>
   status: RequirementStatus
+  isGenerating?: boolean
   blockedGapDescriptions: string[]
   onMarkReady: () => Promise<void>
   onViewGap?: () => void
 }
 
-export function ViewStructured({ items, gaps, status, blockedGapDescriptions, onMarkReady, onViewGap }: Props) {
+export function ViewStructured({ items, gaps, status, isGenerating, blockedGapDescriptions, onMarkReady, onViewGap }: Props) {
   const [marking, setMarking] = useState(false)
   const [markError, setMarkError] = useState<string | null>(null)
 
@@ -67,9 +68,21 @@ export function ViewStructured({ items, gaps, status, blockedGapDescriptions, on
   if (items.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center">
-        <span className="material-symbols-outlined text-slate-600 mb-4" style={{ fontSize: '40px' }}>edit_note</span>
-        <p className="text-slate-400 text-sm">No requirements yet.</p>
-        <p className="text-slate-600 text-xs mt-1">Generate them from the Vision step.</p>
+        {isGenerating ? (
+          <>
+            <span className="relative flex h-4 w-4 mb-4">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-4 w-4 bg-indigo-400" />
+            </span>
+            <p className="text-slate-400 text-sm">Waiting for first requirement...</p>
+          </>
+        ) : (
+          <>
+            <span className="material-symbols-outlined text-slate-600 mb-4" style={{ fontSize: '40px' }}>edit_note</span>
+            <p className="text-slate-400 text-sm">No requirements yet.</p>
+            <p className="text-slate-600 text-xs mt-1">Generate them from the Vision step.</p>
+          </>
+        )}
       </div>
     )
   }

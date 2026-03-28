@@ -176,7 +176,8 @@ export function VisionScreen({
       setGenerating(false)
       return
     }
-    setGenerating(false)
+    // Navigate immediately — requirements page shows live progress
+    router.push(`/projects/${projectId}/requirements`)
   }
 
   const hasContent = mode === 'free_form'
