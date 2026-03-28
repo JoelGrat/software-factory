@@ -28,17 +28,20 @@ export function Workspace({ requirementId, projectId, targetPath, isGenerating: 
   const [generating, setGenerating] = useState(initialIsGenerating)
   const dbRef = useRef(createClient())
 
-  // Live updates during generation
+  // Live updates — always subscribe so we catch items even if status flipped to done during page load
   useEffect(() => {
-    if (!initialIsGenerating) return
-
     const itemsChannel = dbRef.current
       .channel(`req-items-${requirementId}`)
       .on('postgres_changes', {
         event: 'INSERT', schema: 'public', table: 'requirement_items',
         filter: `requirement_id=eq.${requirementId}`,
       }, payload => {
-        setItems(prev => [...prev, payload.new as RequirementItem])
+        setItems(prev => {
+          const incoming = payload.new as RequirementItem
+          // deduplicate in case server-render already included this item
+          if (prev.some(i => i.id === incoming.id)) return prev
+          return [...prev, incoming]
+        })
       })
       .subscribe()
 
@@ -59,7 +62,7 @@ export function Workspace({ requirementId, projectId, targetPath, isGenerating: 
       dbRef.current.removeChannel(itemsChannel)
       dbRef.current.removeChannel(visionChannel)
     }
-  }, [requirementId, projectId, initialIsGenerating])
+  }, [requirementId, projectId])
 
   const refreshData = useCallback(async () => {
     const [itemsRes, gapsRes, reqRes] = await Promise.all([

@@ -37,3 +37,8 @@ create table if not exists vision_logs (
 
 create index if not exists project_visions_project_id on project_visions(project_id);
 create index if not exists vision_logs_project_id on vision_logs(project_id);
+
+-- Enable Realtime on new tables and requirement_items
+alter publication supabase_realtime add table project_visions;
+alter publication supabase_realtime add table vision_logs;
+alter publication supabase_realtime add table requirement_items;
