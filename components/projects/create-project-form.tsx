@@ -26,7 +26,7 @@ export function CreateProjectForm() {
         return
       }
       const project = await res.json()
-      router.push(`/projects/${project.id}/requirements`)
+      router.push(`/projects/${project.id}/vision`)
     } finally {
       setLoading(false)
     }
