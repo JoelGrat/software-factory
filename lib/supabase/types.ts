@@ -24,6 +24,7 @@ export interface Project {
   id: string
   name: string
   owner_id: string
+  setup_mode: 'scratch' | 'imported'
   created_at: string
 }
 
@@ -283,5 +284,37 @@ export interface LogEntry {
   phase: LogPhase
   level: LogLevel
   message: string
+  created_at: string
+}
+
+// ── Vision ────────────────────────────────────────────────────────────────────
+
+export type VisionMode   = 'free_form' | 'structured'
+export type VisionStatus = 'draft' | 'generating' | 'done' | 'failed'
+
+export interface ProjectVision {
+  id:             string
+  project_id:     string
+  mode:           VisionMode
+  free_form_text: string
+  goal:           string
+  tech_stack:     string
+  target_users:   string
+  key_features:   string
+  constraints:    string
+  status:         VisionStatus
+  error:          string | null
+  created_at:     string
+  updated_at:     string
+}
+
+export type VisionLogPhase = 'parsing' | 'generating' | 'system'
+
+export interface VisionLog {
+  id:         string
+  project_id: string
+  phase:      VisionLogPhase
+  level:      LogLevel
+  message:    string
   created_at: string
 }
