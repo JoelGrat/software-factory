@@ -29,42 +29,97 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="bg-white p-8 rounded-lg shadow">
-      <h1 className="text-2xl font-bold mb-6">Sign in</h1>
-      <form onSubmit={handleSubmit} className="space-y-4">
+    <div
+      className="rounded-xl p-8"
+      style={{
+        background: 'var(--bg-surface)',
+        border: '1px solid var(--border-default)',
+      }}
+    >
+      <div className="mb-8">
+        <p className="text-xs font-mono uppercase tracking-widest mb-3" style={{ color: 'var(--accent)', fontFamily: 'var(--font-jetbrains)' }}>
+          Software Factory
+        </p>
+        <h1 className="text-2xl font-bold" style={{ fontFamily: 'var(--font-syne)', color: 'var(--text-primary)' }}>
+          Sign in
+        </h1>
+        <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
+          Welcome back. Let&apos;s build something.
+        </p>
+      </div>
+
+      <form onSubmit={handleSubmit} className="space-y-5">
         <div>
-          <label htmlFor="email" className="block text-sm font-medium mb-1">Email</label>
+          <label htmlFor="email" className="block text-xs font-medium mb-2 uppercase tracking-wider" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-syne)' }}>
+            Email
+          </label>
           <input
             id="email"
             type="email"
             value={email}
             onChange={e => setEmail(e.target.value)}
             required
-            className="w-full border rounded px-3 py-2"
+            className="w-full rounded-lg px-4 py-3 text-sm outline-none transition-all"
+            style={{
+              background: 'var(--bg-elevated)',
+              border: '1px solid var(--border-default)',
+              color: 'var(--text-primary)',
+              fontFamily: 'var(--font-dm-sans)',
+            }}
+            onFocus={e => { e.currentTarget.style.borderColor = 'var(--border-accent)' }}
+            onBlur={e => { e.currentTarget.style.borderColor = 'var(--border-default)' }}
           />
         </div>
         <div>
-          <label htmlFor="password" className="block text-sm font-medium mb-1">Password</label>
+          <label htmlFor="password" className="block text-xs font-medium mb-2 uppercase tracking-wider" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-syne)' }}>
+            Password
+          </label>
           <input
             id="password"
             type="password"
             value={password}
             onChange={e => setPassword(e.target.value)}
             required
-            className="w-full border rounded px-3 py-2"
+            className="w-full rounded-lg px-4 py-3 text-sm outline-none transition-all"
+            style={{
+              background: 'var(--bg-elevated)',
+              border: '1px solid var(--border-default)',
+              color: 'var(--text-primary)',
+              fontFamily: 'var(--font-dm-sans)',
+            }}
+            onFocus={e => { e.currentTarget.style.borderColor = 'var(--border-accent)' }}
+            onBlur={e => { e.currentTarget.style.borderColor = 'var(--border-default)' }}
           />
         </div>
-        {error && <p className="text-red-600 text-sm">{error}</p>}
+
+        {error && (
+          <div className="rounded-lg px-4 py-3 text-sm" style={{ background: 'var(--danger-soft)', border: '1px solid rgba(255,69,69,0.2)', color: 'var(--danger)' }}>
+            {error}
+          </div>
+        )}
+
         <button
           type="submit"
           disabled={loading}
-          className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700 disabled:opacity-50"
+          className="w-full rounded-lg py-3 text-sm font-semibold transition-all disabled:opacity-50"
+          style={{
+            background: loading ? 'var(--bg-overlay)' : 'var(--accent)',
+            color: '#fff',
+            fontFamily: 'var(--font-syne)',
+            letterSpacing: '0.02em',
+          }}
+          onMouseEnter={e => { if (!loading) e.currentTarget.style.background = 'var(--accent-hover)' }}
+          onMouseLeave={e => { if (!loading) e.currentTarget.style.background = 'var(--accent)' }}
         >
-          {loading ? 'Signing in…' : 'Sign in'}
+          {loading ? 'Signing in…' : 'Sign in →'}
         </button>
       </form>
-      <p className="mt-4 text-sm text-center">
-        No account? <Link href="/signup" className="text-blue-600 hover:underline">Sign up</Link>
+
+      <p className="mt-6 text-xs text-center" style={{ color: 'var(--text-muted)' }}>
+        No account?{' '}
+        <Link href="/signup" style={{ color: 'var(--text-link)' }} className="hover:underline">
+          Create one
+        </Link>
       </p>
     </div>
   )

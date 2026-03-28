@@ -22,7 +22,6 @@ export default function SignupPage() {
       if (error) {
         setError('Unable to create account. Please try again.')
       } else if (!data.session) {
-        // Email confirmation required
         setError(null)
         setConfirmed(true)
       } else {
@@ -35,30 +34,68 @@ export default function SignupPage() {
 
   if (confirmed) {
     return (
-      <div className="bg-white p-8 rounded-lg shadow">
-        <h1 className="text-2xl font-bold mb-4">Check your email</h1>
-        <p className="text-gray-600">We sent a confirmation link to <strong>{email}</strong>. Click it to activate your account.</p>
+      <div
+        className="rounded-xl p-8 text-center"
+        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)' }}
+      >
+        <div className="w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-4" style={{ background: 'var(--success-soft)', border: '1px solid rgba(0,216,122,0.2)' }}>
+          <span style={{ color: 'var(--success)' }}>✓</span>
+        </div>
+        <h1 className="text-xl font-bold mb-2" style={{ fontFamily: 'var(--font-syne)', color: 'var(--text-primary)' }}>
+          Check your email
+        </h1>
+        <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+          We sent a confirmation link to{' '}
+          <span style={{ color: 'var(--text-primary)' }}>{email}</span>.{' '}
+          Click it to activate your account.
+        </p>
       </div>
     )
   }
 
   return (
-    <div className="bg-white p-8 rounded-lg shadow">
-      <h1 className="text-2xl font-bold mb-6">Create account</h1>
-      <form onSubmit={handleSubmit} className="space-y-4">
+    <div
+      className="rounded-xl p-8"
+      style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)' }}
+    >
+      <div className="mb-8">
+        <p className="text-xs font-mono uppercase tracking-widest mb-3" style={{ color: 'var(--accent)', fontFamily: 'var(--font-jetbrains)' }}>
+          Software Factory
+        </p>
+        <h1 className="text-2xl font-bold" style={{ fontFamily: 'var(--font-syne)', color: 'var(--text-primary)' }}>
+          Create account
+        </h1>
+        <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
+          Build requirements. Ship with confidence.
+        </p>
+      </div>
+
+      <form onSubmit={handleSubmit} className="space-y-5">
         <div>
-          <label htmlFor="email" className="block text-sm font-medium mb-1">Email</label>
+          <label htmlFor="email" className="block text-xs font-medium mb-2 uppercase tracking-wider" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-syne)' }}>
+            Email
+          </label>
           <input
             id="email"
             type="email"
             value={email}
             onChange={e => setEmail(e.target.value)}
             required
-            className="w-full border rounded px-3 py-2"
+            className="w-full rounded-lg px-4 py-3 text-sm outline-none transition-all"
+            style={{
+              background: 'var(--bg-elevated)',
+              border: '1px solid var(--border-default)',
+              color: 'var(--text-primary)',
+              fontFamily: 'var(--font-dm-sans)',
+            }}
+            onFocus={e => { e.currentTarget.style.borderColor = 'var(--border-accent)' }}
+            onBlur={e => { e.currentTarget.style.borderColor = 'var(--border-default)' }}
           />
         </div>
         <div>
-          <label htmlFor="password" className="block text-sm font-medium mb-1">Password</label>
+          <label htmlFor="password" className="block text-xs font-medium mb-2 uppercase tracking-wider" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-syne)' }}>
+            Password
+          </label>
           <input
             id="password"
             type="password"
@@ -66,20 +103,46 @@ export default function SignupPage() {
             onChange={e => setPassword(e.target.value)}
             required
             minLength={6}
-            className="w-full border rounded px-3 py-2"
+            className="w-full rounded-lg px-4 py-3 text-sm outline-none transition-all"
+            style={{
+              background: 'var(--bg-elevated)',
+              border: '1px solid var(--border-default)',
+              color: 'var(--text-primary)',
+              fontFamily: 'var(--font-dm-sans)',
+            }}
+            onFocus={e => { e.currentTarget.style.borderColor = 'var(--border-accent)' }}
+            onBlur={e => { e.currentTarget.style.borderColor = 'var(--border-default)' }}
           />
         </div>
-        {error && <p className="text-red-600 text-sm">{error}</p>}
+
+        {error && (
+          <div className="rounded-lg px-4 py-3 text-sm" style={{ background: 'var(--danger-soft)', border: '1px solid rgba(255,69,69,0.2)', color: 'var(--danger)' }}>
+            {error}
+          </div>
+        )}
+
         <button
           type="submit"
           disabled={loading}
-          className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700 disabled:opacity-50"
+          className="w-full rounded-lg py-3 text-sm font-semibold transition-all disabled:opacity-50"
+          style={{
+            background: loading ? 'var(--bg-overlay)' : 'var(--accent)',
+            color: '#fff',
+            fontFamily: 'var(--font-syne)',
+            letterSpacing: '0.02em',
+          }}
+          onMouseEnter={e => { if (!loading) e.currentTarget.style.background = 'var(--accent-hover)' }}
+          onMouseLeave={e => { if (!loading) e.currentTarget.style.background = 'var(--accent)' }}
         >
-          {loading ? 'Creating account…' : 'Create account'}
+          {loading ? 'Creating account…' : 'Create account →'}
         </button>
       </form>
-      <p className="mt-4 text-sm text-center">
-        Already have an account? <Link href="/login" className="text-blue-600 hover:underline">Sign in</Link>
+
+      <p className="mt-6 text-xs text-center" style={{ color: 'var(--text-muted)' }}>
+        Already have an account?{' '}
+        <Link href="/login" style={{ color: 'var(--text-link)' }} className="hover:underline">
+          Sign in
+        </Link>
       </p>
     </div>
   )

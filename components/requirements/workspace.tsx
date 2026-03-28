@@ -22,7 +22,6 @@ export function Workspace({ requirementId, initialRawInput, initialItems, initia
   const [activeTab, setActiveTab] = useState<Tab>('input')
   const [items, setItems] = useState<RequirementItem[]>(initialItems)
   const [gaps, setGaps] = useState<GapWithDetails[]>(initialGaps)
-  // status is kept in state so it updates when refreshData runs after partial re-evaluation
   const [status, setStatus] = useState<RequirementStatus>(initialSummary.status as RequirementStatus)
 
   const refreshData = useCallback(async () => {
@@ -79,24 +78,26 @@ export function Workspace({ requirementId, initialRawInput, initialItems, initia
         onScoreClick={() => setActiveTab('gaps')}
       />
 
-      {/* Tab nav */}
-      <div className="flex border-b mb-6">
+      <div className="flex gap-1 mb-6 p-1 rounded-lg" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', display: 'inline-flex' }}>
         {tabs.map(tab => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-              activeTab === tab.id
-                ? 'border-blue-600 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-800'
-            }`}
+            className="px-4 py-2 rounded-md text-sm transition-all"
+            style={{
+              background: activeTab === tab.id ? 'var(--bg-elevated)' : 'transparent',
+              color: activeTab === tab.id ? 'var(--text-primary)' : 'var(--text-muted)',
+              fontFamily: 'var(--font-syne)',
+              fontWeight: activeTab === tab.id ? '600' : '400',
+              border: activeTab === tab.id ? '1px solid var(--border-default)' : '1px solid transparent',
+              letterSpacing: '0.01em',
+            }}
           >
             {tab.label}
           </button>
         ))}
       </div>
 
-      {/* Tab content */}
       {activeTab === 'input' && (
         <ViewInput
           requirementId={requirementId}
