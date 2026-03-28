@@ -1,10 +1,5 @@
 'use client'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
-
-const NAV_ITEMS = [
-  { href: '/projects', icon: 'grid_view', label: 'Projects' },
-]
 
 const FOOTER_ITEMS = [
   { href: '/settings', icon: 'settings',     label: 'Settings' },
@@ -17,8 +12,6 @@ interface Props {
 }
 
 export function LeftNav({ projectName }: Props) {
-  const pathname = usePathname()
-
   return (
     <aside className="h-full w-64 flex-shrink-0 flex flex-col bg-[#131b2e] border-r border-white/5 font-headline text-sm font-medium">
       {/* Header — project name when in project context, app brand otherwise */}
@@ -41,27 +34,8 @@ export function LeftNav({ projectName }: Props) {
         )}
       </div>
 
-      {/* Nav items */}
-      <nav className="flex flex-col gap-0.5 p-3 flex-1">
-        {NAV_ITEMS.map(item => {
-          const active = pathname.startsWith(item.href)
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={[
-                'flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-200',
-                active
-                  ? 'bg-indigo-500/10 text-indigo-400 border-r-4 border-indigo-500'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-[#171f33]',
-              ].join(' ')}
-            >
-              <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>{item.icon}</span>
-              <span>{item.label}</span>
-            </Link>
-          )
-        })}
-      </nav>
+      {/* Spacer */}
+      <div className="flex-1" />
 
       {/* Footer */}
       <div className="p-3 border-t border-white/5 flex flex-col gap-0.5">

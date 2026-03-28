@@ -18,7 +18,7 @@ export function JobShell({ projectName, projectId, sidebar, sidebarTitle, childr
       {/* Top bar */}
       <header className="w-full h-16 flex-shrink-0 flex items-center justify-between px-6 bg-[#0b1326] border-b border-white/5 z-50 font-headline antialiased tracking-tight">
         <div className="flex items-center gap-2 text-sm">
-          <Link href="/projects" className="font-bold text-indigo-400 tracking-tighter hover:text-indigo-300 transition-colors">
+          <Link href="/projects" className="font-black text-indigo-400 tracking-tighter hover:text-indigo-300 transition-colors">
             FactoryOS
           </Link>
           <span className="text-slate-600">/</span>
