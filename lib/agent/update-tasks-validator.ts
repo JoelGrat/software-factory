@@ -1,5 +1,3 @@
-import type { PlanTask } from '@/lib/supabase/types'
-
 export function validateUpdateTasks(tasks: unknown): { valid: true } | { valid: false; error: string } {
   if (!Array.isArray(tasks)) return { valid: false, error: 'tasks must be an array' }
   for (const task of tasks) {

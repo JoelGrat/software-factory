@@ -21,6 +21,8 @@ export function PlanLoading({ jobId, projectId, projectName, initialError }: Pro
   useEffect(() => {
     if (initialError) return
 
+    let intervalId: ReturnType<typeof setInterval>
+
     const poll = async () => {
       const res = await fetch(`/api/jobs/${jobId}`)
       if (!res.ok) return
@@ -29,14 +31,16 @@ export function PlanLoading({ jobId, projectId, projectName, initialError }: Pro
       if (job.status === 'awaiting_plan_approval') {
         router.refresh()
       } else if (job.status === 'failed') {
+        clearInterval(intervalId)
         setError(job.error ?? 'Planning failed — unknown error')
       } else if (job.status === 'cancelled') {
+        clearInterval(intervalId)
         router.push(`/projects/${projectId}/requirements`)
       }
     }
 
-    const id = setInterval(poll, 2000)
-    return () => clearInterval(id)
+    intervalId = setInterval(poll, 2000)
+    return () => clearInterval(intervalId)
   }, [jobId, projectId, router, initialError])
 
   const latestMessage = logs.length > 0
