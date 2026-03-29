@@ -30,7 +30,7 @@ export async function runPlannerAgent(
   }
 
   const plannerPrompt = buildPlannerPrompt(requirements, fileTree, fileContents)
-  const planResult = await ai.complete(plannerPrompt, { responseSchema: PLANNER_SCHEMA, maxTokens: 4096, timeout: 120_000 })
+  const planResult = await ai.complete(plannerPrompt, { responseSchema: PLANNER_SCHEMA, maxTokens: 16000, timeout: 120_000 })
   const plan = JSON.parse(planResult.content) as Omit<AgentPlan, 'id' | 'job_id' | 'created_at' | 'spec_markdown'>
 
   // Generate spec as plain text — best-effort, does not block plan approval if it fails
