@@ -210,7 +210,7 @@ export function PlanScreen({ jobId, projectId, projectName, plan }: Props) {
   )
 }
 
-// ── TaskList placeholder — replaced in Task 7 ────────────────────────────────
+// ── TaskList ──────────────────────────────────────────────────────────────────
 
 interface TaskListProps {
   tasks: PlanTask[]
@@ -219,27 +219,191 @@ interface TaskListProps {
   onUpdate: (tasks: PlanTask[]) => Promise<boolean>
 }
 
-function TaskList({ tasks, saving, error }: TaskListProps) {
+interface EditForm {
+  title: string
+  description: string
+  files: string
+}
+
+const EMPTY_FORM: EditForm = { title: '', description: '', files: '' }
+
+function TaskList({ tasks, saving, error, onUpdate }: TaskListProps) {
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editForm, setEditForm] = useState<EditForm>(EMPTY_FORM)
+  const [adding, setAdding] = useState(false)
+  const [newForm, setNewForm] = useState<EditForm>(EMPTY_FORM)
+
+  function startEdit(task: PlanTask) {
+    setEditingId(task.id)
+    setEditForm({ title: task.title, description: task.description, files: task.files.join(', ') })
+  }
+
+  async function saveEdit() {
+    const updated = tasks.map(t =>
+      t.id === editingId
+        ? { ...t, title: editForm.title.trim(), description: editForm.description.trim(), files: editForm.files.split(',').map(f => f.trim()).filter(Boolean) }
+        : t
+    )
+    const ok = await onUpdate(updated)
+    if (ok) setEditingId(null)
+  }
+
+  async function deleteTask(id: string) {
+    const updated = tasks.filter(t => t.id !== id)
+    await onUpdate(updated)
+  }
+
+  async function saveNewTask() {
+    if (!newForm.title.trim()) return
+    const newTask: PlanTask = {
+      id: `task-${tasks.length + 1}`,
+      title: newForm.title.trim(),
+      description: newForm.description.trim(),
+      files: newForm.files.split(',').map(f => f.trim()).filter(Boolean),
+      dependencies: [],
+    }
+    const ok = await onUpdate([...tasks, newTask])
+    if (ok) { setAdding(false); setNewForm(EMPTY_FORM) }
+  }
+
+  const inputStyle = {
+    background: 'var(--bg-surface)',
+    border: '1px solid var(--border-default)',
+    color: 'var(--text-primary)',
+    fontFamily: 'var(--font-jetbrains)',
+    fontSize: '12px',
+  }
+
   return (
-    <div className="space-y-3">
-      {error && <p className="text-xs text-error font-mono">{error}</p>}
-      {saving && <p className="text-xs text-slate-500 font-mono">Saving...</p>}
+    <div className="space-y-2">
+      {error && <p className="text-xs text-error font-mono mb-2">{error}</p>}
+
       {tasks.map((task, i) => (
-        <div key={task.id} className="bg-surface-container rounded-xl p-4 border border-white/5">
-          <div className="flex gap-3 items-start">
-            <span className="text-xs font-mono text-indigo-400 min-w-[20px] mt-0.5">{i + 1}</span>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-on-surface mb-1">{task.title}</p>
-              <p className="text-xs text-slate-400 mb-2">{task.description}</p>
-              <div className="flex gap-1.5 flex-wrap">
-                {task.files.map(f => (
-                  <span key={f} className="text-[10px] text-slate-500 font-mono bg-surface-container-high px-1.5 py-0.5 rounded">{f}</span>
-                ))}
+        <div key={task.id} className="group bg-surface-container rounded-xl border border-white/5 transition-all hover:border-white/10">
+          {editingId === task.id ? (
+            /* Edit mode */
+            <div className="p-4 space-y-2">
+              <input
+                autoFocus
+                value={editForm.title}
+                onChange={e => setEditForm(p => ({ ...p, title: e.target.value }))}
+                placeholder="Task title"
+                className="w-full rounded-lg px-3 py-2 text-sm outline-none"
+                style={inputStyle}
+              />
+              <textarea
+                value={editForm.description}
+                onChange={e => setEditForm(p => ({ ...p, description: e.target.value }))}
+                placeholder="Description"
+                rows={2}
+                className="w-full rounded-lg px-3 py-2 text-sm resize-none outline-none"
+                style={inputStyle}
+              />
+              <input
+                value={editForm.files}
+                onChange={e => setEditForm(p => ({ ...p, files: e.target.value }))}
+                placeholder="Files (comma-separated)"
+                className="w-full rounded-lg px-3 py-2 text-sm outline-none"
+                style={inputStyle}
+              />
+              <div className="flex gap-2 justify-end">
+                <button onClick={() => setEditingId(null)} className="px-3 py-1 rounded-lg text-xs text-slate-400 hover:text-slate-200 transition-colors">
+                  Cancel
+                </button>
+                <button
+                  onClick={saveEdit}
+                  disabled={!editForm.title.trim() || saving}
+                  className="flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 disabled:opacity-40 transition-all"
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: '13px' }}>check</span>
+                  {saving ? 'Saving...' : 'Save'}
+                </button>
               </div>
             </div>
-          </div>
+          ) : (
+            /* View mode */
+            <div className="flex gap-3 items-start p-4">
+              <span className="text-xs font-mono text-indigo-400 min-w-[20px] mt-0.5 flex-shrink-0">{i + 1}</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-on-surface mb-1">{task.title}</p>
+                <p className="text-xs text-slate-400 mb-2">{task.description}</p>
+                <div className="flex gap-1.5 flex-wrap">
+                  {task.files.map(f => (
+                    <span key={f} className="text-[10px] text-slate-500 font-mono bg-surface-container-high px-1.5 py-0.5 rounded">{f}</span>
+                  ))}
+                </div>
+              </div>
+              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                <button
+                  onClick={() => startEdit(task)}
+                  className="p-1.5 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-white/5 transition-all"
+                  title="Edit task"
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>edit</span>
+                </button>
+                <button
+                  onClick={() => deleteTask(task.id)}
+                  disabled={saving}
+                  className="p-1.5 rounded-lg text-slate-500 hover:text-error hover:bg-error/5 transition-all disabled:opacity-30"
+                  title="Delete task"
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>delete</span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       ))}
+
+      {/* Add task */}
+      {adding ? (
+        <div className="rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-4 space-y-2">
+          <input
+            autoFocus
+            value={newForm.title}
+            onChange={e => setNewForm(p => ({ ...p, title: e.target.value }))}
+            placeholder="Task title"
+            className="w-full rounded-lg px-3 py-2 text-sm outline-none"
+            style={inputStyle}
+          />
+          <textarea
+            value={newForm.description}
+            onChange={e => setNewForm(p => ({ ...p, description: e.target.value }))}
+            placeholder="Description"
+            rows={2}
+            className="w-full rounded-lg px-3 py-2 text-sm resize-none outline-none"
+            style={inputStyle}
+          />
+          <input
+            value={newForm.files}
+            onChange={e => setNewForm(p => ({ ...p, files: e.target.value }))}
+            placeholder="Files (comma-separated)"
+            className="w-full rounded-lg px-3 py-2 text-sm outline-none"
+            style={inputStyle}
+          />
+          <div className="flex gap-2 justify-end">
+            <button onClick={() => { setAdding(false); setNewForm(EMPTY_FORM) }} className="px-3 py-1 rounded-lg text-xs text-slate-400 hover:text-slate-200 transition-colors">
+              Cancel
+            </button>
+            <button
+              onClick={saveNewTask}
+              disabled={!newForm.title.trim() || saving}
+              className="flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-bold bg-gradient-to-br from-primary to-primary-container text-on-primary-container disabled:opacity-40 transition-all"
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: '13px' }}>add</span>
+              {saving ? 'Saving...' : 'Add Task'}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          onClick={() => setAdding(true)}
+          className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-dashed border-white/10 text-xs text-slate-500 hover:text-slate-300 hover:border-white/20 transition-all font-headline font-bold uppercase tracking-wider"
+        >
+          <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>add</span>
+          Add Task
+        </button>
+      )}
     </div>
   )
 }
