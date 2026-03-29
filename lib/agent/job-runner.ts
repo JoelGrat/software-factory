@@ -32,7 +32,8 @@ async function runPlanningPhase(jobId: string, db: SupabaseClient, ai: AIProvide
 
     await logProgress(db, jobId, 'planning', 'File tree loaded — generating implementation plan...', 'info')
 
-    const plan = await runPlannerAgent(items, project.target_path, executor, ai)
+    const planPath = project.setup_mode === 'imported' ? (project.target_path ?? null) : null
+    const plan = await runPlannerAgent(items, planPath, executor, ai)
 
     await db.from('agent_plans').insert({
       job_id: jobId,
@@ -59,6 +60,8 @@ async function runCodingPhase(jobId: string, db: SupabaseClient, ai: AIProvider,
     await logProgress(db, jobId, 'coding', 'Coding started...', 'info')
 
     const { project, items } = await loadJobContext(jobId, db)
+
+    if (!project.target_path) throw new Error('Project target_path not configured. Set it in project settings.')
 
     const { data: planRow } = await db.from('agent_plans').select('*').eq('job_id', jobId).single()
     if (!planRow) throw new Error('No plan found for job')
@@ -125,8 +128,8 @@ async function loadJobContext(jobId: string, db: SupabaseClient) {
   const { data: job } = await db.from('jobs').select('*').eq('id', jobId).single()
   if (!job) throw new Error('Job not found')
 
-  const { data: project } = await db.from('projects').select('id, target_path').eq('id', job.project_id).single()
-  if (!project?.target_path) throw new Error('Project has no target_path configured')
+  const { data: project } = await db.from('projects').select('id, target_path, setup_mode').eq('id', job.project_id).single()
+  if (!project) throw new Error('Project not found')
 
   const { data: req } = await db.from('requirements').select('raw_input').eq('id', job.requirement_id).single()
   if (!req) throw new Error('Requirement not found')

@@ -100,10 +100,6 @@ export function Workspace({
   }
 
   async function handleStartPlanning() {
-    if (!targetPath) {
-      setPlanError('Set the project target path in project settings before planning.')
-      return
-    }
     setStartingPlan(true)
     setPlanError(null)
     const res = await fetch('/api/jobs', {
@@ -201,18 +197,6 @@ export function Workspace({
         </div>
       )}
 
-      {/* Start Planning shortcut */}
-      {status === 'ready_for_dev' && (
-        <div className="pt-2 border-t border-white/5">
-          <button
-            onClick={() => setShowPlanConfirm(true)}
-            className="w-full px-4 py-2.5 rounded-lg text-sm font-headline font-bold bg-gradient-to-br from-primary to-primary-container text-on-primary-container flex items-center justify-center gap-2 hover:scale-[1.02] transition-transform active:scale-95"
-          >
-            <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>architecture</span>
-            Start Planning
-          </button>
-        </div>
-      )}
     </div>
   )
 

@@ -28,6 +28,10 @@ export default async function PlanPage({ params }: Props) {
     return <PlanLoading jobId={jobId} projectId={projectId} projectName={projectName} />
   }
 
+  if (job.status === 'failed' || job.status === 'cancelled') {
+    return <PlanLoading jobId={jobId} projectId={projectId} projectName={projectName} initialError={job.error ?? 'Planning failed'} />
+  }
+
   if (job.status !== 'awaiting_plan_approval') {
     redirect(`/projects/${projectId}/jobs/${jobId}/execution`)
   }

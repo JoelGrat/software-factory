@@ -96,6 +96,7 @@ export function VisionScreen({
   const [mode, setMode]             = useState<'free_form' | 'structured'>(initialVision.mode)
   const [generating, setGenerating] = useState(false)
   const [genError, setGenError]     = useState<string | null>(null)
+  const [improving, setImproving]   = useState(false)
   const dbRef = useRef(db)
 
   const status: VisionStatus = vision.status
@@ -178,6 +179,22 @@ export function VisionScreen({
     }
     // Navigate immediately — requirements page shows live progress
     router.push(`/projects/${projectId}/requirements`)
+  }
+
+  const freeFormWordCount = freeForm.trim().split(/\s+/).filter(Boolean).length
+  const canImprove = freeFormWordCount >= 3
+
+  async function handleImprove() {
+    setImproving(true)
+    const res = await fetch(`/api/projects/${projectId}/vision/improve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: freeForm }),
+    })
+    setImproving(false)
+    if (!res.ok) return
+    const { text } = await res.json()
+    setFreeForm(text)
   }
 
   const hasContent = mode === 'free_form'
@@ -348,23 +365,43 @@ export function VisionScreen({
 
             {/* Free-form */}
             {mode === 'free_form' && (
-              <textarea
-                value={freeForm}
-                onChange={e => setFreeForm(e.target.value)}
-                onBlur={e => { e.currentTarget.style.borderColor = 'var(--border-default)'; saveDraft() }}
-                onFocus={e => { e.currentTarget.style.borderColor = 'var(--border-accent)' }}
-                placeholder="Describe what you're building — goals, key features, tech stack, target users, constraints..."
-                rows={14}
-                className="w-full rounded-xl px-5 py-4 resize-none outline-none transition-all"
-                style={{
-                  background: 'var(--bg-surface)',
-                  border: '1px solid var(--border-default)',
-                  color: 'var(--text-primary)',
-                  fontFamily: 'var(--font-jetbrains)',
-                  fontSize: '13px',
-                  lineHeight: '1.7',
-                }}
-              />
+              <div className="relative">
+                <textarea
+                  value={freeForm}
+                  onChange={e => setFreeForm(e.target.value)}
+                  onBlur={e => { e.currentTarget.style.borderColor = 'var(--border-default)'; saveDraft() }}
+                  onFocus={e => { e.currentTarget.style.borderColor = 'var(--border-accent)' }}
+                  placeholder="Describe what you're building — goals, key features, tech stack, target users, constraints..."
+                  rows={14}
+                  className="w-full rounded-xl px-5 py-4 resize-none outline-none transition-all"
+                  style={{
+                    background: 'var(--bg-surface)',
+                    border: '1px solid var(--border-default)',
+                    color: 'var(--text-primary)',
+                    fontFamily: 'var(--font-jetbrains)',
+                    fontSize: '13px',
+                    lineHeight: '1.7',
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={handleImprove}
+                  disabled={!canImprove || improving}
+                  title="Improve with AI"
+                  className="absolute bottom-3 right-3 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-headline font-bold transition-all disabled:opacity-30"
+                  style={{
+                    background: 'var(--bg-elevated)',
+                    border: '1px solid var(--border-default)',
+                    color: '#818cf8',
+                  }}
+                >
+                  {improving
+                    ? <span className="material-symbols-outlined animate-spin" style={{ fontSize: '14px' }}>progress_activity</span>
+                    : <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>auto_awesome</span>
+                  }
+                  {improving ? 'Improving...' : 'Improve'}
+                </button>
+              </div>
             )}
 
             {/* Structured fields */}

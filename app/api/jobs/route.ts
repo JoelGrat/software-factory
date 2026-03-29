@@ -34,9 +34,6 @@ export async function POST(req: Request) {
     .single()
 
   if (!project) return NextResponse.json({ error: 'Project not found' }, { status: 404 })
-  if (!project.target_path) {
-    return NextResponse.json({ error: 'Project target_path not configured. Set it in project settings.' }, { status: 422 })
-  }
 
   const { data: job, error } = await db
     .from('jobs')
