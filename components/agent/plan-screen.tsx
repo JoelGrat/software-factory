@@ -256,7 +256,7 @@ function TaskList({ tasks, saving, error, onUpdate }: TaskListProps) {
   async function saveNewTask() {
     if (!newForm.title.trim()) return
     const newTask: PlanTask = {
-      id: `task-${tasks.length + 1}`,
+      id: `task-${Date.now()}`,
       title: newForm.title.trim(),
       description: newForm.description.trim(),
       files: newForm.files.split(',').map(f => f.trim()).filter(Boolean),
