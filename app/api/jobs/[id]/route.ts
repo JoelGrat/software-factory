@@ -4,6 +4,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { getProvider } from '@/lib/ai/registry'
 import { LocalExecutor } from '@/lib/agent/executor'
 import { runJob } from '@/lib/agent/job-runner'
+import { validateUpdateTasks } from '@/lib/agent/update-tasks-validator'
 
 async function getJobAndVerifyOwner(jobId: string, userId: string) {
   const db = createClient()
@@ -74,6 +75,18 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   if (action === 'cancel') {
     await db.from('jobs').update({ status: 'cancelled', completed_at: new Date().toISOString() }).eq('id', id)
+    return NextResponse.json({ ok: true })
+  }
+
+  if (action === 'update_tasks') {
+    if (job.status !== 'awaiting_plan_approval') {
+      return NextResponse.json({ error: 'Job is not awaiting plan approval' }, { status: 422 })
+    }
+    const validation = validateUpdateTasks(body.tasks)
+    if (!validation.valid) {
+      return NextResponse.json({ error: validation.error }, { status: 400 })
+    }
+    await db.from('agent_plans').update({ tasks: body.tasks }).eq('job_id', id)
     return NextResponse.json({ ok: true })
   }
 
