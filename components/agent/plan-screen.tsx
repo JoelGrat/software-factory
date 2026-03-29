@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import type { AgentPlan, PlanTask } from '@/lib/supabase/types'
 import { JobShell } from '@/components/agent/job-shell'
 import { StepIndicator } from '@/components/agent/step-indicator'
+import { MarkdownView } from '@/components/ui/markdown-view'
 
 type Tab = 'tasks' | 'spec'
 
@@ -16,9 +17,31 @@ interface Props {
 
 export function PlanScreen({ jobId, projectId, projectName, plan }: Props) {
   const router = useRouter()
+  const [tasks, setTasks] = useState<PlanTask[]>(plan.tasks as PlanTask[])
+  const [activeTab, setActiveTab] = useState<Tab>('tasks')
+  const [savingTasks, setSavingTasks] = useState(false)
+  const [taskError, setTaskError] = useState<string | null>(null)
+  const [confirming, setConfirming] = useState(false)
   const [approving, setApproving] = useState(false)
   const [approveError, setApproveError] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState<Tab>('tasks')
+
+  async function updateTasks(updated: PlanTask[]) {
+    setSavingTasks(true)
+    setTaskError(null)
+    const res = await fetch(`/api/jobs/${jobId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'update_tasks', tasks: updated }),
+    })
+    setSavingTasks(false)
+    if (!res.ok) {
+      const d = await res.json()
+      setTaskError(d.error ?? 'Failed to save tasks')
+      return false
+    }
+    setTasks(updated)
+    return true
+  }
 
   async function approvePlan() {
     setApproving(true)
@@ -49,13 +72,14 @@ export function PlanScreen({ jobId, projectId, projectName, plan }: Props) {
     router.push(`/projects/${projectId}/requirements`)
   }
 
+  const totalFiles = plan.files_to_create.length + plan.files_to_modify.length
+
   const sidebar = (
     <div className="p-5 space-y-4">
       <div className="p-3 bg-surface-container rounded-lg border border-white/5">
         <div className="text-[10px] text-slate-500 uppercase font-bold font-headline mb-1">Branch</div>
         <code className="text-xs font-mono text-indigo-300 break-all">{plan.branch_name || 'not yet created'}</code>
       </div>
-
       <div className="grid grid-cols-2 gap-3">
         <div className="p-3 bg-surface-container rounded-lg border border-white/5 text-center">
           <div className="text-[10px] text-slate-500 uppercase font-bold font-headline mb-1">Create</div>
@@ -66,12 +90,10 @@ export function PlanScreen({ jobId, projectId, projectName, plan }: Props) {
           <div className="text-xl font-bold font-headline text-[#f59e0b]">{plan.files_to_modify.length}</div>
         </div>
       </div>
-
       <div className="p-3 bg-surface-container rounded-lg border border-white/5">
         <div className="text-[10px] text-slate-500 uppercase font-bold font-headline mb-1">Tasks</div>
-        <div className="text-xl font-bold font-headline text-indigo-100">{plan.tasks.length}</div>
+        <div className="text-xl font-bold font-headline text-indigo-100">{tasks.length}</div>
       </div>
-
       {plan.test_approach && (
         <div className="p-3 bg-surface-container rounded-lg border border-white/5">
           <div className="text-[10px] text-slate-500 uppercase font-bold font-headline mb-2">Test Approach</div>
@@ -82,74 +104,65 @@ export function PlanScreen({ jobId, projectId, projectName, plan }: Props) {
   )
 
   return (
-    <JobShell
-      projectName={projectName}
-      projectId={projectId}
-      jobId={jobId}
-      sidebar={sidebar}
-      sidebarTitle="Plan Summary"
-    >
-      <div className="max-w-4xl mx-auto space-y-8">
+    <JobShell projectName={projectName} projectId={projectId} jobId={jobId} sidebar={sidebar} sidebarTitle="Plan Summary">
+      <div className="max-w-4xl mx-auto space-y-6">
         <StepIndicator current={3} />
 
         {/* Header */}
-        <div className="flex items-start justify-between">
-          <div>
-            <h1 className="text-3xl font-extrabold font-headline tracking-tight text-white mb-2">
-              Review Implementation Plan
-            </h1>
-            <p className="text-slate-500 text-sm">
-              Branch: <code className="font-mono text-indigo-300">{plan.branch_name || 'not yet created'}</code>
-            </p>
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3 flex-wrap">
+            <code className="text-xs font-mono text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 px-2 py-1 rounded-lg">
+              {plan.branch_name || 'branch pending'}
+            </code>
+            <span className="text-xs text-[#22c55e] font-mono">+{plan.files_to_create.length} create</span>
+            <span className="text-xs text-[#f59e0b] font-mono">~{plan.files_to_modify.length} modify</span>
           </div>
-          <div className="flex items-center gap-3 flex-shrink-0 ml-6">
+          <div className="flex items-center gap-3 flex-shrink-0">
             <button
               onClick={cancel}
               className="text-xs font-bold text-slate-500 hover:text-white transition-colors uppercase tracking-widest px-4 py-2"
             >
               Cancel
             </button>
-            <button
-              onClick={approvePlan}
-              disabled={approving}
-              className="bg-gradient-to-br from-primary to-primary-container text-on-primary-container px-6 py-2.5 rounded-lg font-headline font-extrabold text-sm flex items-center gap-2 shadow-[0_4px_20px_rgba(189,194,255,0.2)] hover:scale-[1.02] transition-transform active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed disabled:scale-100"
-            >
-              {approving ? 'Approving...' : 'Approve & Start Execution'}
-              {!approving && <span className="material-symbols-outlined text-[16px]">arrow_forward</span>}
-            </button>
+            {confirming ? (
+              <div className="flex items-center gap-3 px-4 py-2.5 rounded-lg bg-surface-container border border-white/10">
+                <p className="text-xs text-slate-400">
+                  Create <code className="text-indigo-300 font-mono">{plan.branch_name}</code> and start coding —{' '}
+                  <span className="text-white font-semibold">{tasks.length} tasks</span>,{' '}
+                  <span className="text-white font-semibold">{totalFiles} files</span>.
+                </p>
+                <button
+                  onClick={() => setConfirming(false)}
+                  className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={approvePlan}
+                  disabled={approving}
+                  className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-headline font-bold bg-gradient-to-br from-primary to-primary-container text-on-primary-container disabled:opacity-50 hover:scale-[1.02] active:scale-95 transition-all"
+                >
+                  {approving ? 'Starting...' : 'Confirm & Start →'}
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setConfirming(true)}
+                className="bg-gradient-to-br from-primary to-primary-container text-on-primary-container px-6 py-2.5 rounded-lg font-headline font-extrabold text-sm flex items-center gap-2 shadow-[0_4px_20px_rgba(189,194,255,0.2)] hover:scale-[1.02] transition-transform active:scale-95"
+              >
+                Approve & Start Execution
+                <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
+              </button>
+            )}
           </div>
         </div>
 
         {approveError && <p className="text-xs text-error font-mono">{approveError}</p>}
 
-        {/* Files */}
-        <div className="grid grid-cols-2 gap-4">
-          <div className="bg-surface-container rounded-xl p-4 border border-white/5">
-            <h3 className="text-[10px] font-bold uppercase tracking-widest text-[#22c55e] mb-3">
-              Create ({plan.files_to_create.length})
-            </h3>
-            {plan.files_to_create.length === 0
-              ? <p className="text-xs text-slate-600 font-mono">None</p>
-              : plan.files_to_create.map(f => (
-                  <div key={f} className="text-xs text-slate-400 font-mono mb-1">+ {f}</div>
-                ))}
-          </div>
-          <div className="bg-surface-container rounded-xl p-4 border border-white/5">
-            <h3 className="text-[10px] font-bold uppercase tracking-widest text-[#f59e0b] mb-3">
-              Modify ({plan.files_to_modify.length})
-            </h3>
-            {plan.files_to_modify.length === 0
-              ? <p className="text-xs text-slate-600 font-mono">None</p>
-              : plan.files_to_modify.map(f => (
-                  <div key={f} className="text-xs text-slate-400 font-mono mb-1">~ {f}</div>
-                ))}
-          </div>
-        </div>
-
         {/* Tab bar */}
         <div className="flex gap-1 p-1 rounded-lg" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', display: 'inline-flex' }}>
           {([
-            { id: 'tasks' as Tab, label: `Tasks (${(plan.tasks as PlanTask[]).length})` },
+            { id: 'tasks' as Tab, label: `Tasks (${tasks.length})` },
             { id: 'spec' as Tab, label: 'Spec File' },
           ]).map(tab => (
             <button
@@ -171,33 +184,19 @@ export function PlanScreen({ jobId, projectId, projectName, plan }: Props) {
 
         {/* Tasks tab */}
         {activeTab === 'tasks' && (
-          <div className="space-y-3">
-            {(plan.tasks as PlanTask[]).map((task, i) => (
-              <div key={task.id} className="bg-surface-container rounded-xl p-4 border border-white/5">
-                <div className="flex gap-3 items-start">
-                  <span className="text-xs font-mono text-indigo-400 min-w-[20px] mt-0.5">{i + 1}</span>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-on-surface mb-1">{task.title}</p>
-                    <p className="text-xs text-slate-400 mb-2">{task.description}</p>
-                    <div className="flex gap-1.5 flex-wrap">
-                      {task.files.map(f => (
-                        <span key={f} className="text-[10px] text-slate-500 font-mono bg-surface-container-high px-1.5 py-0.5 rounded">{f}</span>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
+          <TaskList
+            tasks={tasks}
+            saving={savingTasks}
+            error={taskError}
+            onUpdate={updateTasks}
+          />
         )}
 
         {/* Spec tab */}
         {activeTab === 'spec' && (
           <div className="bg-surface-container rounded-xl border border-white/5 overflow-hidden">
             {plan.spec_markdown ? (
-              <pre className="p-6 text-xs text-slate-300 font-mono leading-relaxed whitespace-pre-wrap overflow-x-auto">
-                {plan.spec_markdown}
-              </pre>
+              <MarkdownView className="p-6">{plan.spec_markdown}</MarkdownView>
             ) : (
               <div className="flex flex-col items-center justify-center py-16 text-center">
                 <span className="material-symbols-outlined text-slate-600 mb-3" style={{ fontSize: '32px' }}>description</span>
@@ -208,5 +207,39 @@ export function PlanScreen({ jobId, projectId, projectName, plan }: Props) {
         )}
       </div>
     </JobShell>
+  )
+}
+
+// ── TaskList placeholder — replaced in Task 7 ────────────────────────────────
+
+interface TaskListProps {
+  tasks: PlanTask[]
+  saving: boolean
+  error: string | null
+  onUpdate: (tasks: PlanTask[]) => Promise<boolean>
+}
+
+function TaskList({ tasks, saving, error }: TaskListProps) {
+  return (
+    <div className="space-y-3">
+      {error && <p className="text-xs text-error font-mono">{error}</p>}
+      {saving && <p className="text-xs text-slate-500 font-mono">Saving...</p>}
+      {tasks.map((task, i) => (
+        <div key={task.id} className="bg-surface-container rounded-xl p-4 border border-white/5">
+          <div className="flex gap-3 items-start">
+            <span className="text-xs font-mono text-indigo-400 min-w-[20px] mt-0.5">{i + 1}</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-on-surface mb-1">{task.title}</p>
+              <p className="text-xs text-slate-400 mb-2">{task.description}</p>
+              <div className="flex gap-1.5 flex-wrap">
+                {task.files.map(f => (
+                  <span key={f} className="text-[10px] text-slate-500 font-mono bg-surface-container-high px-1.5 py-0.5 rounded">{f}</span>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
   )
 }
