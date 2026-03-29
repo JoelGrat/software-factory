@@ -30,7 +30,7 @@ function makeDb(tables: Record<string, unknown> = {}) {
 }
 
 const JOB = { id: 'job-1', project_id: 'proj-1', requirement_id: 'req-1', status: 'plan_loop', branch_name: null, iteration_count: 0, error: null, created_at: '', completed_at: null }
-const PROJECT = { id: 'proj-1', target_path: '/tmp/test-project' }
+const PROJECT = { id: 'proj-1', target_path: '/tmp/test-project', setup_mode: 'imported' }
 const REQUIREMENT = { id: 'req-1', raw_input: 'build login feature' }
 const ITEMS = [{ type: 'functional', title: 'Login', description: 'Login', priority: 'high', source_text: 'Login', nfr_category: null }]
 const PLAN_ROW = { tasks: [{ id: 'task-1', title: 'Add login', description: 'Add login', files: ['src/login.ts'], dependencies: [] }], files_to_create: ['src/login.ts'], files_to_modify: [], test_approach: 'unit tests', branch_name: 'sf/abc-login' }

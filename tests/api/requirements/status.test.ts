@@ -5,8 +5,8 @@ describe('validateStatusTransition', () => {
   it('allows draft → analyzing', () => {
     expect(validateStatusTransition('draft', 'analyzing')).toBe(true)
   })
-  it('blocks draft → ready_for_dev', () => {
-    expect(validateStatusTransition('draft', 'ready_for_dev')).toBe(false)
+  it('allows draft → ready_for_dev', () => {
+    expect(validateStatusTransition('draft', 'ready_for_dev')).toBe(true)
   })
   it('allows incomplete → review_required', () => {
     expect(validateStatusTransition('incomplete', 'review_required')).toBe(true)

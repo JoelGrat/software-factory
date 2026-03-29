@@ -33,7 +33,7 @@ describe('runPlannerAgent', () => {
 
     expect(result.tasks).toHaveLength(1)
     expect(result.branch_name).toBe('sf/abc123-add-auth')
-    expect(mock.callCount).toBe(2)
+    expect(mock.callCount).toBe(3) // file tree + plan JSON + spec markdown
 
     fs.rmSync(tmpDir, { recursive: true, force: true })
   })
