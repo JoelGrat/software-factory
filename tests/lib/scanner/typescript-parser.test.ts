@@ -53,3 +53,69 @@ describe('groupFilesByComponent', () => {
     expect(groups.get('lib/index')).toEqual(['lib/index.ts'])
   })
 })
+
+import { extractImports, TypeScriptParser } from '@/lib/scanner/typescript-parser'
+import type { FileFetcher } from '@/lib/scanner/types'
+
+describe('extractImports', () => {
+  it('extracts static imports', () => {
+    const source = `import { foo } from './bar'`
+    const result = extractImports('test.ts', source)
+    expect(result).toContainEqual({ fromPath: 'test.ts', toSpecifier: './bar', edgeType: 'static' })
+  })
+
+  it('classifies re-exports', () => {
+    const source = `export { foo } from './qux'`
+    const result = extractImports('test.ts', source)
+    expect(result).toContainEqual({ fromPath: 'test.ts', toSpecifier: './qux', edgeType: 're-export' })
+  })
+
+  it('classifies dynamic import with string literal', () => {
+    const source = `const mod = import('./dynamic')`
+    const result = extractImports('test.ts', source)
+    expect(result).toContainEqual({ fromPath: 'test.ts', toSpecifier: './dynamic', edgeType: 'dynamic-static-string' })
+  })
+
+  it('returns empty array for file with no imports', () => {
+    const source = `export const x = 1`
+    expect(extractImports('test.ts', source)).toEqual([])
+  })
+})
+
+describe('TypeScriptParser', () => {
+  it('canParse returns true when tsconfig.json present', () => {
+    const parser = new TypeScriptParser()
+    expect(parser.canParse(['tsconfig.json', 'src/index.ts'])).toBe(true)
+  })
+
+  it('canParse returns true when next.config.ts present', () => {
+    const parser = new TypeScriptParser()
+    expect(parser.canParse(['next.config.ts', 'app/page.tsx'])).toBe(true)
+  })
+
+  it('canParse returns false for non-TS project', () => {
+    const parser = new TypeScriptParser()
+    expect(parser.canParse(['main.py', 'requirements.txt'])).toBe(false)
+  })
+
+  it('parse produces components grouped by directory', async () => {
+    const parser = new TypeScriptParser()
+    const mockFetcher: FileFetcher = {
+      getFileTree: async () => [],
+      getContent: async (path: string) => {
+        if (path === 'lib/auth/token.ts') return `import { createClient } from '@supabase/supabase-js'`
+        if (path === 'app/api/auth/route.ts') return `export async function GET(req: Request) {}`
+        return ''
+      },
+    }
+    const files = ['tsconfig.json', 'lib/auth/token.ts', 'app/api/auth/route.ts']
+    const components = await parser.parse(files, mockFetcher, { '@/': '' })
+    expect(components.length).toBeGreaterThan(0)
+    const authComponent = components.find(c => c.name === 'lib/auth')
+    expect(authComponent).toBeDefined()
+    expect(authComponent?.type).toBe('db')  // imports supabase client → db signal
+    const apiComponent = components.find(c => c.name === 'app/api')
+    expect(apiComponent).toBeDefined()
+    expect(apiComponent?.type).toBe('api')  // HTTP handler signal
+  })
+})
