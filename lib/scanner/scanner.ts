@@ -30,7 +30,7 @@ export async function runFullScan(projectId: string, db: SupabaseClient): Promis
 
   try {
     // 3. Fetch file tree
-    const fetcher = instantiateFetcher(GithubFileFetcher, project.repo_url, project.repo_token ?? undefined)
+    const fetcher = new GithubFileFetcher(project.repo_url, project.repo_token ?? undefined)
     const files = await fetcher.getFileTree()
 
     // 4. Build alias map from tsconfig.json if present
@@ -62,10 +62,12 @@ export async function runFullScan(projectId: string, db: SupabaseClient): Promis
     for (const f of (upsertedFiles ?? [])) fileIdMap.set(f.path, f.id)
 
     // 8. Fetch existing components for stability tracking
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: existingComponents } = await (db.from('system_components') as any)
+    const { data: existingComponents } = await db
+      .from('system_components')
+      .select('id, name, scan_count, reassignment_count, status')
+      .eq('project_id', projectId)
       .is('deleted_at', null)
-      .order('name')
+      .order('name' as any)
     const existingMap = new Map<string, { id: string; scan_count: number; reassignment_count: number; status: string }>()
     for (const c of (existingComponents ?? [])) existingMap.set(c.name, c)
 
@@ -180,22 +182,6 @@ export async function runFullScan(projectId: string, db: SupabaseClient): Promis
       .update({ scan_status: 'failed', scan_error: message })
       .eq('id', projectId)
   }
-}
-
-import type { FileFetcher } from './types'
-
-type FetcherFactory = new (url: string, token?: string) => FileFetcher
-
-/** Instantiate a fetcher, handling both real class constructors and test mocks.
- * Real class: source starts with "class ". Mock (vi.fn): source starts with "function".
- */
-function instantiateFetcher(Ctor: FetcherFactory, url: string, token?: string): FileFetcher {
-  const src = typeof Ctor === 'function' ? Ctor.toString() : ''
-  if (src.startsWith('class ')) {
-    return new Ctor(url, token)
-  }
-  // vi.fn() mock or other callable: invoke without new
-  return (Ctor as unknown as (u: string, t?: string) => FileFetcher)(url, token)
 }
 
 function resolveSpecifier(

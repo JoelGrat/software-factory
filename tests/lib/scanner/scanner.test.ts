@@ -10,17 +10,24 @@ const mockContent: Record<string, string> = {
 }
 
 vi.mock('@/lib/scanner/github-fetcher', () => ({
-  GithubFileFetcher: vi.fn().mockImplementation(() => ({
-    getFileTree: async () => mockFileTree,
-    getContent: async (path: string) => mockContent[path] ?? '',
-  })),
+  GithubFileFetcher: vi.fn().mockImplementation(function() {
+    return {
+      getFileTree: async () => mockFileTree,
+      getContent: async (path: string) => mockContent[path] ?? '',
+    }
+  }),
 }))
 
 function makeDb(project = { id: 'proj-1', repo_url: 'https://github.com/owner/repo', repo_token: null }) {
   const calls: Array<{ table: string; op: string; data?: unknown }> = []
   const db = {
     from: (table: string) => ({
-      select: () => ({ eq: () => ({ single: async () => ({ data: project, error: null }) }) }),
+      select: () => ({
+        eq: (col: string, val: unknown) => ({
+          single: async () => ({ data: project, error: null }),
+          is: () => ({ order: () => ({ data: [], error: null }) }),
+        }),
+      }),
       update: (data: unknown) => {
         calls.push({ table, op: 'update', data })
         return { eq: () => ({ error: null }) }
@@ -74,10 +81,12 @@ describe('runFullScan', () => {
 
   it('sets scan_status to failed with error message when fetch fails', async () => {
     const { GithubFileFetcher } = await import('@/lib/scanner/github-fetcher')
-    vi.mocked(GithubFileFetcher).mockImplementationOnce(() => ({
-      getFileTree: async () => { throw new Error('Network error') },
-      getContent: async () => '',
-    }))
+    vi.mocked(GithubFileFetcher).mockImplementationOnce(function() {
+      return {
+        getFileTree: async () => { throw new Error('Network error') },
+        getContent: async () => '',
+      }
+    })
     const db = makeDb()
     await runFullScan('proj-1', db as any)
     const failUpdate = db._calls.find(
