@@ -426,3 +426,150 @@ create policy "project owner access" on change_plan_tasks for all using (
     where cp.id = change_plan_tasks.plan_id and projects.owner_id = auth.uid()
   )
 );
+
+-- ── Execution layer ───────────────────────────────────────────────────────────
+
+create table execution_snapshots (
+  id                 uuid primary key default gen_random_uuid(),
+  change_id          uuid not null references change_requests(id) on delete cascade,
+  iteration          int not null default 1,
+  files_modified     text[] not null default '{}',
+  tests_run          text[] not null default '{}',
+  tests_passed       int not null default 0,
+  tests_failed       int not null default 0,
+  error_summary      text,
+  diff_summary       text,
+  duration_ms        int,
+  retry_count        int not null default 0,
+  ai_cost            numeric,
+  environment        text,
+  termination_reason text check (termination_reason in ('passed','max_iterations','cancelled','error'))
+);
+
+alter table execution_snapshots enable row level security;
+create policy "project owner access" on execution_snapshots for all using (
+  exists (
+    select 1 from change_requests cr
+    join projects on projects.id = cr.project_id
+    where cr.id = execution_snapshots.change_id and projects.owner_id = auth.uid()
+  )
+);
+
+create table file_locks (
+  file_id   uuid primary key references files(id) on delete cascade,
+  change_id uuid not null references change_requests(id) on delete cascade,
+  locked_at timestamptz not null default now()
+);
+
+alter table file_locks enable row level security;
+create policy "project owner access" on file_locks for all using (
+  exists (
+    select 1 from files
+    join projects on projects.id = files.project_id
+    where files.id = file_locks.file_id and projects.owner_id = auth.uid()
+  )
+);
+
+-- ── Outcome + deployment layer ────────────────────────────────────────────────
+
+create table change_commits (
+  id          uuid primary key default gen_random_uuid(),
+  change_id   uuid not null references change_requests(id) on delete cascade,
+  branch_name text not null,
+  commit_hash text not null,
+  created_at  timestamptz not null default now()
+);
+
+alter table change_commits enable row level security;
+create policy "project owner access" on change_commits for all using (
+  exists (
+    select 1 from change_requests cr
+    join projects on projects.id = cr.project_id
+    where cr.id = change_commits.change_id and projects.owner_id = auth.uid()
+  )
+);
+
+create table change_outcomes (
+  change_id              uuid primary key references change_requests(id) on delete cascade,
+  success                boolean not null,
+  regressions_detected   boolean not null default false,
+  rollback_triggered     boolean not null default false,
+  user_feedback          text,
+  created_at             timestamptz not null default now()
+);
+
+alter table change_outcomes enable row level security;
+create policy "project owner access" on change_outcomes for all using (
+  exists (
+    select 1 from change_requests cr
+    join projects on projects.id = cr.project_id
+    where cr.id = change_outcomes.change_id and projects.owner_id = auth.uid()
+  )
+);
+
+create table deployments (
+  id          uuid primary key default gen_random_uuid(),
+  project_id  uuid not null references projects(id) on delete cascade,
+  change_id   uuid not null references change_requests(id) on delete cascade,
+  environment text not null check (environment in ('staging','prod')),
+  status      text not null default 'pending' check (status in ('pending','deployed','failed')),
+  commit_hash text,
+  deployed_at timestamptz
+);
+
+alter table deployments enable row level security;
+create policy "project owner access" on deployments for all using (
+  exists (select 1 from projects where projects.id = deployments.project_id and projects.owner_id = auth.uid())
+);
+
+-- ── Production layer ──────────────────────────────────────────────────────────
+
+create table production_events (
+  id         uuid primary key default gen_random_uuid(),
+  project_id uuid not null references projects(id) on delete cascade,
+  type       text not null check (type in ('error','performance','usage')),
+  source     text not null,
+  severity   text not null check (severity in ('low','high','critical')),
+  payload    jsonb not null default '{}',
+  created_at timestamptz not null default now()
+);
+
+alter table production_events enable row level security;
+create policy "project owner access" on production_events for all using (
+  exists (select 1 from projects where projects.id = production_events.project_id and projects.owner_id = auth.uid())
+);
+
+create table production_event_components (
+  event_id     uuid not null references production_events(id) on delete cascade,
+  component_id uuid not null references system_components(id) on delete cascade,
+  unique(event_id, component_id)
+);
+
+alter table production_event_components enable row level security;
+create policy "project owner access" on production_event_components for all using (
+  exists (
+    select 1 from production_events pe
+    join projects on projects.id = pe.project_id
+    where pe.id = production_event_components.event_id and projects.owner_id = auth.uid()
+  )
+);
+
+create index production_event_components_component_idx on production_event_components(component_id);
+
+create table production_event_links (
+  event_id      uuid not null references production_events(id) on delete cascade,
+  change_id     uuid not null references change_requests(id) on delete cascade,
+  relation_type text not null check (relation_type in ('caused_by','resolved_by')),
+  unique(event_id, change_id, relation_type)
+);
+
+alter table production_event_links enable row level security;
+create policy "project owner access" on production_event_links for all using (
+  exists (
+    select 1 from production_events pe
+    join projects on projects.id = pe.project_id
+    where pe.id = production_event_links.event_id and projects.owner_id = auth.uid()
+  )
+);
+
+create index production_event_links_change_idx on production_event_links(change_id);
