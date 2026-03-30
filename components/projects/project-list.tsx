@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation'
 interface Project {
   id: string
   name: string
+  scan_status: string
   created_at: string
 }
 
@@ -44,13 +45,19 @@ export function ProjectList({ projects: initial }: { projects: Project[] }) {
           className="flex items-center justify-between px-5 py-4 rounded-xl group transition-all bg-surface-container-low border border-white/5 hover:border-white/10 hover:bg-[#171f33]"
         >
           <Link
-            href={`/projects/${p.id}/requirements`}
+            href={`/projects/${p.id}`}
             className="flex items-center gap-3 flex-1 min-w-0"
           >
             <div className="w-2 h-2 rounded-full bg-indigo-400 flex-shrink-0" style={{ boxShadow: '0 0 6px rgba(129,140,248,0.6)' }} />
             <span className="font-semibold text-sm text-on-surface font-headline truncate">
               {p.name}
             </span>
+            <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded font-mono ${
+              p.scan_status === 'ready' ? 'text-green-400 bg-green-400/10' :
+              p.scan_status === 'scanning' ? 'text-indigo-400 bg-indigo-400/10' :
+              p.scan_status === 'failed' ? 'text-red-400 bg-red-400/10' :
+              'text-slate-500 bg-slate-500/10'
+            }`}>{p.scan_status}</span>
           </Link>
 
           <div className="flex items-center gap-3 flex-shrink-0 ml-4">

@@ -8,7 +8,7 @@ export async function GET() {
 
   const { data: projects } = await db
     .from('projects')
-    .select('id, name, created_at')
+    .select('id, name, scan_status, created_at')
     .eq('owner_id', user.id)
     .order('created_at', { ascending: false })
 
@@ -25,26 +25,27 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'name is required' }, { status: 400 })
   }
 
-  const { data: project, error: projectError } = await db
+  const insert: Record<string, unknown> = {
+    name: body.name.trim(),
+    owner_id: user.id,
+    scan_status: 'pending',
+  }
+  if (typeof body.repo_url === 'string' && body.repo_url.trim()) {
+    insert.repo_url = body.repo_url.trim()
+  }
+  if (typeof body.repo_token === 'string' && body.repo_token.trim()) {
+    insert.repo_token = body.repo_token.trim()
+  }
+
+  const { data: project, error } = await db
     .from('projects')
-    .insert({ name: body.name.trim(), owner_id: user.id, setup_mode: 'scratch' })
-    .select('id, name, created_at, setup_mode')
+    .insert(insert)
+    .select('id, name, scan_status, repo_url, created_at')
     .single()
 
-  if (projectError || !project) {
+  if (error || !project) {
     return NextResponse.json({ error: 'Failed to create project' }, { status: 500 })
   }
 
-  // Create requirements row eagerly so vision generator has a requirement_id
-  const { data: req_ } = await db
-    .from('requirements')
-    .insert({ project_id: project.id, title: 'Requirements', raw_input: '', status: 'draft' })
-    .select('id')
-    .single()
-
-  if (!req_) {
-    return NextResponse.json({ error: 'Failed to initialise requirements' }, { status: 500 })
-  }
-
-  return NextResponse.json({ ...project, requirement_id: req_.id }, { status: 201 })
+  return NextResponse.json(project, { status: 201 })
 }

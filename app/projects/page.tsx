@@ -12,7 +12,7 @@ export default async function ProjectsPage() {
 
   const { data: projects } = await db
     .from('projects')
-    .select('id, name, created_at')
+    .select('id, name, scan_status, created_at')
     .eq('owner_id', user.id)
     .order('created_at', { ascending: false })
 
