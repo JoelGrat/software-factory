@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
+import { runFullScan } from '@/lib/scanner/scanner'
 
 export async function GET() {
   const db = createClient()
@@ -45,6 +47,13 @@ export async function POST(req: Request) {
 
   if (error || !project) {
     return NextResponse.json({ error: 'Failed to create project' }, { status: 500 })
+  }
+
+  // Auto-trigger scan if repo_url was provided
+  if (project.repo_url) {
+    const adminDb = createAdminClient()
+    await adminDb.from('projects').update({ scan_status: 'scanning' }).eq('id', project.id)
+    runFullScan(project.id, adminDb).catch(err => console.error('[scan] auto-trigger failed:', err))
   }
 
   return NextResponse.json(project, { status: 201 })
