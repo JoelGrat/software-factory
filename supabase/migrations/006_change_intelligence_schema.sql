@@ -212,3 +212,217 @@ create policy "project owner access" on component_evolution_signals for all usin
     where sc.id = component_evolution_signals.component_id and projects.owner_id = auth.uid()
   )
 );
+
+-- ── Change layer ──────────────────────────────────────────────────────────────
+
+create table change_requests (
+  id                   uuid primary key default gen_random_uuid(),
+  project_id           uuid not null references projects(id) on delete cascade,
+  title                text not null,
+  intent               text not null,
+  type                 text not null check (type in ('bug','feature','refactor','hotfix')),
+  priority             text not null default 'medium' check (priority in ('low','medium','high')),
+  status               text not null default 'open' check (
+    status in (
+      'open','analyzing','analyzing_mapping','analyzing_propagation','analyzing_scoring',
+      'analyzed','planned','executing','review','done','failed'
+    )
+  ),
+  risk_level           text check (risk_level in ('low','medium','high')),
+  confidence_score     int check (confidence_score between 0 and 100),
+  confidence_breakdown jsonb,
+  analysis_quality     text check (analysis_quality in ('high','medium','low')),
+  lock_version         int not null default 0,
+  execution_group      text,
+  created_by           uuid references auth.users(id) on delete set null,
+  triggered_by         text not null default 'user' check (triggered_by in ('user','system','production_event')),
+  tags                 text[] not null default '{}',
+  created_at           timestamptz not null default now(),
+  updated_at           timestamptz not null default now()
+);
+
+alter table change_requests enable row level security;
+create policy "project owner access" on change_requests for all using (
+  exists (select 1 from projects where projects.id = change_requests.project_id and projects.owner_id = auth.uid())
+);
+
+create index change_requests_project_status_idx on change_requests(project_id, status);
+
+create table change_request_components (
+  change_id    uuid not null references change_requests(id) on delete cascade,
+  component_id uuid not null references system_components(id) on delete cascade,
+  unique(change_id, component_id)
+);
+
+alter table change_request_components enable row level security;
+create policy "project owner access" on change_request_components for all using (
+  exists (
+    select 1 from change_requests cr
+    join projects on projects.id = cr.project_id
+    where cr.id = change_request_components.change_id and projects.owner_id = auth.uid()
+  )
+);
+
+create index change_request_components_component_idx on change_request_components(component_id);
+
+create table change_request_files (
+  change_id uuid not null references change_requests(id) on delete cascade,
+  file_id   uuid not null references files(id) on delete cascade,
+  unique(change_id, file_id)
+);
+
+alter table change_request_files enable row level security;
+create policy "project owner access" on change_request_files for all using (
+  exists (
+    select 1 from change_requests cr
+    join projects on projects.id = cr.project_id
+    where cr.id = change_request_files.change_id and projects.owner_id = auth.uid()
+  )
+);
+
+create table change_risk_factors (
+  id        uuid primary key default gen_random_uuid(),
+  change_id uuid not null references change_requests(id) on delete cascade,
+  factor    text not null,
+  weight    int not null
+);
+
+alter table change_risk_factors enable row level security;
+create policy "project owner access" on change_risk_factors for all using (
+  exists (
+    select 1 from change_requests cr
+    join projects on projects.id = cr.project_id
+    where cr.id = change_risk_factors.change_id and projects.owner_id = auth.uid()
+  )
+);
+
+create table change_decisions (
+  id              uuid primary key default gen_random_uuid(),
+  change_id       uuid not null references change_requests(id) on delete cascade,
+  stage           text not null check (stage in ('analysis','planning','execution')),
+  decision_type   text not null,
+  rationale       text,
+  input_snapshot  jsonb,
+  output_snapshot jsonb,
+  created_at      timestamptz not null default now()
+);
+
+alter table change_decisions enable row level security;
+create policy "project owner access" on change_decisions for all using (
+  exists (
+    select 1 from change_requests cr
+    join projects on projects.id = cr.project_id
+    where cr.id = change_decisions.change_id and projects.owner_id = auth.uid()
+  )
+);
+
+create table change_system_snapshot_components (
+  change_id            uuid not null references change_requests(id) on delete cascade,
+  component_version_id uuid not null references system_component_versions(id) on delete cascade,
+  unique(change_id, component_version_id)
+);
+
+alter table change_system_snapshot_components enable row level security;
+create policy "project owner access" on change_system_snapshot_components for all using (
+  exists (
+    select 1 from change_requests cr
+    join projects on projects.id = cr.project_id
+    where cr.id = change_system_snapshot_components.change_id and projects.owner_id = auth.uid()
+  )
+);
+
+create table change_impacts (
+  id                   uuid primary key default gen_random_uuid(),
+  change_id            uuid not null references change_requests(id) on delete cascade,
+  risk_score           numeric not null default 0,
+  blast_radius         numeric not null default 0,
+  primary_risk_factor  text,
+  analysis_quality     text not null default 'high' check (analysis_quality in ('high','medium','low')),
+  requires_migration   boolean not null default false,
+  requires_data_change boolean not null default false
+);
+
+alter table change_impacts enable row level security;
+create policy "project owner access" on change_impacts for all using (
+  exists (
+    select 1 from change_requests cr
+    join projects on projects.id = cr.project_id
+    where cr.id = change_impacts.change_id and projects.owner_id = auth.uid()
+  )
+);
+
+create table change_impact_components (
+  impact_id     uuid not null references change_impacts(id) on delete cascade,
+  component_id  uuid not null references system_components(id) on delete cascade,
+  impact_weight numeric not null default 0,
+  source        text not null check (source in ('directly_mapped','via_dependency','via_file')),
+  source_detail text,
+  unique(impact_id, component_id)
+);
+
+alter table change_impact_components enable row level security;
+create policy "project owner access" on change_impact_components for all using (
+  exists (
+    select 1 from change_impacts ci
+    join change_requests cr on cr.id = ci.change_id
+    join projects on projects.id = cr.project_id
+    where ci.id = change_impact_components.impact_id and projects.owner_id = auth.uid()
+  )
+);
+
+create index change_impact_components_component_idx on change_impact_components(component_id);
+
+create table change_impact_files (
+  impact_id uuid not null references change_impacts(id) on delete cascade,
+  file_id   uuid not null references files(id) on delete cascade,
+  unique(impact_id, file_id)
+);
+
+alter table change_impact_files enable row level security;
+create policy "project owner access" on change_impact_files for all using (
+  exists (
+    select 1 from change_impacts ci
+    join change_requests cr on cr.id = ci.change_id
+    join projects on projects.id = cr.project_id
+    where ci.id = change_impact_files.impact_id and projects.owner_id = auth.uid()
+  )
+);
+
+create table change_plans (
+  id              uuid primary key default gen_random_uuid(),
+  change_id       uuid not null references change_requests(id) on delete cascade,
+  status          text not null default 'draft' check (status in ('draft','approved','rejected')),
+  spec_markdown   text,
+  estimated_tasks int,
+  estimated_files int,
+  created_at      timestamptz not null default now(),
+  approved_at     timestamptz
+);
+
+alter table change_plans enable row level security;
+create policy "project owner access" on change_plans for all using (
+  exists (
+    select 1 from change_requests cr
+    join projects on projects.id = cr.project_id
+    where cr.id = change_plans.change_id and projects.owner_id = auth.uid()
+  )
+);
+
+create table change_plan_tasks (
+  id           uuid primary key default gen_random_uuid(),
+  plan_id      uuid not null references change_plans(id) on delete cascade,
+  component_id uuid references system_components(id) on delete set null,
+  description  text not null,
+  order_index  int not null default 0,
+  status       text not null default 'pending' check (status in ('pending','done'))
+);
+
+alter table change_plan_tasks enable row level security;
+create policy "project owner access" on change_plan_tasks for all using (
+  exists (
+    select 1 from change_plans cp
+    join change_requests cr on cr.id = cp.change_id
+    join projects on projects.id = cr.project_id
+    where cp.id = change_plan_tasks.plan_id and projects.owner_id = auth.uid()
+  )
+);
