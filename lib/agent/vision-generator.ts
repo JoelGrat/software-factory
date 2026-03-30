@@ -2,7 +2,9 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { createClient } from '@supabase/supabase-js'
 import { buildVisionPrompt, VISION_SYSTEM_PROMPT } from '@/lib/agent/prompts/vision'
-import type { ProjectVision, RequirementItem } from '@/lib/supabase/types'
+// TODO: replaced in Plan 2/3/4 — old types removed in migration 006
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// import type { ProjectVision, RequirementItem } from '@/lib/supabase/types' // removed in migration 006
 
 function getServiceClient() {
   return createClient(
@@ -23,7 +25,7 @@ async function log(
   } catch { /* logging must never abort generation */ }
 }
 
-type ItemRow = Pick<RequirementItem, 'type' | 'title' | 'description' | 'priority'>
+type ItemRow = { type: any; title: string; description: string; priority: any }
 
 function parseItem(line: string): ItemRow | null {
   try {
@@ -42,7 +44,7 @@ function parseItem(line: string): ItemRow | null {
 
 export async function generateVisionRequirements(
   projectId: string,
-  vision: ProjectVision,
+  vision: any,
   requirementId: string
 ): Promise<void> {
   const db = getServiceClient()

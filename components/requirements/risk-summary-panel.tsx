@@ -1,7 +1,9 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import type { RequirementSummary } from '@/lib/supabase/types'
+// TODO: replaced in Plan 2/3/4 — old types removed in migration 006
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// import type { RequirementSummary } from '@/lib/supabase/types' // removed in migration 006
 import { Spinner } from '@/components/ui/spinner'
 
 const STATUS_CONFIG = {
@@ -15,14 +17,14 @@ const STATUS_CONFIG = {
 
 interface Props {
   requirementId: string
-  initialSummary: RequirementSummary
+  initialSummary: any
   onCriticalClick?: () => void
   onMajorClick?: () => void
   onScoreClick?: () => void
 }
 
 export function RiskSummaryPanel({ requirementId, initialSummary, onCriticalClick, onMajorClick, onScoreClick }: Props) {
-  const [summary, setSummary] = useState<RequirementSummary>(initialSummary)
+  const [summary, setSummary] = useState<any>(initialSummary)
 
   const refresh = useCallback(async () => {
     const res = await fetch(`/api/requirements/${requirementId}/summary`)
@@ -45,7 +47,7 @@ export function RiskSummaryPanel({ requirementId, initialSummary, onCriticalClic
     return () => { void supabase.removeChannel(channel) }
   }, [requirementId, refresh])
 
-  const cfg = STATUS_CONFIG[summary.status] ?? STATUS_CONFIG.draft
+  const cfg = (STATUS_CONFIG as any)[summary.status] ?? STATUS_CONFIG.draft
   const isAnalyzing = summary.status === 'analyzing'
 
   return (

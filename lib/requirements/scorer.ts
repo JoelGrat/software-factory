@@ -1,6 +1,8 @@
 import type { DetectedGap } from '@/lib/requirements/gap-detector'
 import type { ParsedItem } from '@/lib/requirements/parser'
-import type { ScoreBreakdown } from '@/lib/supabase/types'
+// TODO: replaced in Plan 2/3/4 — old types removed in migration 006
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// import type { ScoreBreakdown } from '@/lib/supabase/types' // removed in migration 006
 
 export interface ComputedScore {
   blocking_count: number
@@ -8,7 +10,7 @@ export interface ComputedScore {
   coverage_pct: number
   internal_score: number
   nfr_score: number
-  breakdown: ScoreBreakdown
+  breakdown: any
 }
 
 const NFR_WEIGHTS: Record<'security' | 'performance' | 'auditability', number> = {
@@ -46,7 +48,7 @@ export function computeScore(
 
   const internal_score = Math.round(coverage_pct * 0.7 + nfr_score * 0.3)
 
-  const breakdown: ScoreBreakdown = {
+  const breakdown: any = {
     blocking_count: criticalCount,
     high_risk_count: majorCount,
     coverage_pct,

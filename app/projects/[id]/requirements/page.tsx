@@ -2,7 +2,9 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { buildGapsWithDetails } from '@/lib/requirements/gaps-with-details'
 import { Workspace } from '@/components/requirements/workspace'
-import type { Gap, Question, InvestigationTask, RequirementSummary } from '@/lib/supabase/types'
+// TODO: replaced in Plan 2/3/4 — old types removed in migration 006
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// import type { Gap, Question, InvestigationTask, RequirementSummary } from '@/lib/supabase/types' // removed in migration 006
 
 interface Props {
   params: Promise<{ id: string }>
@@ -57,12 +59,12 @@ export default async function RequirementsPage({ params }: Props) {
   ])
 
   const gapsWithDetails = buildGapsWithDetails(
-    (gaps ?? []) as Gap[],
-    (questions ?? []) as Question[],
-    (tasks ?? []) as InvestigationTask[]
+    (gaps ?? []) as any[],
+    (questions ?? []) as any[],
+    (tasks ?? []) as any[]
   )
 
-  const summary: RequirementSummary = {
+  const summary: any = {
     blocking_count: 0,
     high_risk_count: 0,
     coverage_pct: 0,

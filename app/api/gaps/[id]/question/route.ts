@@ -2,7 +2,9 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getProvider } from '@/lib/ai/registry'
 import { buildGenerateQuestionPrompt, GENERATE_QUESTION_SCHEMA } from '@/lib/ai/prompts/generate-question'
-import type { TargetRole } from '@/lib/supabase/types'
+// TODO: replaced in Plan 2/3/4 — old types removed in migration 006
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// import type { TargetRole } from '@/lib/supabase/types' // removed in migration 006
 
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -20,7 +22,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   const ai = getProvider()
   const prompt = buildGenerateQuestionPrompt(gap.description, gap.category, null)
   const result = await ai.complete(prompt, { responseSchema: GENERATE_QUESTION_SCHEMA })
-  const parsed = JSON.parse(result.content) as { question_text: string; target_role: TargetRole }
+  const parsed = JSON.parse(result.content) as { question_text: string; target_role: any }
 
   const { data: question, error } = await db
     .from('questions')

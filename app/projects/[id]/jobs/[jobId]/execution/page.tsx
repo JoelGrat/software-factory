@@ -1,7 +1,9 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { ExecutionScreen } from '@/components/agent/execution-screen'
-import type { Job, LogEntry } from '@/lib/supabase/types'
+// TODO: replaced in Plan 2/3/4 — old types removed in migration 006
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// import type { Job, LogEntry } from '@/lib/supabase/types' // removed in migration 006
 
 interface Props {
   params: Promise<{ id: string; jobId: string }>
@@ -36,8 +38,8 @@ export default async function ExecutionPage({ params }: Props) {
       jobId={jobId}
       projectId={projectId}
       projectName={projectName}
-      initialJob={job as Job}
-      initialLogs={(logs ?? []) as LogEntry[]}
+      initialJob={job as any}
+      initialLogs={(logs ?? []) as any[]}
     />
   )
 }

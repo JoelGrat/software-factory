@@ -1,6 +1,8 @@
-import type { RequirementStatus } from '@/lib/supabase/types'
+// TODO: replaced in Plan 2/3/4 — old types removed in migration 006
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// import type { RequirementStatus } from '@/lib/supabase/types' // removed in migration 006
 
-const VALID_TRANSITIONS: Record<RequirementStatus, RequirementStatus[]> = {
+const VALID_TRANSITIONS: Record<string, string[]> = {
   draft: ['analyzing', 'ready_for_dev'],
   analyzing: ['incomplete', 'review_required', 'ready_for_dev'],
   incomplete: ['review_required', 'ready_for_dev', 'blocked'],
@@ -9,7 +11,7 @@ const VALID_TRANSITIONS: Record<RequirementStatus, RequirementStatus[]> = {
   blocked: ['draft', 'analyzing', 'incomplete', 'review_required', 'ready_for_dev'],
 }
 
-export function validateStatusTransition(from: RequirementStatus, to: RequirementStatus): boolean {
+export function validateStatusTransition(from: any, to: any): boolean {
   return (VALID_TRANSITIONS[from] ?? []).includes(to)
 }
 

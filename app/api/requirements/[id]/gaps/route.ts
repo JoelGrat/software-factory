@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { buildGapsWithDetails } from '@/lib/requirements/gaps-with-details'
-import type { Gap, Question, InvestigationTask } from '@/lib/supabase/types'
+// TODO: replaced in Plan 2/3/4 — old types removed in migration 006
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// import type { Gap, Question, InvestigationTask } from '@/lib/supabase/types' // removed in migration 006
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -16,9 +18,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   ])
 
   const result = buildGapsWithDetails(
-    (gaps ?? []) as Gap[],
-    (questions ?? []) as Question[],
-    (tasks ?? []) as InvestigationTask[]
+    (gaps ?? []) as any[],
+    (questions ?? []) as any[],
+    (tasks ?? []) as any[]
   )
 
   return NextResponse.json(result)

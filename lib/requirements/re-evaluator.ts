@@ -1,9 +1,11 @@
-import type { Gap, RequirementStatus } from '@/lib/supabase/types'
+// TODO: replaced in Plan 2/3/4 — old types removed in migration 006
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// import type { Gap, RequirementStatus } from '@/lib/supabase/types' // removed in migration 006
 
 export function resolveGap(
-  gap: Gap,
+  gap: any,
   source: 'question_answered' | 'task_resolved' | 'decision_recorded'
-): Gap {
+): any {
   return {
     ...gap,
     resolved_at: new Date().toISOString(),
@@ -17,7 +19,7 @@ export function resolveGap(
  * - review_required: no critical, but unresolved major gaps
  * - ready_for_dev: no unresolved critical or major gaps (minor alone does not block)
  */
-export function computeStatusFromScore(allGaps: Gap[]): RequirementStatus {
+export function computeStatusFromScore(allGaps: any[]): any {
   const unresolved = allGaps.filter(g => g.resolved_at === null && g.merged_into === null)
   if (unresolved.some(g => g.severity === 'critical')) return 'incomplete'
   if (unresolved.some(g => g.severity === 'major')) return 'review_required'

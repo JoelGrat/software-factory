@@ -2,7 +2,9 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { LocalExecutor } from '@/lib/agent/executor'
 import { ReviewScreen } from '@/components/agent/review-screen'
-import type { Job } from '@/lib/supabase/types'
+// TODO: replaced in Plan 2/3/4 — old types removed in migration 006
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// import type { Job } from '@/lib/supabase/types' // removed in migration 006
 
 interface Props {
   params: Promise<{ id: string; jobId: string }>
@@ -54,7 +56,7 @@ export default async function ReviewPage({ params }: Props) {
       jobId={jobId}
       projectId={projectId}
       projectName={projectName}
-      job={job as Job}
+      job={job as any}
       diff={diff}
       testResult={testResult}
     />

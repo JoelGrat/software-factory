@@ -3,14 +3,16 @@ import type { AIProvider } from '@/lib/ai/provider'
 import { buildDetectGapsPrompt, DETECT_GAPS_SCHEMA } from '@/lib/ai/prompts/detect-gaps'
 import type { ParsedItem } from '@/lib/requirements/parser'
 import { selectRulePack } from '@/lib/requirements/rules/index'
-import type { GapCategory, GapSeverity, GapSource, RequirementDomain } from '@/lib/supabase/types'
+// TODO: replaced in Plan 2/3/4 — old types removed in migration 006
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// import type { GapCategory, GapSeverity, GapSource, RequirementDomain } from '@/lib/supabase/types' // removed in migration 006
 
 export interface DetectedGap {
   item_id: string | null
-  severity: GapSeverity
-  category: GapCategory
+  severity: any
+  category: any
   description: string
-  source: GapSource
+  source: any
   rule_id: string | null
   priority_score: number
   confidence: number
@@ -28,14 +30,14 @@ export interface GapDetectionResult {
   mergedPairs: MergedPair[]
 }
 
-const IMPACT: Record<GapSeverity, number>      = { critical: 3, major: 2, minor: 1 }
-const UNCERTAINTY: Record<GapCategory, number> = { missing: 3, ambiguous: 2, conflicting: 2, incomplete: 1 }
+const IMPACT: Record<string, number> = { critical: 3, major: 2, minor: 1 }
+const UNCERTAINTY: Record<string, number> = { missing: 3, ambiguous: 2, conflicting: 2, incomplete: 1 }
 
-function priorityScore(severity: GapSeverity, category: GapCategory): number {
+function priorityScore(severity: any, category: any): number {
   return IMPACT[severity] * UNCERTAINTY[category]
 }
 
-function runRules(items: ParsedItem[], domain: RequirementDomain | null): DetectedGap[] {
+function runRules(items: ParsedItem[], domain: any): DetectedGap[] {
   const pack = selectRulePack(domain)
   const gaps: DetectedGap[] = []
   for (const rule of pack) {
@@ -80,7 +82,7 @@ function computeMerges(gaps: DetectedGap[]): MergedPair[] {
 
 export async function detectGaps(
   items: ParsedItem[],
-  domain: RequirementDomain | null,
+  domain: any,
   ai: AIProvider
 ): Promise<GapDetectionResult> {
   const ruleGaps = runRules(items, domain)
@@ -90,8 +92,8 @@ export async function detectGaps(
   const result = await ai.complete(prompt, { responseSchema: DETECT_GAPS_SCHEMA })
   const parsed = JSON.parse(result.content) as { gaps: Array<{
     item_id?: string | null
-    severity: GapSeverity
-    category: GapCategory
+    severity: any
+    category: any
     description: string
     confidence: number
   }> }
@@ -101,7 +103,7 @@ export async function detectGaps(
     severity: g.severity,
     category: g.category,
     description: g.description,
-    source: 'ai' as GapSource,
+    source: 'ai',
     rule_id: null,
     priority_score: priorityScore(g.severity, g.category),
     confidence: g.confidence,

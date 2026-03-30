@@ -1,7 +1,9 @@
 // lib/agent/prompts/vision.ts
-import type { ProjectVision } from '@/lib/supabase/types'
+// TODO: replaced in Plan 2/3/4 — old types removed in migration 006
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// import type { ProjectVision } from '@/lib/supabase/types' // removed in migration 006
 
-export function buildVisionPrompt(vision: ProjectVision): string {
+export function buildVisionPrompt(vision: any): string {
   const content = vision.mode === 'free_form'
     ? vision.free_form_text
     : [

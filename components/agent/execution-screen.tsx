@@ -2,19 +2,21 @@
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import type { Job, LogEntry, JobStatus } from '@/lib/supabase/types'
+// TODO: replaced in Plan 2/3/4 — old types removed in migration 006
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// import type { Job, LogEntry, JobStatus } from '@/lib/supabase/types' // removed in migration 006
 import { JobShell } from '@/components/agent/job-shell'
 import { StepIndicator } from '@/components/agent/step-indicator'
 
-const PHASES: { key: string; label: string; icon: string; statuses: JobStatus[] }[] = [
+const PHASES: { key: string; label: string; icon: string; statuses: any[] }[] = [
   { key: 'planning', label: 'Planning', icon: 'manage_search', statuses: ['plan_loop', 'awaiting_plan_approval'] },
   { key: 'coding', label: 'Coding', icon: 'terminal', statuses: ['coding'] },
   { key: 'review', label: 'Review', icon: 'fact_check', statuses: ['awaiting_review', 'done'] },
 ]
 
-function phaseStatus(phase: typeof PHASES[0], job: Job): 'pending' | 'active' | 'done' | 'failed' {
+function phaseStatus(phase: typeof PHASES[0], job: any): 'pending' | 'active' | 'done' | 'failed' {
   if (job.status === 'failed' || job.status === 'cancelled') {
-    if (phase.statuses.includes(job.status as JobStatus)) return 'failed'
+    if (phase.statuses.includes(job.status as any)) return 'failed'
     const phaseIdx = PHASES.findIndex(p => p.key === phase.key)
     const jobPhaseIdx = PHASES.findIndex(p => p.statuses.some(s => s === job.status))
     return phaseIdx < jobPhaseIdx ? 'done' : 'pending'
@@ -45,14 +47,14 @@ interface Props {
   jobId: string
   projectId: string
   projectName: string
-  initialJob: Job
-  initialLogs: LogEntry[]
+  initialJob: any
+  initialLogs: any[]
 }
 
 export function ExecutionScreen({ jobId, projectId, projectName, initialJob, initialLogs }: Props) {
   const router = useRouter()
-  const [job, setJob] = useState<Job>(initialJob)
-  const [logs, setLogs] = useState<LogEntry[]>(initialLogs)
+  const [job, setJob] = useState<any>(initialJob)
+  const [logs, setLogs] = useState<any[]>(initialLogs)
   const [retryLoading, setRetryLoading] = useState(false)
   const [retryError, setRetryError] = useState<string | null>(null)
   const dbRef = useRef(createClient())
@@ -66,7 +68,7 @@ export function ExecutionScreen({ jobId, projectId, projectName, initialJob, ini
     const jobChannel = dbRef.current
       .channel(`job-${jobId}`)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'jobs', filter: `id=eq.${jobId}` }, payload => {
-        const updated = payload.new as Job
+        const updated = payload.new as any
         setJob(updated)
         if (updated.status === 'awaiting_plan_approval') {
           router.push(`/projects/${projectId}/jobs/${jobId}/plan`)
@@ -80,7 +82,7 @@ export function ExecutionScreen({ jobId, projectId, projectName, initialJob, ini
     const logsChannel = dbRef.current
       .channel(`logs-${jobId}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'job_logs', filter: `job_id=eq.${jobId}` }, payload => {
-        setLogs(prev => [...prev, payload.new as LogEntry])
+        setLogs(prev => [...prev, payload.new as any])
       })
       .subscribe()
 
@@ -120,7 +122,7 @@ export function ExecutionScreen({ jobId, projectId, projectName, initialJob, ini
     router.push(`/projects/${projectId}/requirements`)
   }
 
-  const currentPhaseLabel = PHASES.find(p => p.statuses.includes(job.status as JobStatus))?.label ?? 'Processing'
+  const currentPhaseLabel = PHASES.find(p => p.statuses.includes(job.status as any))?.label ?? 'Processing'
   const sidebar = (
     <div className="flex flex-col h-full">
       {/* Live log feed */}

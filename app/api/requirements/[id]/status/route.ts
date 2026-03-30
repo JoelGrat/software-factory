@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { validateStatusTransition, checkReadyForDevGate } from '@/lib/requirements/status-validator'
-import type { RequirementStatus } from '@/lib/supabase/types'
+// TODO: replaced in Plan 2/3/4 — old types removed in migration 006
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// import type { RequirementStatus } from '@/lib/supabase/types' // removed in migration 006
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -13,13 +15,13 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (!body.status || typeof body.status !== 'string') {
     return NextResponse.json({ error: 'status is required' }, { status: 400 })
   }
-  const newStatus: RequirementStatus = body.status
+  const newStatus: any = body.status
   const blockedReason: string | null = body.blocked_reason ?? null
 
   const { data: current } = await db.from('requirements').select('status').eq('id', id).single()
   if (!current) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  if (!validateStatusTransition(current.status as RequirementStatus, newStatus)) {
+  if (!validateStatusTransition(current.status as any, newStatus)) {
     return NextResponse.json(
       { error: `Cannot transition from ${current.status} to ${newStatus}` },
       { status: 409 }

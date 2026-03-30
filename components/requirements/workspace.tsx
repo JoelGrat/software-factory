@@ -1,8 +1,10 @@
 'use client'
 import { useState, useCallback, useEffect } from 'react'
-import type { RequirementItem, RequirementStatus } from '@/lib/supabase/types'
+// TODO: replaced in Plan 2/3/4 — old types removed in migration 006
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// import type { RequirementItem, RequirementStatus } from '@/lib/supabase/types' // removed in migration 006
 import type { GapWithDetails } from '@/lib/requirements/gaps-with-details'
-import type { RequirementSummary } from '@/lib/supabase/types'
+// import type { RequirementSummary } from '@/lib/supabase/types' // removed in migration 006
 import { JobShell } from '@/components/agent/job-shell'
 import { StepIndicator } from '@/components/agent/step-indicator'
 import { ViewStructured } from '@/components/requirements/view-structured'
@@ -10,7 +12,7 @@ import { ViewGaps } from '@/components/requirements/view-gaps'
 
 type Tab = 'structured' | 'gaps'
 
-const STATUS_CONFIG: Record<RequirementStatus, { label: string; color: string }> = {
+const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   draft:            { label: 'Draft',                 color: '#94a3b8' },
   analyzing:        { label: 'Analyzing',             color: '#818cf8' },
   incomplete:       { label: 'Incomplete',            color: '#f59e0b' },
@@ -32,9 +34,9 @@ interface Props {
   projectName: string
   targetPath: string | null
   isGenerating: boolean
-  initialItems: RequirementItem[]
+  initialItems: any[]
   initialGaps: GapWithDetails[]
-  initialSummary: RequirementSummary
+  initialSummary: any
 }
 
 export function Workspace({
@@ -43,9 +45,9 @@ export function Workspace({
   initialItems, initialGaps, initialSummary,
 }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('structured')
-  const [items, setItems] = useState<RequirementItem[]>(initialItems)
+  const [items, setItems] = useState<any[]>(initialItems)
   const [gaps, setGaps] = useState<GapWithDetails[]>(initialGaps)
-  const [status, setStatus] = useState<RequirementStatus>(initialSummary.status as RequirementStatus)
+  const [status, setStatus] = useState<any>(initialSummary.status)
   const [generating, setGenerating] = useState(initialIsGenerating)
   const [showPlanConfirm, setShowPlanConfirm] = useState(false)
   const [startingPlan, setStartingPlan] = useState(false)
@@ -316,7 +318,7 @@ export function Workspace({
 // ── Confirmation modal ────────────────────────────────────────────────────────
 
 interface ConfirmPlanModalProps {
-  items: RequirementItem[]
+  items: any[]
   activeGaps: GapWithDetails[]
   starting: boolean
   error: string | null

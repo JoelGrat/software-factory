@@ -1,6 +1,8 @@
 'use client'
 import { useEffect, useRef } from 'react'
-import type { LogLevel } from '@/lib/supabase/types'
+// TODO: replaced in Plan 2/3/4 — old types removed in migration 006
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// import type { LogLevel } from '@/lib/supabase/types' // removed in migration 006
 
 const LOG_COLORS: Record<string, string> = {
   info: '#c7c4d7', warn: '#f59e0b', error: '#ffb4ab', success: '#22c55e',
@@ -11,7 +13,7 @@ const LOG_ICONS: Record<string, string> = {
 
 export interface FeedEntry {
   id: string
-  level: LogLevel
+  level: any
   message: string
   created_at: string
 }

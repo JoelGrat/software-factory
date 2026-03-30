@@ -1,6 +1,8 @@
 // lib/requirements/rules/index.ts
 import type { ParsedItem } from '@/lib/requirements/parser'
-import type { RequirementDomain } from '@/lib/supabase/types'
+// TODO: replaced in Plan 2/3/4 — old types removed in migration 006
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// import type { RequirementDomain } from '@/lib/supabase/types' // removed in migration 006
 
 // Existing core rules (unchanged location)
 import { hasActorsDefined }             from './has-actors-defined'
@@ -64,7 +66,7 @@ const WORKFLOW_RULES: RuleCheck[] = [
   { id: 'hasRetryStrategyDefined',  check: hasRetryStrategyDefined,  severity: 'major', category: 'missing', description: 'No retry behaviour defined for failures.' },
 ]
 
-export function selectRulePack(domain: RequirementDomain | null): RuleCheck[] {
+export function selectRulePack(domain: any): RuleCheck[] {
   switch (domain) {
     case 'saas':     return [...CORE_RULES, ...SAAS_RULES]
     case 'fintech':  return [...CORE_RULES, ...FINTECH_RULES]
