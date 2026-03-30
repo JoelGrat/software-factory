@@ -2,7 +2,9 @@ import fs from 'fs'
 import path from 'path'
 import { exec } from 'child_process'
 import { promisify } from 'util'
-import type { FileChange, TestResult } from '@/lib/supabase/types'
+// TODO: replaced in Plan 2/3/4 — old types removed in migration 006
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// import type { FileChange, TestResult } from '@/lib/supabase/types' // removed in migration 006
 
 const execAsync = promisify(exec)
 
@@ -14,8 +16,8 @@ export interface IExecutor {
   getFileTree(projectPath: string): Promise<string[]>
   readFile(projectPath: string, filePath: string): Promise<string>
   readFiles(projectPath: string, filePaths: string[]): Promise<Record<string, string>>
-  writeFiles(projectPath: string, changes: FileChange[]): Promise<void>
-  runTests(projectPath: string): Promise<TestResult>
+  writeFiles(projectPath: string, changes: any[]): Promise<void>
+  runTests(projectPath: string): Promise<any>
   detectTestCommand(projectPath: string): Promise<string>
   createBranch(projectPath: string, branchName: string): Promise<void>
   getGitDiff(projectPath: string): Promise<string>
@@ -50,7 +52,7 @@ export class LocalExecutor implements IExecutor {
     return result
   }
 
-  async writeFiles(projectPath: string, changes: FileChange[]): Promise<void> {
+  async writeFiles(projectPath: string, changes: any[]): Promise<void> {
     for (const change of changes) {
       const abs = path.join(projectPath, change.path)
       if (change.operation === 'delete') {
@@ -70,7 +72,7 @@ export class LocalExecutor implements IExecutor {
     return cmd
   }
 
-  async runTests(projectPath: string): Promise<TestResult> {
+  async runTests(projectPath: string): Promise<any> {
     const cmd = await this.detectTestCommand(projectPath)
     try {
       const { stdout, stderr } = await execAsync(cmd, { cwd: projectPath, timeout: 120_000 })
@@ -83,7 +85,7 @@ export class LocalExecutor implements IExecutor {
     }
   }
 
-  private parseTestOutput(raw: string, success: boolean): TestResult {
+  private parseTestOutput(raw: string, success: boolean): any {
     const passedMatch = raw.match(/(\d+)\s+passed/)
     const failedMatch = raw.match(/(\d+)\s+failed/)
     const passed = passedMatch ? parseInt(passedMatch[1]) : 0

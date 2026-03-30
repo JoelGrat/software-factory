@@ -2,7 +2,9 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { computeScore } from '@/lib/requirements/scorer'
 import { computeStatusFromScore } from '@/lib/requirements/re-evaluator'
-import type { TaskStatus, Gap } from '@/lib/supabase/types'
+// TODO: replaced in Plan 2/3/4 — old types removed in migration 006
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// import type { TaskStatus, Gap } from '@/lib/supabase/types' // removed in migration 006
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -14,7 +16,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (!body.status || typeof body.status !== 'string') {
     return NextResponse.json({ error: 'status is required' }, { status: 400 })
   }
-  const newStatus: TaskStatus = body.status
+  const newStatus: any = body.status
 
   const { data: task } = await db.from('investigation_tasks').select('*').eq('id', id).single()
   if (!task) return NextResponse.json({ error: 'Not found' }, { status: 404 })
@@ -32,7 +34,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     db.from('requirements').select('status').eq('id', task.requirement_id).single(),
   ])
 
-  const gapsForScoring = ((allGaps ?? []) as Gap[]).map(g => ({
+  const gapsForScoring = ((allGaps ?? []) as any[]).map((g: any) => ({
     item_id: g.item_id, severity: g.severity, category: g.category,
     description: g.description, source: g.source, rule_id: g.rule_id,
     priority_score: g.priority_score, confidence: g.confidence,

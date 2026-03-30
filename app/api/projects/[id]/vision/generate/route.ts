@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { generateVisionRequirements } from '@/lib/agent/vision-generator'
-import type { ProjectVision } from '@/lib/supabase/types'
+// TODO: replaced in Plan 2/3/4 — old types removed in migration 006
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// import type { ProjectVision } from '@/lib/supabase/types' // removed in migration 006
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -48,7 +50,7 @@ export async function POST(_req: Request, { params }: Params) {
     .eq('project_id', id)
 
   // Fire and forget — Next.js 14 Node.js runtime keeps process alive
-  void generateVisionRequirements(id, vision as ProjectVision, req_.id)
+  void generateVisionRequirements(id, vision as any, req_.id)
 
   return NextResponse.json({ ok: true }, { status: 202 })
 }

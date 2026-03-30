@@ -2,7 +2,9 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { PlanScreen } from '@/components/agent/plan-screen'
 import { PlanLoading } from '@/components/agent/plan-loading'
-import type { AgentPlan } from '@/lib/supabase/types'
+// TODO: replaced in Plan 2/3/4 — old types removed in migration 006
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// import type { AgentPlan } from '@/lib/supabase/types' // removed in migration 006
 
 interface Props {
   params: Promise<{ id: string; jobId: string }>
@@ -39,5 +41,5 @@ export default async function PlanPage({ params }: Props) {
   const { data: plan } = await db.from('agent_plans').select('*').eq('job_id', jobId).single()
   if (!plan) redirect(`/projects/${projectId}/jobs/${jobId}/execution`)
 
-  return <PlanScreen jobId={jobId} projectId={projectId} projectName={projectName} plan={plan as AgentPlan} />
+  return <PlanScreen jobId={jobId} projectId={projectId} projectName={projectName} plan={plan as any} />
 }

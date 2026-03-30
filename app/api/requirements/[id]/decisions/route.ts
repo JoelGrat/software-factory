@@ -5,7 +5,9 @@ import { computeStatusFromScore } from '@/lib/requirements/re-evaluator'
 import { validateDecision } from '@/lib/requirements/validate-decision'
 import { extractGapPattern } from '@/lib/requirements/knowledge/pattern-extractor'
 import { extractResolutionPattern } from '@/lib/requirements/knowledge/resolution-extractor'
-import type { Gap, DecisionLog } from '@/lib/supabase/types'
+// TODO: replaced in Plan 2/3/4 — old types removed in migration 006
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// import type { Gap, DecisionLog } from '@/lib/supabase/types' // removed in migration 006
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -49,7 +51,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     db.from('requirements').select('status, project_id').eq('id', id).single(),
   ])
 
-  const gapsForScoring = ((allGaps ?? []) as Gap[]).map(g => ({
+  const gapsForScoring = ((allGaps ?? []) as any[]).map((g: any) => ({
     item_id: g.item_id, severity: g.severity, category: g.category,
     description: g.description, source: g.source, rule_id: g.rule_id,
     priority_score: g.priority_score, confidence: g.confidence,
@@ -77,8 +79,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   // Async knowledge extraction — fire-and-forget, correct signatures
   const projectId = currentReq?.project_id ?? null
-  void extractGapPattern(gap as Gap, projectId, db)
-  void extractResolutionPattern(gap as Gap, decision as DecisionLog, projectId, db)
+  void extractGapPattern(gap as any, projectId, db)
+  void extractResolutionPattern(gap as any, decision as any, projectId, db)
 
   return NextResponse.json({ decision_id: decision.id, new_status: newStatus }, { status: 201 })
 }

@@ -1,7 +1,9 @@
 'use client'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import type { AgentPlan, PlanTask } from '@/lib/supabase/types'
+// TODO: replaced in Plan 2/3/4 — old types removed in migration 006
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// import type { AgentPlan, PlanTask } from '@/lib/supabase/types' // removed in migration 006
 import { JobShell } from '@/components/agent/job-shell'
 import { StepIndicator } from '@/components/agent/step-indicator'
 import { MarkdownView } from '@/components/ui/markdown-view'
@@ -12,12 +14,12 @@ interface Props {
   jobId: string
   projectId: string
   projectName: string
-  plan: AgentPlan
+  plan: any
 }
 
 export function PlanScreen({ jobId, projectId, projectName, plan }: Props) {
   const router = useRouter()
-  const [tasks, setTasks] = useState<PlanTask[]>(plan.tasks as PlanTask[])
+  const [tasks, setTasks] = useState<any[]>(plan.tasks as any[])
   const [activeTab, setActiveTab] = useState<Tab>('tasks')
   const [savingTasks, setSavingTasks] = useState(false)
   const [taskError, setTaskError] = useState<string | null>(null)
@@ -25,7 +27,7 @@ export function PlanScreen({ jobId, projectId, projectName, plan }: Props) {
   const [approving, setApproving] = useState(false)
   const [approveError, setApproveError] = useState<string | null>(null)
 
-  async function updateTasks(updated: PlanTask[]) {
+  async function updateTasks(updated: any[]) {
     setSavingTasks(true)
     setTaskError(null)
     const res = await fetch(`/api/jobs/${jobId}`, {
@@ -213,10 +215,10 @@ export function PlanScreen({ jobId, projectId, projectName, plan }: Props) {
 // ── TaskList ──────────────────────────────────────────────────────────────────
 
 interface TaskListProps {
-  tasks: PlanTask[]
+  tasks: any[]
   saving: boolean
   error: string | null
-  onUpdate: (tasks: PlanTask[]) => Promise<boolean>
+  onUpdate: (tasks: any[]) => Promise<boolean>
 }
 
 interface EditForm {
@@ -233,7 +235,7 @@ function TaskList({ tasks, saving, error, onUpdate }: TaskListProps) {
   const [adding, setAdding] = useState(false)
   const [newForm, setNewForm] = useState<EditForm>(EMPTY_FORM)
 
-  function startEdit(task: PlanTask) {
+  function startEdit(task: any) {
     setEditingId(task.id)
     setEditForm({ title: task.title, description: task.description, files: task.files.join(', ') })
   }
@@ -241,7 +243,7 @@ function TaskList({ tasks, saving, error, onUpdate }: TaskListProps) {
   async function saveEdit() {
     const updated = tasks.map(t =>
       t.id === editingId
-        ? { ...t, title: editForm.title.trim(), description: editForm.description.trim(), files: editForm.files.split(',').map(f => f.trim()).filter(Boolean) }
+        ? { ...t, title: editForm.title.trim(), description: editForm.description.trim(), files: editForm.files.split(',').map((f: string) => f.trim()).filter(Boolean) }
         : t
     )
     const ok = await onUpdate(updated)
@@ -255,7 +257,7 @@ function TaskList({ tasks, saving, error, onUpdate }: TaskListProps) {
 
   async function saveNewTask() {
     if (!newForm.title.trim()) return
-    const newTask: PlanTask = {
+    const newTask: any = {
       id: `task-${Date.now()}`,
       title: newForm.title.trim(),
       description: newForm.description.trim(),
@@ -328,7 +330,7 @@ function TaskList({ tasks, saving, error, onUpdate }: TaskListProps) {
                 <p className="text-sm font-semibold text-on-surface mb-1">{task.title}</p>
                 <p className="text-xs text-slate-400 mb-2">{task.description}</p>
                 <div className="flex gap-1.5 flex-wrap">
-                  {task.files.map(f => (
+                  {(task.files as any[]).map((f: any) => (
                     <span key={f} className="text-[10px] text-slate-500 font-mono bg-surface-container-high px-1.5 py-0.5 rounded">{f}</span>
                   ))}
                 </div>

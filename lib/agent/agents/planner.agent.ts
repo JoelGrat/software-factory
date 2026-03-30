@@ -1,6 +1,8 @@
 import type { AIProvider } from '@/lib/ai/provider'
 import type { ParsedItem } from '@/lib/requirements/parser'
-import type { AgentPlan } from '@/lib/supabase/types'
+// TODO: replaced in Plan 2/3/4 — old types removed in migration 006
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// import type { AgentPlan } from '@/lib/supabase/types' // removed in migration 006
 import type { IExecutor } from '@/lib/agent/executor'
 import {
   buildFileRequestPrompt,
@@ -15,7 +17,7 @@ export async function runPlannerAgent(
   projectPath: string | null,
   executor: IExecutor,
   ai: AIProvider
-): Promise<Omit<AgentPlan, 'id' | 'job_id' | 'created_at'>> {
+): Promise<any> {
   let fileTree: string[] = []
   let fileContents: Record<string, string> = {}
 
@@ -31,7 +33,7 @@ export async function runPlannerAgent(
 
   const plannerPrompt = buildPlannerPrompt(requirements, fileTree, fileContents)
   const planResult = await ai.complete(plannerPrompt, { responseSchema: PLANNER_SCHEMA, maxTokens: 16000, timeout: 120_000 })
-  const plan = JSON.parse(planResult.content) as Omit<AgentPlan, 'id' | 'job_id' | 'created_at' | 'spec_markdown'>
+  const plan = JSON.parse(planResult.content) as any
 
   // Generate spec as plain text — best-effort, does not block plan approval if it fails
   let spec_markdown: string | null = null

@@ -1,12 +1,14 @@
-import type { Gap, Question, InvestigationTask, GapSeverity, GapCategory, GapSource, TargetRole, QuestionStatus, TaskStatus } from '@/lib/supabase/types'
+// TODO: replaced in Plan 2/3/4 — old types removed in migration 006
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// import type { Gap, Question, InvestigationTask, GapSeverity, GapCategory, GapSource, TargetRole, QuestionStatus, TaskStatus } from '@/lib/supabase/types' // removed in migration 006
 
 export interface GapWithDetails {
   id: string
   item_id: string | null
-  severity: GapSeverity
-  category: GapCategory
+  severity: any
+  category: any
   description: string
-  source: GapSource
+  source: any
   rule_id: string | null
   priority_score: number
   confidence: number
@@ -17,23 +19,23 @@ export interface GapWithDetails {
   question: {
     id: string
     question_text: string
-    target_role: TargetRole
-    status: QuestionStatus
+    target_role: any
+    status: any
     answer: string | null
   } | null
   task: {
     id: string
     title: string
-    status: TaskStatus
+    status: any
     priority: 'high' | 'medium' | 'low'
   } | null
   merged_count: number
 }
 
 export function buildGapsWithDetails(
-  gaps: Gap[],
-  questions: Question[],
-  tasks: InvestigationTask[]
+  gaps: any[],
+  questions: any[],
+  tasks: any[]
 ): GapWithDetails[] {
   const questionByGapId = new Map(questions.map(q => [q.gap_id, q]))
   const taskByGapId = new Map(

@@ -1,10 +1,12 @@
 'use client'
 import { useState, useMemo } from 'react'
-import type { RequirementItem, RequirementStatus } from '@/lib/supabase/types'
+// TODO: replaced in Plan 2/3/4 — old types removed in migration 006
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// import type { RequirementItem, RequirementStatus } from '@/lib/supabase/types' // removed in migration 006
 
-const TYPE_ORDER: RequirementItem['type'][] = ['functional', 'non-functional', 'constraint', 'assumption']
+const TYPE_ORDER: string[] = ['functional', 'non-functional', 'constraint', 'assumption']
 
-const TYPE_CONFIG: Record<RequirementItem['type'], { label: string; icon: string; color: string }> = {
+const TYPE_CONFIG: Record<string, { label: string; icon: string; color: string }> = {
   functional:       { label: 'Functional',     icon: 'check_box',    color: '#818cf8' },
   'non-functional': { label: 'Non-Functional', icon: 'speed',        color: '#34d399' },
   constraint:       { label: 'Constraints',    icon: 'block',        color: '#f59e0b' },
@@ -20,9 +22,9 @@ const PRIORITY_STYLES: Record<string, string> = {
 // ── Inline add form ───────────────────────────────────────────────────────────
 
 interface AddFormProps {
-  type: RequirementItem['type']
+  type: any
   requirementId: string
-  onAdd: (item: RequirementItem) => void
+  onAdd: (item: any) => void
   onCancel: () => void
 }
 
@@ -69,7 +71,7 @@ function AddForm({ type, requirementId, onAdd, onCancel }: AddFormProps) {
       setError(d.error ?? 'Failed to add')
       return
     }
-    const item: RequirementItem = await res.json()
+    const item: any = await res.json()
     onAdd(item)
   }
 
@@ -180,13 +182,13 @@ function AddForm({ type, requirementId, onAdd, onCancel }: AddFormProps) {
 
 interface Props {
   requirementId: string
-  items: RequirementItem[]
+  items: any[]
   gaps: Array<{ id: string; item_id: string | null; severity: string; resolved_at: string | null; merged_into: string | null }>
-  status: RequirementStatus
+  status: any
   isGenerating?: boolean
   blockedGapDescriptions: string[]
   onMarkReady: () => Promise<void>
-  onAdd: (item: RequirementItem) => void
+  onAdd: (item: any) => void
   onViewGap?: () => void
 }
 
@@ -196,7 +198,7 @@ export function ViewStructured({
 }: Props) {
   const [marking, setMarking]   = useState(false)
   const [markError, setMarkError] = useState<string | null>(null)
-  const [addingType, setAddingType] = useState<RequirementItem['type'] | null>(null)
+  const [addingType, setAddingType] = useState<any>(null)
 
   const activeGapsByItemId = useMemo(() => {
     const map = new Map<string, typeof gaps[number][]>()

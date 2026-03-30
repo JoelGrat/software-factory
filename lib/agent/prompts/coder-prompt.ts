@@ -1,5 +1,7 @@
 import type { ParsedItem } from '@/lib/requirements/parser'
-import type { AgentPlan } from '@/lib/supabase/types'
+// TODO: replaced in Plan 2/3/4 — old types removed in migration 006
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// import type { AgentPlan } from '@/lib/supabase/types' // removed in migration 006
 
 export const CODER_SCHEMA: Record<string, unknown> = {
   type: 'object',
@@ -22,7 +24,7 @@ export const CODER_SCHEMA: Record<string, unknown> = {
 
 export function buildCoderPrompt(
   requirements: ParsedItem[],
-  plan: Omit<AgentPlan, 'id' | 'job_id' | 'created_at'>,
+  plan: any,
   previousErrors: string[],
   currentFileContents: Record<string, string>
 ): string {
@@ -50,7 +52,7 @@ ${requirements.map(r => `[${r.priority.toUpperCase()}] ${r.title}: ${r.descripti
 
 --- PLAN ---
 Tasks:
-${plan.tasks.map(t => `${t.id}: ${t.title}\n  ${t.description}\n  Files: ${t.files.join(', ')}`).join('\n')}
+${(plan.tasks as any[]).map((t: any) => `${t.id}: ${t.title}\n  ${t.description}\n  Files: ${t.files.join(', ')}`).join('\n')}
 
 Test approach: ${plan.test_approach}
 --- END ---${errorsSection}${filesSection}`

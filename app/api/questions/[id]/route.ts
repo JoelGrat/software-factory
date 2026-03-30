@@ -4,7 +4,9 @@ import { getProvider } from '@/lib/ai/registry'
 import { buildEvaluateAnswerPrompt, EVALUATE_ANSWER_SCHEMA } from '@/lib/ai/prompts/evaluate-answer'
 import { computeScore } from '@/lib/requirements/scorer'
 import { computeStatusFromScore } from '@/lib/requirements/re-evaluator'
-import type { Gap } from '@/lib/supabase/types'
+// TODO: replaced in Plan 2/3/4 — old types removed in migration 006
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// import type { Gap } from '@/lib/supabase/types' // removed in migration 006
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -44,7 +46,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     db.from('requirements').select('status').eq('id', question.requirement_id).single(),
   ])
 
-  const gapsForScoring = ((allGaps ?? []) as Gap[]).map(g => ({
+  const gapsForScoring = ((allGaps ?? []) as any[]).map((g: any) => ({
     item_id: g.item_id, severity: g.severity, category: g.category,
     description: g.description, source: g.source, rule_id: g.rule_id,
     priority_score: g.priority_score, confidence: g.confidence,

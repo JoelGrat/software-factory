@@ -1,14 +1,16 @@
 import type { AIProvider } from '@/lib/ai/provider'
 import { buildParsePrompt, PARSE_REQUIREMENTS_SCHEMA } from '@/lib/ai/prompts/parse-requirements'
-import type { ItemType, NfrCategory } from '@/lib/supabase/types'
+// TODO: replaced in Plan 2/3/4 — old types removed in migration 006
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// import type { ItemType, NfrCategory } from '@/lib/supabase/types' // removed in migration 006
 
 export interface ParsedItem {
-  type: ItemType
+  type: any
   title: string
   description: string
   priority: 'high' | 'medium' | 'low'
   source_text: string | null
-  nfr_category: NfrCategory | null
+  nfr_category: any
 }
 
 export async function parseRequirements(rawInput: string, ai: AIProvider): Promise<ParsedItem[]> {

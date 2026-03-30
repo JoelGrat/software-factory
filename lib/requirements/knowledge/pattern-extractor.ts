@@ -1,5 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { Gap } from '@/lib/supabase/types'
+// TODO: replaced in Plan 2/3/4 — old types removed in migration 006
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// import type { Gap } from '@/lib/supabase/types' // removed in migration 006
 
 /**
  * When a gap is resolved, record its category/severity as a gap_pattern.
@@ -7,7 +9,7 @@ import type { Gap } from '@/lib/supabase/types'
  * Fire-and-forget — never throws.
  */
 export async function extractGapPattern(
-  gap: Gap,
+  gap: any,
   projectId: string | null,
   db: SupabaseClient
 ): Promise<void> {

@@ -1,7 +1,9 @@
 'use client'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import type { Job, TestResult } from '@/lib/supabase/types'
+// TODO: replaced in Plan 2/3/4 — old types removed in migration 006
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// import type { Job, TestResult } from '@/lib/supabase/types' // removed in migration 006
 import { JobShell } from '@/components/agent/job-shell'
 import { StepIndicator } from '@/components/agent/step-indicator'
 
@@ -21,9 +23,9 @@ interface Props {
   jobId: string
   projectId: string
   projectName: string
-  job: Job
+  job: any
   diff: string
-  testResult: TestResult | null
+  testResult: any
 }
 
 export function ReviewScreen({ jobId, projectId, projectName, job, diff, testResult }: Props) {

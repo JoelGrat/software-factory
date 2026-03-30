@@ -5,7 +5,9 @@ import { createClient } from '@/lib/supabase/client'
 import { JobShell } from '@/components/agent/job-shell'
 import { StepIndicator } from '@/components/agent/step-indicator'
 import { LogFeed } from '@/components/agent/log-feed'
-import type { ProjectVision, VisionLog, VisionStatus, RequirementItem } from '@/lib/supabase/types'
+// TODO: replaced in Plan 2/3/4 — old types removed in migration 006
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// import type { ProjectVision, VisionLog, VisionStatus, RequirementItem } from '@/lib/supabase/types' // removed in migration 006
 import type { FeedEntry } from '@/components/agent/log-feed'
 
 // ─── Structured fields ────────────────────────────────────────────────────────
@@ -29,9 +31,9 @@ interface Props {
   projectId:     string
   projectName:   string
   requirementId: string
-  initialVision: ProjectVision
-  initialLogs:   VisionLog[]
-  initialItems:  RequirementItem[]
+  initialVision: any
+  initialLogs:   any[]
+  initialItems:  any[]
 }
 
 const PHASE_LABELS: Record<string, string> = {
@@ -47,9 +49,9 @@ export function VisionScreen({
   const router = useRouter()
   const db = createClient()
 
-  const [vision,      setVision]      = useState<ProjectVision>(initialVision)
-  const [logs,        setLogs]        = useState<VisionLog[]>(initialLogs)
-  const [items,       setItems]       = useState<RequirementItem[]>(initialItems)
+  const [vision,      setVision]      = useState<any>(initialVision)
+  const [logs,        setLogs]        = useState<any[]>(initialLogs)
+  const [items,       setItems]       = useState<any[]>(initialItems)
   const [freeForm,    setFreeForm]    = useState(initialVision.free_form_text)
   const [structured,  setStructured]  = useState<StructuredFields>({
     goal:         initialVision.goal,
@@ -64,7 +66,7 @@ export function VisionScreen({
   const [improving, setImproving]   = useState(false)
   const dbRef = useRef(db)
 
-  const status: VisionStatus = vision.status
+  const status: any = vision.status
   const isGenerating = status === 'generating'
   const isFailed     = status === 'failed'
   const latestPhase  = logs.length > 0 ? logs[logs.length - 1].phase : 'system'
@@ -77,7 +79,7 @@ export function VisionScreen({
         event: 'UPDATE', schema: 'public', table: 'project_visions',
         filter: `project_id=eq.${projectId}`,
       }, payload => {
-        const updated = payload.new as ProjectVision
+        const updated = payload.new as any
         setVision(updated)
         if (updated.status === 'done') {
           router.push(`/projects/${projectId}/requirements`)
@@ -91,7 +93,7 @@ export function VisionScreen({
         event: 'INSERT', schema: 'public', table: 'vision_logs',
         filter: `project_id=eq.${projectId}`,
       }, payload => {
-        setLogs(prev => [...prev, payload.new as VisionLog])
+        setLogs(prev => [...prev, payload.new as any])
       })
       .subscribe()
 
@@ -101,7 +103,7 @@ export function VisionScreen({
         event: 'INSERT', schema: 'public', table: 'requirement_items',
         filter: `requirement_id=eq.${requirementId}`,
       }, payload => {
-        setItems(prev => [...prev, payload.new as RequirementItem])
+        setItems(prev => [...prev, payload.new as any])
       })
       .subscribe()
 

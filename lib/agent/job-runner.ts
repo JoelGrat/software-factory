@@ -2,7 +2,9 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { AIProvider } from '@/lib/ai/provider'
 import type { IExecutor } from '@/lib/agent/executor'
 import type { ParsedItem } from '@/lib/requirements/parser'
-import type { AgentPlan } from '@/lib/supabase/types'
+// TODO: replaced in Plan 2/3/4 — old types removed in migration 006
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// import type { AgentPlan } from '@/lib/supabase/types' // removed in migration 006
 import { runPlannerAgent } from '@/lib/agent/agents/planner.agent'
 import { runCoderAgent } from '@/lib/agent/agents/coder.agent'
 import { logProgress } from '@/lib/agent/progress'
@@ -66,7 +68,7 @@ async function runCodingPhase(jobId: string, db: SupabaseClient, ai: AIProvider,
     const { data: planRow } = await db.from('agent_plans').select('*').eq('job_id', jobId).single()
     if (!planRow) throw new Error('No plan found for job')
 
-    const plan: Omit<AgentPlan, 'id' | 'job_id' | 'created_at'> = {
+    const plan: any = {
       tasks: planRow.tasks,
       files_to_create: planRow.files_to_create,
       files_to_modify: planRow.files_to_modify,

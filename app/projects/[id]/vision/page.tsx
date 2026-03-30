@@ -1,7 +1,9 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { VisionScreen } from '@/components/agent/vision-screen'
-import type { ProjectVision, VisionLog, RequirementItem } from '@/lib/supabase/types'
+// TODO: replaced in Plan 2/3/4 — old types removed in migration 006
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// import type { ProjectVision, VisionLog, RequirementItem } from '@/lib/supabase/types' // removed in migration 006
 
 interface Props {
   params: Promise<{ id: string }>
@@ -67,9 +69,9 @@ export default async function VisionPage({ params }: Props) {
       projectId={projectId}
       projectName={project.name}
       requirementId={req.id}
-      initialVision={vision as ProjectVision}
-      initialLogs={(logs ?? []) as VisionLog[]}
-      initialItems={(items ?? []) as RequirementItem[]}
+      initialVision={vision as any}
+      initialLogs={(logs ?? []) as any[]}
+      initialItems={(items ?? []) as any[]}
     />
   )
 }
