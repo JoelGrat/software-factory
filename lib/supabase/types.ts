@@ -1,321 +1,306 @@
 // lib/supabase/types.ts
 
-export type RequirementStatus =
-  | 'draft'
-  | 'analyzing'
-  | 'incomplete'
-  | 'review_required'
-  | 'ready_for_dev'
-  | 'blocked'
+// ── Shared enums ──────────────────────────────────────────────────────────────
 
-export type RequirementDomain = 'saas' | 'fintech' | 'workflow' | 'general'
+export type ScanStatus         = 'pending' | 'scanning' | 'ready' | 'failed'
+export type ComponentType      = 'service' | 'module' | 'api' | 'db' | 'ui'
+export type ComponentStatus    = 'stable' | 'unstable'
+export type AssignmentStatus   = 'assigned' | 'unassigned'
+export type EdgeType           =
+  | 'static' | 're-export'
+  | 'dynamic-static-string' | 'dynamic-template' | 'dynamic-computed'
+export type DependencyType     = 'sync' | 'async' | 'data' | 'api'
+export type EvolutionSignalType = 'split' | 'merge'
 
-export type GapSeverity  = 'critical' | 'major' | 'minor'
-export type GapCategory  = 'missing' | 'ambiguous' | 'conflicting' | 'incomplete'
-export type GapSource    = 'rule' | 'ai' | 'relation'
-export type RelationType = 'depends_on' | 'conflicts_with' | 'refines'
-export type NfrCategory  = 'security' | 'performance' | 'auditability'
-export type TargetRole   = 'ba' | 'architect' | 'po' | 'dev'
-export type TaskStatus   = 'open' | 'in-progress' | 'resolved' | 'dismissed'
-export type QuestionStatus = 'open' | 'answered' | 'dismissed'
-export type ItemType     = 'functional' | 'non-functional' | 'constraint' | 'assumption'
+export type ChangeType         = 'bug' | 'feature' | 'refactor' | 'hotfix'
+export type ChangePriority     = 'low' | 'medium' | 'high'
+export type ChangeStatus       =
+  | 'open' | 'analyzing' | 'analyzing_mapping'
+  | 'analyzing_propagation' | 'analyzing_scoring'
+  | 'analyzed' | 'planned' | 'executing' | 'review' | 'done' | 'failed'
+export type RiskLevel          = 'low' | 'medium' | 'high'
+export type AnalysisQuality    = 'high' | 'medium' | 'low'
+export type DecisionStage      = 'analysis' | 'planning' | 'execution'
+export type PlanStatus         = 'draft' | 'approved' | 'rejected'
+export type PlanTaskStatus     = 'pending' | 'done'
+export type TerminationReason  = 'passed' | 'max_iterations' | 'cancelled' | 'error'
+export type DeploymentEnv      = 'staging' | 'prod'
+export type DeploymentStatus   = 'pending' | 'deployed' | 'failed'
+export type ProductionEventType     = 'error' | 'performance' | 'usage'
+export type ProductionEventSeverity = 'low' | 'high' | 'critical'
+export type EventRelationType  = 'caused_by' | 'resolved_by'
+export type ImpactSource       = 'directly_mapped' | 'via_dependency' | 'via_file'
+export type TriggeredBy        = 'user' | 'system' | 'production_event'
+
+// ── Project ───────────────────────────────────────────────────────────────────
 
 export interface Project {
-  id: string
-  name: string
-  owner_id: string
-  setup_mode: 'scratch' | 'imported'
-  created_at: string
+  id:           string
+  name:         string
+  owner_id:     string
+  repo_url:     string | null
+  repo_token:   string | null
+  scan_status:  ScanStatus
+  scan_error:   string | null
+  lock_version: number
+  created_at:   string
 }
 
-export interface Requirement {
-  id: string
-  project_id: string
-  title: string
-  raw_input: string
-  domain: RequirementDomain | null
-  status: RequirementStatus
-  blocked_reason: string | null
-  created_at: string
-  updated_at: string
-}
+// ── System model ──────────────────────────────────────────────────────────────
 
-export interface RequirementItem {
-  id: string
-  requirement_id: string
-  type: ItemType
-  title: string
-  description: string
-  priority: 'high' | 'medium' | 'low'
-  source_text: string | null
-  nfr_category: NfrCategory | null
-  created_at: string
-}
-
-export interface RequirementRelation {
-  id: string
-  source_id: string
-  target_id: string
-  type: RelationType
-  detected_by: 'rule' | 'ai'
-  created_at: string
-}
-
-export interface Gap {
-  id: string
-  requirement_id: string
-  item_id: string | null
-  severity: GapSeverity
-  category: GapCategory
-  description: string
-  source: GapSource
-  rule_id: string | null
-  priority_score: number
-  confidence: number
-  validated: boolean
-  validated_by: string | null
-  question_generated: boolean
-  merged_into: string | null
-  resolved_at: string | null
-  resolution_source:
-    | 'question_answered'
-    | 'task_resolved'
-    | 'decision_recorded'
-    | 'risk_accepted'
-    | 'dismissed'
-    | null
-  created_at: string
-}
-
-export interface RiskAcceptance {
-  id: string
-  gap_id: string
-  accepted_by: string
-  rationale: string
-  expires_at: string | null
-  created_at: string
-}
-
-export interface Question {
-  id: string
-  gap_id: string
-  requirement_id: string
-  question_text: string
-  target_role: TargetRole
-  status: QuestionStatus
-  answer: string | null
-  answered_at: string | null
-  created_at: string
-}
-
-export interface InvestigationTask {
-  id: string
-  requirement_id: string
-  linked_gap_id: string | null
-  title: string
-  description: string
-  priority: 'high' | 'medium' | 'low'
-  status: TaskStatus
-  created_at: string
-}
-
-export interface AuditLog {
-  id: string
-  entity_type: string
-  entity_id: string
-  action: 'created' | 'updated' | 'deleted' | 'analyzed' | 'scored' | 'risk_accepted'
-  actor_id: string | null
-  diff: Record<string, unknown> | null
-  created_at: string
-}
-
-export interface DecisionLog {
-  id: string
-  requirement_id: string
-  related_gap_id: string | null
-  related_question_id: string | null
-  decision: string
-  rationale: string
-  decided_by: string
-  created_at: string
-}
-
-export interface AiUsageLog {
-  id: string
-  requirement_id: string | null
-  pipeline_step: string
-  provider: string
-  model: string
-  input_tokens: number
-  output_tokens: number
-  latency_ms: number
-  retry_count: number
-  created_at: string
-}
-
-export interface KnowledgeCase {
-  id: string
-  project_id: string | null
-  requirement_item_snapshot: Record<string, unknown>
-  gap_snapshot: Record<string, unknown>
-  resolution_snapshot: Record<string, unknown>
-  context_tags: string[]
-  embedding: number[] | null
-  created_at: string
-}
-
-export interface CaseFeedback {
-  id: string
-  case_id: string
-  user_id: string
-  helpful: boolean
-  used: boolean
-  overridden: boolean
-  created_at: string
-}
-
-export interface CompletenessScore {
-  id: string
-  requirement_id: string
-  // Primary signals (shown in UI)
-  blocking_count: number
-  high_risk_count: number
-  coverage_pct: number
-  // Secondary (internal)
-  internal_score: number
-  nfr_score: number
-  // Risk
-  complexity_score: number
-  risk_flags: string[]
-  // Metadata
-  gap_density: number
-  breakdown: ScoreBreakdown
-  scored_at: string
-}
-
-export interface ScoreBreakdown {
-  blocking_count: number
-  high_risk_count: number
-  coverage_pct: number
-  internal_score: number
-  nfr_score: number
-  gap_density: number
-  complexity_score: number
-  risk_flags: string[]
-  gap_counts: { critical: number; major: number; minor: number; unvalidated: number }
-  nfr_coverage: { security: boolean; performance: boolean; auditability: boolean }
-}
-
-export interface RequirementSummary {
-  blocking_count: number
-  high_risk_count: number
-  coverage_pct: number
-  unvalidated_count: number
-  internal_score: number
-  complexity_score: number
-  risk_flags: string[]
-  status: RequirementStatus
-  blocked_reason: string | null
-}
-
-// ── Agent Loop ────────────────────────────────────────────────────────────────
-
-export type JobStatus =
-  | 'pending'
-  | 'plan_loop'
-  | 'awaiting_plan_approval'
-  | 'coding'
-  | 'awaiting_review'
-  | 'done'
-  | 'failed'
-  | 'cancelled'
-
-export type LogPhase = 'requirements' | 'planning' | 'coding' | 'system'
-export type LogLevel = 'info' | 'warn' | 'error' | 'success'
-
-export interface Job {
-  id: string
-  project_id: string
-  requirement_id: string
-  status: JobStatus
-  branch_name: string | null
-  iteration_count: number
-  error: string | null
-  created_at: string
-  completed_at: string | null
-}
-
-export interface PlanTask {
-  id: string
-  title: string
-  description: string
-  files: string[]
-  dependencies: string[]
-}
-
-export interface AgentPlan {
-  id: string
-  job_id: string
-  tasks: PlanTask[]
-  files_to_create: string[]
-  files_to_modify: string[]
-  test_approach: string
-  branch_name: string
-  spec_markdown: string | null
-  created_at: string
-}
-
-export interface FileChange {
-  path: string
-  content: string
-  operation: 'create' | 'modify' | 'delete'
-}
-
-export interface TestResult {
-  success: boolean
-  passed: number
-  failed: number
-  errors: string[]
-  raw_output: string
-}
-
-export interface LogEntry {
-  id: string
-  job_id: string
-  phase: LogPhase
-  level: LogLevel
-  message: string
-  created_at: string
-}
-
-// ── Vision ────────────────────────────────────────────────────────────────────
-
-export type VisionMode   = 'free_form' | 'structured'
-export type VisionStatus = 'draft' | 'generating' | 'done' | 'failed'
-
-export interface ProjectVision {
-  id:             string
-  project_id:     string
-  mode:           VisionMode
-  free_form_text: string
-  goal:           string
-  tech_stack:     string
-  target_users:   string
-  key_features:   string
-  constraints:    string
-  status:         VisionStatus
-  error:          string | null
-  created_at:     string
-  updated_at:     string
-}
-
-export type VisionLogPhase = 'parsing' | 'generating' | 'system'
-
-export interface VisionLog {
+export interface ProjectFile {
   id:         string
   project_id: string
-  phase:      VisionLogPhase
-  level:      LogLevel
-  message:    string
+  path:       string
+  hash:       string | null
+}
+
+export interface SystemComponent {
+  id:                 string
+  project_id:         string
+  name:               string
+  type:               ComponentType
+  exposed_interfaces: string[]
+  status:             ComponentStatus
+  is_anchored:        boolean
+  scan_count:         number
+  last_updated:       string
+  deleted_at:         string | null
+}
+
+export interface ComponentAssignment {
+  file_id:            string
+  component_id:       string | null
+  confidence:         number
+  is_primary:         boolean
+  status:             AssignmentStatus
+  reassignment_count: number
+  last_validated_at:  string
+  last_moved_at:      string
+}
+
+export interface ComponentDependency {
+  from_id:    string
+  to_id:      string
+  type:       DependencyType
+  deleted_at: string | null
+}
+
+export interface SystemComponentVersion {
+  id:           string
+  component_id: string
+  version:      number
+  snapshot:     Record<string, unknown>
+  created_at:   string
+}
+
+export interface ComponentTest {
+  id:           string
+  component_id: string
+  test_path:    string
+}
+
+export interface TestCoverageMap {
+  test_path: string
+  file_id:   string
+}
+
+export interface ComponentGraphEdge {
+  from_file_id: string
+  to_file_id:   string
+  project_id:   string
+  edge_type:    EdgeType
+}
+
+export interface ComponentEvolutionSignal {
+  id:                  string
+  component_id:        string
+  type:                EvolutionSignalType
+  target_component_id: string | null
+  confidence:          number
+  created_at:          string
+  expires_at:          string
+}
+
+// ── Change layer ──────────────────────────────────────────────────────────────
+
+export interface ConfidenceBreakdown {
+  mapping_confidence:    number
+  model_completeness:    number
+  dependency_coverage:   number
+}
+
+export interface ChangeRequest {
+  id:                   string
+  project_id:           string
+  title:                string
+  intent:               string
+  type:                 ChangeType
+  priority:             ChangePriority
+  status:               ChangeStatus
+  risk_level:           RiskLevel | null
+  confidence_score:     number | null
+  confidence_breakdown: ConfidenceBreakdown | null
+  analysis_quality:     AnalysisQuality | null
+  lock_version:         number
+  execution_group:      string | null
+  created_by:           string | null
+  triggered_by:         TriggeredBy
+  tags:                 string[]
+  created_at:           string
+  updated_at:           string
+}
+
+export interface ChangeRequestComponent {
+  change_id:    string
+  component_id: string
+}
+
+export interface ChangeRequestFile {
+  change_id: string
+  file_id:   string
+}
+
+export interface ChangeRiskFactor {
+  id:        string
+  change_id: string
+  factor:    string
+  weight:    number
+}
+
+export interface ChangeDecision {
+  id:              string
+  change_id:       string
+  stage:           DecisionStage
+  decision_type:   string
+  rationale:       string | null
+  input_snapshot:  Record<string, unknown> | null
+  output_snapshot: Record<string, unknown> | null
+  created_at:      string
+}
+
+export interface ChangeSystemSnapshotComponent {
+  change_id:            string
+  component_version_id: string
+}
+
+export interface ChangeImpact {
+  id:                   string
+  change_id:            string
+  risk_score:           number
+  blast_radius:         number
+  primary_risk_factor:  string | null
+  analysis_quality:     AnalysisQuality
+  requires_migration:   boolean
+  requires_data_change: boolean
+}
+
+export interface ChangeImpactComponent {
+  impact_id:     string
+  component_id:  string
+  impact_weight: number
+  source:        ImpactSource
+  source_detail: string | null
+}
+
+export interface ChangeImpactFile {
+  impact_id: string
+  file_id:   string
+}
+
+export interface ChangePlan {
+  id:              string
+  change_id:       string
+  status:          PlanStatus
+  spec_markdown:   string | null
+  estimated_tasks: number | null
+  estimated_files: number | null
+  created_at:      string
+  approved_at:     string | null
+}
+
+export interface ChangePlanTask {
+  id:          string
+  plan_id:     string
+  component_id: string | null
+  description: string
+  order_index: number
+  status:      PlanTaskStatus
+}
+
+// ── Execution layer ───────────────────────────────────────────────────────────
+
+export interface ExecutionSnapshot {
+  id:                 string
+  change_id:          string
+  iteration:          number
+  files_modified:     string[]
+  tests_run:          string[]
+  tests_passed:       number
+  tests_failed:       number
+  error_summary:      string | null
+  diff_summary:       string | null
+  duration_ms:        number | null
+  retry_count:        number
+  ai_cost:            number | null
+  environment:        string | null
+  termination_reason: TerminationReason | null
+}
+
+export interface FileLock {
+  file_id:   string
+  change_id: string
+  locked_at: string
+}
+
+// ── Outcome + deployment ──────────────────────────────────────────────────────
+
+export interface ChangeCommit {
+  id:          string
+  change_id:   string
+  branch_name: string
+  commit_hash: string
+  created_at:  string
+}
+
+export interface ChangeOutcome {
+  change_id:            string
+  success:              boolean
+  regressions_detected: boolean
+  rollback_triggered:   boolean
+  user_feedback:        string | null
+  created_at:           string
+}
+
+export interface Deployment {
+  id:          string
+  project_id:  string
+  change_id:   string
+  environment: DeploymentEnv
+  status:      DeploymentStatus
+  commit_hash: string | null
+  deployed_at: string | null
+}
+
+// ── Production layer ──────────────────────────────────────────────────────────
+
+export interface ProductionEvent {
+  id:         string
+  project_id: string
+  type:       ProductionEventType
+  source:     string
+  severity:   ProductionEventSeverity
+  payload:    Record<string, unknown>
   created_at: string
+}
+
+export interface ProductionEventComponent {
+  event_id:     string
+  component_id: string
+}
+
+export interface ProductionEventLink {
+  event_id:      string
+  change_id:     string
+  relation_type: EventRelationType
 }
