@@ -120,27 +120,30 @@ export function ChangeDetailView({ project, change: initial }: { project: Projec
               <div className="rounded-xl p-6 bg-[#131b2e] border border-white/5">
                 <p className="text-xs font-bold uppercase tracking-widest text-slate-400 font-headline mb-4">Impact Analysis</p>
                 <div className="space-y-3">
-                  {ANALYSIS_STEPS.map((step, i) => {
-                    const isActive = step.statuses.includes(change.status)
-                    const isDone = ANALYSIS_STEPS.slice(0, i).some(s => !s.statuses.includes(change.status)) && !isActive
-                    return (
-                      <div key={step.label} className="flex items-center gap-3">
-                        {isActive ? (
-                          <span className="relative flex h-2 w-2 flex-shrink-0">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
-                            <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-400" />
+                  {(() => {
+                    const currentStepIndex = ANALYSIS_STEPS.findIndex(s => s.statuses.includes(change.status))
+                    return ANALYSIS_STEPS.map((step, i) => {
+                      const isActive = step.statuses.includes(change.status)
+                      const isDone = i < currentStepIndex
+                      return (
+                        <div key={step.label} className="flex items-center gap-3">
+                          {isActive ? (
+                            <span className="relative flex h-2 w-2 flex-shrink-0">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
+                              <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-400" />
+                            </span>
+                          ) : isDone ? (
+                            <span className="h-2 w-2 rounded-full bg-green-400 flex-shrink-0" />
+                          ) : (
+                            <span className="h-2 w-2 rounded-full bg-slate-700 flex-shrink-0" />
+                          )}
+                          <span className={`text-sm ${isActive ? 'text-slate-200' : isDone ? 'text-slate-500' : 'text-slate-600'}`}>
+                            {step.label}
                           </span>
-                        ) : isDone ? (
-                          <span className="h-2 w-2 rounded-full bg-green-400 flex-shrink-0" />
-                        ) : (
-                          <span className="h-2 w-2 rounded-full bg-slate-700 flex-shrink-0" />
-                        )}
-                        <span className={`text-sm ${isActive ? 'text-slate-200' : isDone ? 'text-slate-500' : 'text-slate-600'}`}>
-                          {step.label}
-                        </span>
-                      </div>
-                    )
-                  })}
+                        </div>
+                      )
+                    })
+                  })()}
                 </div>
               </div>
             ) : change.status === 'open' ? (
