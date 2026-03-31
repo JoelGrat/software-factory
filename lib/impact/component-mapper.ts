@@ -40,6 +40,7 @@ export async function mapComponents(
   // 3. Keyword match: title words + tags → component names
   const searchTerms = [
     ...change.title.toLowerCase().split(/\s+/),
+    ...change.intent.toLowerCase().split(/\s+/),
     ...change.tags.map(t => t.toLowerCase()),
   ].filter(t => t.length > 2)
 
@@ -96,15 +97,15 @@ export async function mapComponents(
   }
 
   // 5. Fetch file IDs for all matched components to use as seeds
+  if (matchedIds.size === 0) return { seedFileIds: [], components: mappedComponents, aiUsed }
   const { data: assignments } = await db
     .from('component_assignment')
     .select('file_id, component_id')
     .in('component_id', Array.from(matchedIds))
 
-  const seedFileIds = (assignments ?? [])
-    .map(a => a.file_id)
-    .filter(Boolean)
-    .slice(0, 30)
+  const seedFileIds = [...new Set(
+    (assignments ?? []).map(a => a.file_id).filter(Boolean)
+  )].slice(0, 30)
 
   return { seedFileIds, components: mappedComponents, aiUsed }
 }
