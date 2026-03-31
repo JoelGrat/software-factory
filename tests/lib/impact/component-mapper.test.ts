@@ -85,7 +85,7 @@ describe('mapComponents', () => {
     ai.setDefaultResponse(JSON.stringify({ affected: ['ProjectsAPI'] }))
     const result = await mapComponents(
       'cr1',
-      { title: 'Improve project listing speed', intent: 'Slow', tags: [] },
+      { title: 'Fix database performance issues', intent: 'Slow', tags: [] },
       makeMockDb(),
       ai
     )
