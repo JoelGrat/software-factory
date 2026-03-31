@@ -9,7 +9,7 @@ export interface SeedFile {
 export interface FileGraphEdge {
   from_file_id: string
   to_file_id: string
-  edge_type: string
+  edge_type: 'static' | 're-export' | 'component_dependency' | 'dynamic' | string
 }
 
 export interface FileAssignment {

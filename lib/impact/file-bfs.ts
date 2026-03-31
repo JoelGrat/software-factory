@@ -22,13 +22,14 @@ export function runFileBFS(
   const dynamicImportCounts: Record<string, number> = {}
 
   const queue: Array<{ fileId: string; weight: number; depth: number }> = []
+  let head = 0
   for (const seed of seeds) {
     reachedFileIds.set(seed.fileId, 1.0)
     queue.push({ fileId: seed.fileId, weight: 1.0, depth: 0 })
   }
 
-  while (queue.length > 0) {
-    const { fileId, weight, depth } = queue.shift()!
+  while (head < queue.length) {
+    const { fileId, weight, depth } = queue[head++]
     if (depth >= maxDepth) continue
 
     for (const { target, type } of adjacency.get(fileId) ?? []) {
