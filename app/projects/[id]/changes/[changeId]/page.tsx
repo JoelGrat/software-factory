@@ -30,5 +30,37 @@ export default async function ChangeDetailPage({
 
   if (!change) redirect(`/projects/${id}`)
 
-  return <ChangeDetailView project={project} change={change} />
+  // Fetch impact if analyzed
+  const { data: impact } = await db
+    .from('change_impacts')
+    .select('id, risk_score, blast_radius, primary_risk_factor, analysis_quality, requires_migration, requires_data_change')
+    .eq('change_id', changeId)
+    .maybeSingle()
+
+  const { data: riskFactors } = impact
+    ? await db
+        .from('change_risk_factors')
+        .select('factor, weight')
+        .eq('change_id', changeId)
+        .order('weight', { ascending: false })
+    : { data: [] }
+
+  const { data: impactComponents } = impact
+    ? await db
+        .from('change_impact_components')
+        .select('component_id, impact_weight, source, system_components(name, type)')
+        .eq('impact_id', impact.id)
+        .order('impact_weight', { ascending: false })
+        .limit(10)
+    : { data: [] }
+
+  return (
+    <ChangeDetailView
+      project={project}
+      change={change}
+      impact={impact ?? null}
+      riskFactors={riskFactors ?? []}
+      impactComponents={impactComponents ?? []}
+    />
+  )
 }

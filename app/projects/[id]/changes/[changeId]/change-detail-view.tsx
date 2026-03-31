@@ -6,6 +6,29 @@ import { LeftNav } from '@/components/app/left-nav'
 import { ProfileAvatar } from '@/components/app/profile-avatar'
 
 interface Project { id: string; name: string }
+
+interface ImpactData {
+  id: string
+  risk_score: number | null
+  blast_radius: number | null
+  primary_risk_factor: string | null
+  analysis_quality: string | null
+  requires_migration: boolean | null
+  requires_data_change: boolean | null
+}
+
+interface RiskFactor {
+  factor: string
+  weight: number
+}
+
+interface ImpactComponent {
+  component_id: string
+  impact_weight: number
+  source: string
+  system_components: { name: string; type: string } | null
+}
+
 interface Change {
   id: string
   project_id: string
@@ -50,9 +73,24 @@ function Badge({ label, colorClass }: { label: string; colorClass: string }) {
   )
 }
 
-export function ChangeDetailView({ project, change: initial }: { project: Project; change: Change }) {
+export function ChangeDetailView({
+  project,
+  change: initial,
+  impact: initialImpact,
+  riskFactors: initialRiskFactors,
+  impactComponents: initialImpactComponents,
+}: {
+  project: Project
+  change: Change
+  impact: ImpactData | null
+  riskFactors: RiskFactor[]
+  impactComponents: ImpactComponent[]
+}) {
   const router = useRouter()
   const [change, setChange] = useState(initial)
+  const [impact, setImpact] = useState(initialImpact)
+  const [riskFactors, setRiskFactors] = useState(initialRiskFactors)
+  const [impactComponents, setImpactComponents] = useState(initialImpactComponents)
   const isAnalyzing = ANALYZING_STATUSES.includes(change.status)
 
   useEffect(() => {
@@ -64,6 +102,9 @@ export function ChangeDetailView({ project, change: initial }: { project: Projec
       setChange(updated)
       if (!ANALYZING_STATUSES.includes(updated.status)) {
         clearInterval(id)
+        setImpact(updated.impact ?? null)
+        setRiskFactors(updated.risk_factors ?? [])
+        setImpactComponents(updated.impact_components ?? [])
         router.refresh()
       }
     }, 2000)
@@ -148,17 +189,125 @@ export function ChangeDetailView({ project, change: initial }: { project: Projec
               </div>
             ) : change.status === 'open' ? (
               <div className="rounded-xl p-6 bg-[#131b2e] border border-white/5 text-center">
-                <span className="material-symbols-outlined text-slate-600 mb-2 block" style={{ fontSize: '28px' }}>analytics</span>
-                <p className="text-sm text-slate-500">Impact analysis will run when triggered.</p>
-                <p className="text-xs text-slate-600 mt-1">Analysis engine coming in a future update.</p>
+                <span className="material-symbols-outlined text-slate-600 mb-3 block" style={{ fontSize: '28px' }}>analytics</span>
+                <p className="text-sm text-slate-400 mb-4">Run impact analysis to see which components this change affects.</p>
+                <button
+                  onClick={async () => {
+                    const res = await fetch(`/api/change-requests/${change.id}/analyze`, { method: 'POST' })
+                    if (res.ok) {
+                      setChange(c => ({ ...c, status: 'analyzing_mapping' }))
+                    }
+                  }}
+                  className="px-4 py-2 rounded-lg bg-indigo-500 hover:bg-indigo-400 text-white text-sm font-bold font-headline transition-colors"
+                >
+                  Run Analysis
+                </button>
               </div>
-            ) : change.status === 'analyzed' ? (
-              <div className="rounded-xl p-6 bg-[#131b2e] border border-white/5">
-                <p className="text-xs font-bold uppercase tracking-widest text-slate-400 font-headline mb-2">Impact Analysis</p>
-                <p className="text-sm text-slate-400">Analysis complete. Full impact panel coming in Plan 4.</p>
-                {change.confidence_score !== null && (
-                  <p className="text-xs text-slate-500 mt-1 font-mono">Confidence: {change.confidence_score}%</p>
+            ) : change.status === 'analyzed' && impact ? (
+              <div className="rounded-xl bg-[#131b2e] border border-white/5 overflow-hidden">
+                {/* Header row */}
+                <div className="flex items-center justify-between px-5 py-4 border-b border-white/5">
+                  <p className="text-xs font-bold uppercase tracking-widest text-slate-400 font-headline">Impact Analysis</p>
+                  <div className="flex items-center gap-2">
+                    {change.confidence_score !== null && (
+                      <span className="text-[10px] font-mono text-slate-500">{change.confidence_score}% confidence</span>
+                    )}
+                    {impact.analysis_quality && (
+                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-700 text-slate-400 uppercase tracking-wider">
+                        {impact.analysis_quality.replace('_', ' ')}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Risk score + blast radius */}
+                <div className="grid grid-cols-3 divide-x divide-white/5 border-b border-white/5">
+                  <div className="px-5 py-4">
+                    <p className="text-[10px] uppercase tracking-widest text-slate-500 font-headline mb-1">Risk Level</p>
+                    <p className={`text-lg font-extrabold font-headline capitalize ${
+                      change.risk_level === 'high' ? 'text-red-400' :
+                      change.risk_level === 'medium' ? 'text-amber-400' : 'text-green-400'
+                    }`}>{change.risk_level ?? '—'}</p>
+                  </div>
+                  <div className="px-5 py-4">
+                    <p className="text-[10px] uppercase tracking-widest text-slate-500 font-headline mb-1">Risk Score</p>
+                    <p className="text-lg font-extrabold font-headline text-on-surface font-mono">{impact.risk_score ?? '—'}</p>
+                  </div>
+                  <div className="px-5 py-4">
+                    <p className="text-[10px] uppercase tracking-widest text-slate-500 font-headline mb-1">Blast Radius</p>
+                    <p className="text-lg font-extrabold font-headline text-on-surface font-mono">
+                      {impact.blast_radius ?? '—'}
+                      <span className="text-xs font-normal text-slate-500 ml-1">components</span>
+                    </p>
+                  </div>
+                </div>
+
+                {/* Migration flags */}
+                {(impact.requires_migration || impact.requires_data_change) && (
+                  <div className="px-5 py-3 border-b border-white/5 flex items-center gap-3 flex-wrap">
+                    {impact.requires_migration && (
+                      <span className="flex items-center gap-1.5 text-xs text-amber-300 font-mono">
+                        <span className="material-symbols-outlined text-amber-400" style={{ fontSize: '14px' }}>warning</span>
+                        Schema migration required
+                      </span>
+                    )}
+                    {impact.requires_data_change && (
+                      <span className="flex items-center gap-1.5 text-xs text-orange-300 font-mono">
+                        <span className="material-symbols-outlined text-orange-400" style={{ fontSize: '14px' }}>database</span>
+                        Data migration required
+                      </span>
+                    )}
+                  </div>
                 )}
+
+                {/* Affected components */}
+                {impactComponents.length > 0 && (
+                  <div className="px-5 py-4 border-b border-white/5">
+                    <p className="text-[10px] uppercase tracking-widest text-slate-500 font-headline mb-3">Affected Components</p>
+                    <div className="space-y-2">
+                      {impactComponents.map((ic) => (
+                        <div key={ic.component_id} className="flex items-center justify-between">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="text-[10px] font-mono px-1 py-0.5 rounded bg-indigo-400/10 text-indigo-300 uppercase flex-shrink-0">
+                              {ic.system_components?.type ?? '?'}
+                            </span>
+                            <span className="text-sm text-slate-300 font-mono truncate">
+                              {ic.system_components?.name ?? ic.component_id}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <div
+                              className="h-1.5 rounded-full bg-indigo-500/40"
+                              style={{ width: `${Math.round(ic.impact_weight * 60 + 12)}px` }}
+                            />
+                            <span className="text-[10px] font-mono text-slate-500 w-8 text-right">
+                              {Math.round(ic.impact_weight * 100)}%
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Risk factors */}
+                {riskFactors.length > 0 && (
+                  <div className="px-5 py-4">
+                    <p className="text-[10px] uppercase tracking-widest text-slate-500 font-headline mb-3">Risk Factors</p>
+                    <div className="space-y-1.5">
+                      {riskFactors.map((rf) => (
+                        <div key={rf.factor} className="flex items-center justify-between">
+                          <span className="text-xs text-slate-400 font-mono capitalize">{rf.factor.replace(/_/g, ' ')}</span>
+                          <span className="text-xs font-mono text-slate-500">+{rf.weight}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : change.status === 'analyzed' && !impact ? (
+              <div className="rounded-xl p-6 bg-[#131b2e] border border-white/5 text-center">
+                <p className="text-sm text-slate-500">Analysis complete but impact data unavailable.</p>
               </div>
             ) : null}
 
