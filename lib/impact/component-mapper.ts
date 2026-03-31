@@ -2,6 +2,15 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { AIProvider } from '@/lib/ai/provider'
 import type { MappedComponent, ComponentMapResult } from './types'
 
+function splitCamelCase(str: string): string[] {
+  return str
+    .replace(/([A-Z])/g, ' $1')
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+}
+
 export async function mapComponents(
   changeId: string,
   change: { title: string; intent: string; tags: string[] },
@@ -38,8 +47,8 @@ export async function mapComponents(
   const matchedIds = new Set<string>()
 
   for (const comp of components) {
-    const nameLower = comp.name.toLowerCase()
-    const hits = searchTerms.filter(term => nameLower.includes(term))
+    const componentWords = splitCamelCase(comp.name)
+    const hits = searchTerms.filter(term => componentWords.includes(term))
     if (hits.length > 0) {
       matchedIds.add(comp.id)
       mappedComponents.push({
