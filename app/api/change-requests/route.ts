@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
+import { getProvider } from '@/lib/ai/registry'
+import { runImpactAnalysis } from '@/lib/impact/impact-analyzer'
 import { validateCreateChangeRequest } from '@/lib/change-requests/validator'
 
 export async function POST(req: Request) {
@@ -44,6 +47,13 @@ export async function POST(req: Request) {
   if (error || !change) {
     return NextResponse.json({ error: 'Failed to create change request' }, { status: 500 })
   }
+
+  // Auto-trigger impact analysis fire-and-forget
+  const adminDb = createAdminClient()
+  const ai = getProvider()
+  runImpactAnalysis(change.id, adminDb, ai).catch(err =>
+    console.error(`[impact-analyzer] change ${change.id} failed:`, err)
+  )
 
   return NextResponse.json(change, { status: 201 })
 }
