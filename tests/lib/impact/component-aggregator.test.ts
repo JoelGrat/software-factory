@@ -52,6 +52,18 @@ describe('aggregateComponents', () => {
     expect(comp?.source).toBe('seed')
   })
 
+  it('seed source is preserved even when file_graph weight is also 1.0', () => {
+    const bfs = makeBfsResult([['f1', 1.0]])
+    const assignments: FileAssignment[] = [{ file_id: 'f1', component_id: 'comp1' }]
+    const seedComponents: MappedComponent[] = [{
+      componentId: 'comp1', name: 'Auth', type: 'service', confidence: 90, matchReason: 'keyword: auth'
+    }]
+    const result = aggregateComponents(bfs, assignments, seedComponents)
+    const comp = result.find(c => c.componentId === 'comp1')
+    expect(comp?.weight).toBe(1.0)
+    expect(comp?.source).toBe('seed')
+  })
+
   it('ignores files with no component assignment', () => {
     const bfs = makeBfsResult([['f_unassigned', 0.9]])
     const assignments: FileAssignment[] = []

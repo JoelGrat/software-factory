@@ -25,7 +25,7 @@ export function aggregateComponents(
     const componentId = fileToComponent.get(fileId)
     if (!componentId) continue
     const existing = weights.get(componentId)
-    if (!existing || fileWeight > existing.weight) {
+    if (!existing || (existing.source !== 'seed' && fileWeight > existing.weight)) {
       weights.set(componentId, {
         componentId,
         weight: fileWeight,
