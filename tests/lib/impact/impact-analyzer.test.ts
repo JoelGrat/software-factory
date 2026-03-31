@@ -176,11 +176,7 @@ describe('runImpactAnalysis', () => {
     const ai = new MockAIProvider()
 
     // change is null → should throw inside and recover
-    try {
-      await runImpactAnalysis('cr1', db, ai)
-    } catch {
-      // expected
-    }
+    await expect(runImpactAnalysis('cr1', db, ai)).rejects.toThrow()
 
     const finalStatus = updates
       .filter(u => u.table === 'change_requests')

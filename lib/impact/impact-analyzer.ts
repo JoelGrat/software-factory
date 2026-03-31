@@ -7,6 +7,16 @@ import { aggregateComponents } from './component-aggregator'
 import { computeRiskScore } from './risk-scorer'
 import { detectMigrationWithAIFallback } from './migration-detector'
 
+interface ComponentDetail {
+  id: string
+  name: string
+  type: string
+  has_unknown_dependencies: boolean
+  avg_confidence: number | null
+}
+
+const MAX_IMPACT_COMPONENTS = 20
+
 export async function runImpactAnalysis(
   changeId: string,
   db: SupabaseClient,
@@ -29,16 +39,20 @@ export async function runImpactAnalysis(
 
     await db.from('change_requests').update({ status: 'analyzing_propagation' }).eq('id', changeId)
 
-    // Phase 2a: Fetch file-level edges + assignments
-    const { data: edges } = await db
-      .from('component_graph_edges')
-      .select('from_file_id, to_file_id, edge_type')
-      .eq('project_id', change.project_id)
+    // Phase 2a: Fetch file-level edges + assignments (skip if no seed files)
+    const { data: edges } = mapResult.seedFileIds.length > 0
+      ? await db
+          .from('component_graph_edges')
+          .select('from_file_id, to_file_id, edge_type')
+          .eq('project_id', change.project_id)
+      : { data: [] }
 
-    const { data: assignments } = await db
-      .from('component_assignment')
-      .select('file_id, component_id')
-      .eq('project_id', change.project_id)
+    const { data: assignments } = mapResult.seedFileIds.length > 0
+      ? await db
+          .from('component_assignment')
+          .select('file_id, component_id')
+          .eq('project_id', change.project_id)
+      : { data: [] }
 
     // Phase 2b: File BFS
     const seeds = mapResult.seedFileIds.map(fileId => ({ fileId, reason: 'component_match' as const }))
@@ -50,19 +64,20 @@ export async function runImpactAnalysis(
     // Fetch component details for risk scoring
     const componentIds = componentWeights.map(c => c.componentId)
     const { data: componentDetails } = componentIds.length > 0
-      ? await (db.from('system_components') as any)
+      ? await db
+          .from('system_components')
           .select('id, name, type, has_unknown_dependencies, avg_confidence')
-          .in('id', componentIds)
-      : { data: [] }
+          .in('id', componentIds) as { data: ComponentDetail[] | null }
+      : { data: [] as ComponentDetail[] }
 
     await db.from('change_requests').update({ status: 'analyzing_scoring' }).eq('id', changeId)
 
     // Phase 3: Risk Scoring
-    const types = (componentDetails ?? []).map((c: any) => c.type as string)
+    const types = (componentDetails ?? []).map((c) => c.type)
     const riskFactors: RiskFactors = {
       blastRadius: componentWeights.filter(c => c.weight > 0.3).length,
-      unknownDepsCount: (componentDetails ?? []).filter((c: any) => c.has_unknown_dependencies).length,
-      hasLowConfidenceComponents: (componentDetails ?? []).some((c: any) => (c.avg_confidence ?? 100) < 60),
+      unknownDepsCount: (componentDetails ?? []).filter((c) => c.has_unknown_dependencies).length,
+      hasLowConfidenceComponents: (componentDetails ?? []).some((c) => (c.avg_confidence ?? 100) < 60),
       componentTypes: types,
       dynamicImportCount: Object.values(bfsResult.dynamicImportCounts).reduce((a, b) => a + b, 0),
     }
@@ -72,7 +87,7 @@ export async function runImpactAnalysis(
     const migrationResult = await detectMigrationWithAIFallback(change.intent, types, ai)
 
     // Write change_impacts
-    const { data: impact } = await db
+    const { data: impact, error: impactError } = await db
       .from('change_impacts')
       .insert({
         change_id: changeId,
@@ -87,6 +102,7 @@ export async function runImpactAnalysis(
       .select('id')
       .single()
 
+    if (impactError) throw impactError
     if (!impact) throw new Error('Failed to insert change_impacts')
 
     // Write risk factors
@@ -100,8 +116,8 @@ export async function runImpactAnalysis(
       await db.from('change_risk_factors').insert(riskFactorRows)
     }
 
-    // Write impact components (top 20)
-    const componentRows = componentWeights.slice(0, 20).map(c => ({
+    // Write impact components (top MAX_IMPACT_COMPONENTS)
+    const componentRows = componentWeights.slice(0, MAX_IMPACT_COMPONENTS).map(c => ({
       impact_id: impact.id,
       change_id: changeId,
       component_id: c.componentId,
