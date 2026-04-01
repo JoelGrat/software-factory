@@ -54,6 +54,23 @@ export default async function ChangeDetailPage({
         .limit(10)
     : { data: [] }
 
+  // Fetch plan if exists
+  const { data: plan } = await db
+    .from('change_plans')
+    .select('id, status, spec_markdown, estimated_tasks, estimated_files, approved_at')
+    .eq('change_id', changeId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  const { data: planTasks } = plan
+    ? await db
+        .from('change_plan_tasks')
+        .select('id, component_id, description, order_index, status, system_components(name, type)')
+        .eq('plan_id', plan.id)
+        .order('order_index', { ascending: true })
+    : { data: [] }
+
   return (
     <ChangeDetailView
       project={project}
@@ -61,6 +78,8 @@ export default async function ChangeDetailPage({
       impact={impact ?? null}
       riskFactors={riskFactors ?? []}
       impactComponents={impactComponents ?? []}
+      plan={plan ?? null}
+      planTasks={planTasks ?? []}
     />
   )
 }

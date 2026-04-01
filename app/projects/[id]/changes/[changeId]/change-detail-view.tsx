@@ -29,6 +29,24 @@ interface ImpactComponent {
   system_components: { name: string; type: string } | null
 }
 
+interface PlanData {
+  id: string
+  status: string
+  spec_markdown: string | null
+  estimated_tasks: number | null
+  estimated_files: number | null
+  approved_at: string | null
+}
+
+interface PlanTask {
+  id: string
+  component_id: string | null
+  description: string
+  order_index: number
+  status: string
+  system_components: { name: string; type: string } | null
+}
+
 interface Change {
   id: string
   project_id: string
@@ -57,12 +75,13 @@ const RISK_COLORS: Record<string, string> = {
   high: 'text-red-400 bg-red-400/10',
 }
 
-const ANALYZING_STATUSES = ['analyzing', 'analyzing_mapping', 'analyzing_propagation', 'analyzing_scoring']
+const ANALYZING_STATUSES = ['analyzing', 'analyzing_mapping', 'analyzing_propagation', 'analyzing_scoring', 'planning']
 
 const ANALYSIS_STEPS = [
   { label: 'Mapping intent → components', statuses: ['analyzing', 'analyzing_mapping'] },
   { label: 'Propagating dependency graph', statuses: ['analyzing_propagation'] },
   { label: 'Computing risk score', statuses: ['analyzing_scoring'] },
+  { label: 'Generating implementation plan', statuses: ['planning'] },
 ]
 
 function Badge({ label, colorClass }: { label: string; colorClass: string }) {
@@ -79,18 +98,26 @@ export function ChangeDetailView({
   impact: initialImpact,
   riskFactors: initialRiskFactors,
   impactComponents: initialImpactComponents,
+  plan: initialPlan,
+  planTasks: initialPlanTasks,
 }: {
   project: Project
   change: Change
   impact: ImpactData | null
   riskFactors: RiskFactor[]
   impactComponents: ImpactComponent[]
+  plan: PlanData | null
+  planTasks: PlanTask[]
 }) {
   const router = useRouter()
   const [change, setChange] = useState(initial)
   const [impact, setImpact] = useState(initialImpact)
   const [riskFactors, setRiskFactors] = useState(initialRiskFactors)
   const [impactComponents, setImpactComponents] = useState(initialImpactComponents)
+  const [plan, setPlan] = useState(initialPlan)
+  const [planTasks, setPlanTasks] = useState(initialPlanTasks)
+  const [planTab, setPlanTab] = useState<'tasks' | 'spec'>('tasks')
+  const [approving, setApproving] = useState(false)
   const isAnalyzing = ANALYZING_STATUSES.includes(change.status)
 
   useEffect(() => {
@@ -105,6 +132,8 @@ export function ChangeDetailView({
         setImpact(updated.impact ?? null)
         setRiskFactors(updated.risk_factors ?? [])
         setImpactComponents(updated.impact_components ?? [])
+        setPlan(updated.plan ?? null)
+        setPlanTasks(updated.plan_tasks ?? [])
         router.refresh()
       }
     }, 2000)
@@ -304,10 +333,141 @@ export function ChangeDetailView({
                     </div>
                   </div>
                 )}
+
+                {/* Generate Plan CTA */}
+                <div className="px-5 py-4 border-t border-white/5 flex items-center justify-between">
+                  <div className="text-xs text-slate-500 font-mono">
+                    {change.risk_level === 'high' && (
+                      <span className="text-red-400">High risk — confirmation required</span>
+                    )}
+                  </div>
+                  <button
+                    onClick={async () => {
+                      const confirmed = change.risk_level !== 'high' ||
+                        window.confirm('This change carries high risk. Generate a plan anyway?')
+                      if (!confirmed) return
+                      const res = await fetch(`/api/change-requests/${change.id}/plan`, { method: 'POST' })
+                      if (res.ok) setChange(c => ({ ...c, status: 'planning' }))
+                    }}
+                    className="px-4 py-2 rounded-lg bg-indigo-500 hover:bg-indigo-400 text-white text-sm font-bold font-headline transition-colors"
+                  >
+                    Generate Plan
+                  </button>
+                </div>
               </div>
             ) : change.status === 'analyzed' && !impact ? (
               <div className="rounded-xl p-6 bg-[#131b2e] border border-white/5 text-center">
                 <p className="text-sm text-slate-500">Analysis complete but impact data unavailable.</p>
+              </div>
+            ) : (change.status === 'planned' || change.status === 'approved') && plan ? (
+              <div className="rounded-xl bg-[#131b2e] border border-white/5 overflow-hidden">
+                {/* Plan header */}
+                <div className="flex items-center justify-between px-5 py-4 border-b border-white/5">
+                  <p className="text-xs font-bold uppercase tracking-widest text-slate-400 font-headline">Implementation Plan</p>
+                  <div className="flex items-center gap-3">
+                    {plan.estimated_tasks !== null && (
+                      <span className="text-[10px] font-mono text-slate-500">{plan.estimated_tasks} tasks</span>
+                    )}
+                    <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded uppercase tracking-wider ${
+                      plan.status === 'approved'
+                        ? 'bg-green-400/10 text-green-400'
+                        : 'bg-slate-700 text-slate-400'
+                    }`}>
+                      {plan.status}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Tab bar */}
+                <div className="flex border-b border-white/5">
+                  {(['tasks', 'spec'] as const).map(tab => (
+                    <button
+                      key={tab}
+                      onClick={() => setPlanTab(tab)}
+                      className={`px-5 py-2.5 text-xs font-bold uppercase tracking-widest font-headline transition-colors ${
+                        planTab === tab
+                          ? 'text-indigo-400 border-b-2 border-indigo-400'
+                          : 'text-slate-500 hover:text-slate-300'
+                      }`}
+                    >
+                      {tab}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Tasks tab */}
+                {planTab === 'tasks' && (
+                  <div className="divide-y divide-white/5">
+                    {planTasks.length === 0 ? (
+                      <p className="px-5 py-6 text-sm text-slate-500 text-center">No tasks generated.</p>
+                    ) : (
+                      planTasks.map((task) => (
+                        <div key={task.id} className="px-5 py-3 flex items-start gap-3">
+                          <span className={`mt-0.5 h-2 w-2 rounded-full flex-shrink-0 ${
+                            task.status === 'done' ? 'bg-green-400' : 'bg-slate-600'
+                          }`} />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm text-slate-300">{task.description}</p>
+                            {task.system_components && (
+                              <span className="text-[10px] font-mono text-slate-600 mt-0.5 block">
+                                {task.system_components.name}
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[10px] font-mono text-slate-600 flex-shrink-0">
+                            #{task.order_index + 1}
+                          </span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+
+                {/* Spec tab */}
+                {planTab === 'spec' && (
+                  <div className="px-5 py-4">
+                    {plan.spec_markdown ? (
+                      <pre className="text-xs text-slate-400 font-mono whitespace-pre-wrap leading-relaxed">
+                        {plan.spec_markdown}
+                      </pre>
+                    ) : (
+                      <p className="text-sm text-slate-500 text-center py-4">Spec not available.</p>
+                    )}
+                  </div>
+                )}
+
+                {/* Approve footer */}
+                {plan.status !== 'approved' && (
+                  <div className="px-5 py-4 border-t border-white/5 flex items-center justify-end gap-3">
+                    <button
+                      onClick={async () => {
+                        const res = await fetch(`/api/change-requests/${change.id}/plan`, { method: 'POST' })
+                        if (res.ok) setChange(c => ({ ...c, status: 'planning' }))
+                      }}
+                      className="px-3 py-1.5 rounded-lg border border-white/10 text-slate-400 hover:text-slate-200 text-xs font-bold font-headline transition-colors"
+                    >
+                      Regenerate
+                    </button>
+                    <button
+                      disabled={approving}
+                      onClick={async () => {
+                        setApproving(true)
+                        const res = await fetch(`/api/change-requests/${change.id}/plan`, {
+                          method: 'PATCH',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ action: 'approve' }),
+                        })
+                        if (res.ok) {
+                          setPlan(p => p ? { ...p, status: 'approved' } : p)
+                        }
+                        setApproving(false)
+                      }}
+                      className="px-4 py-2 rounded-lg bg-green-500 hover:bg-green-400 disabled:opacity-50 text-white text-sm font-bold font-headline transition-colors"
+                    >
+                      {approving ? 'Approving…' : 'Approve Plan'}
+                    </button>
+                  </div>
+                )}
               </div>
             ) : null}
 
