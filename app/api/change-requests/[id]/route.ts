@@ -46,11 +46,30 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
         .limit(10)
     : { data: [] }
 
+  // Fetch plan if exists
+  const { data: plan } = await db
+    .from('change_plans')
+    .select('id, status, estimated_tasks, estimated_files, approved_at')
+    .eq('change_id', id)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  const { data: planTasks } = plan
+    ? await db
+        .from('change_plan_tasks')
+        .select('id, component_id, description, order_index, status, system_components(name, type)')
+        .eq('plan_id', plan.id)
+        .order('order_index', { ascending: true })
+    : { data: [] }
+
   return NextResponse.json({
     ...change,
     impact: impact ?? null,
     risk_factors: riskFactors ?? [],
     impact_components: impactComponents ?? [],
+    plan: plan ?? null,
+    plan_tasks: planTasks ?? [],
   })
 }
 
