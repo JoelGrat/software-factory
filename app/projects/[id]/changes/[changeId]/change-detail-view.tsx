@@ -346,8 +346,12 @@ export function ChangeDetailView({
                       const confirmed = change.risk_level !== 'high' ||
                         window.confirm('This change carries high risk. Generate a plan anyway?')
                       if (!confirmed) return
-                      const res = await fetch(`/api/change-requests/${change.id}/plan`, { method: 'POST' })
-                      if (res.ok) setChange(c => ({ ...c, status: 'planning' }))
+                      try {
+                        const res = await fetch(`/api/change-requests/${change.id}/plan`, { method: 'POST' })
+                        if (res.ok) setChange(c => ({ ...c, status: 'planning' }))
+                      } catch {
+                        // network error — no optimistic update to revert since we only update on success
+                      }
                     }}
                     className="px-4 py-2 rounded-lg bg-indigo-500 hover:bg-indigo-400 text-white text-sm font-bold font-headline transition-colors"
                   >
@@ -359,7 +363,7 @@ export function ChangeDetailView({
               <div className="rounded-xl p-6 bg-[#131b2e] border border-white/5 text-center">
                 <p className="text-sm text-slate-500">Analysis complete but impact data unavailable.</p>
               </div>
-            ) : (change.status === 'planned' || change.status === 'approved') && plan ? (
+            ) : change.status === 'planned' && plan ? (
               <div className="rounded-xl bg-[#131b2e] border border-white/5 overflow-hidden">
                 {/* Plan header */}
                 <div className="flex items-center justify-between px-5 py-4 border-b border-white/5">
@@ -441,8 +445,12 @@ export function ChangeDetailView({
                   <div className="px-5 py-4 border-t border-white/5 flex items-center justify-end gap-3">
                     <button
                       onClick={async () => {
-                        const res = await fetch(`/api/change-requests/${change.id}/plan`, { method: 'POST' })
-                        if (res.ok) setChange(c => ({ ...c, status: 'planning' }))
+                        try {
+                          const res = await fetch(`/api/change-requests/${change.id}/plan`, { method: 'POST' })
+                          if (res.ok) setChange(c => ({ ...c, status: 'planning' }))
+                        } catch {
+                          // network error — leave status as-is
+                        }
                       }}
                       className="px-3 py-1.5 rounded-lg border border-white/10 text-slate-400 hover:text-slate-200 text-xs font-bold font-headline transition-colors"
                     >
@@ -452,15 +460,18 @@ export function ChangeDetailView({
                       disabled={approving}
                       onClick={async () => {
                         setApproving(true)
-                        const res = await fetch(`/api/change-requests/${change.id}/plan`, {
-                          method: 'PATCH',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ action: 'approve' }),
-                        })
-                        if (res.ok) {
-                          setPlan(p => p ? { ...p, status: 'approved' } : p)
+                        try {
+                          const res = await fetch(`/api/change-requests/${change.id}/plan`, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ action: 'approve' }),
+                          })
+                          if (res.ok) {
+                            setPlan(p => p ? { ...p, status: 'approved' } : p)
+                          }
+                        } finally {
+                          setApproving(false)
                         }
-                        setApproving(false)
                       }}
                       className="px-4 py-2 rounded-lg bg-green-500 hover:bg-green-400 disabled:opacity-50 text-white text-sm font-bold font-headline transition-colors"
                     >
