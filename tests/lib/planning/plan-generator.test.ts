@@ -113,7 +113,7 @@ function makeAI(): MockAIProvider {
 }
 
 describe('runPlanGeneration', () => {
-  it('transitions status: planning → planned', async () => {
+  it('transitions status: planning → planned in correct order', async () => {
     const { db, updates } = makeMockDb()
     const ai = makeAI()
 
@@ -123,8 +123,7 @@ describe('runPlanGeneration', () => {
       .filter(u => u.table === 'change_requests' && u.data.status)
       .map(u => u.data.status)
 
-    expect(statuses).toContain('planning')
-    expect(statuses).toContain('planned')
+    expect(statuses.indexOf('planning')).toBeLessThan(statuses.indexOf('planned'))
   })
 
   it('inserts a change_plans row', async () => {
