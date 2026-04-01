@@ -56,6 +56,7 @@ export async function runPlanGeneration(
         change_id: changeId,
         status: 'draft',
         estimated_files: architecture.estimatedFiles,
+        branch_name: architecture.branchName,
       })
       .select('id')
       .single()
@@ -89,7 +90,8 @@ export async function runPlanGeneration(
         order_index: t.orderIndex,
         status: 'pending',
       }))
-      await db.from('change_plan_tasks').insert(taskRows)
+      const { error: tasksError } = await db.from('change_plan_tasks').insert(taskRows)
+      if (tasksError) throw tasksError
     }
 
     // Update plan with task count

@@ -49,7 +49,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   // Fetch plan if exists
   const { data: plan } = await db
     .from('change_plans')
-    .select('id, status, estimated_tasks, estimated_files, approved_at')
+    .select('id, status, spec_markdown, estimated_tasks, estimated_files, approved_at')
     .eq('change_id', id)
     .order('created_at', { ascending: false })
     .limit(1)
