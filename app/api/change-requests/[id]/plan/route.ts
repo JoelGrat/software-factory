@@ -85,11 +85,6 @@ export async function PATCH(
   const { data: { user } } = await db.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const body = await req.json()
-  if (body.action !== 'approve') {
-    return NextResponse.json({ error: 'Unknown action' }, { status: 400 })
-  }
-
   const { data: change } = await db
     .from('change_requests')
     .select('id, projects!inner(owner_id)')
@@ -98,6 +93,11 @@ export async function PATCH(
     .single()
 
   if (!change) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+  const body = await req.json()
+  if (body.action !== 'approve') {
+    return NextResponse.json({ error: 'Unknown action' }, { status: 400 })
+  }
 
   const { data: plan } = await db
     .from('change_plans')
