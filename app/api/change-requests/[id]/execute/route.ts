@@ -51,7 +51,7 @@ export async function POST(
     console.error(`[execution-orchestrator] change ${id} failed:`, err)
   )
 
-  return NextResponse.json({ status: 'executing' }, { status: 202 })
+  return NextResponse.json({ changeId: id, status: 'executing' }, { status: 202 })
 }
 
 export async function GET(

@@ -71,6 +71,19 @@ export default function ExecutionView({ change, project }: { change: Change; pro
   }, [status, poll])
 
   const latestSnapshot = snapshots[snapshots.length - 1]
+
+  const latestTraceByTask = new Map<string, TraceEntry>()
+  for (const t of traces) {
+    latestTraceByTask.set(t.task_id, t)
+  }
+
+  const failureTypeByIteration = new Map<number, string>()
+  for (const t of traces) {
+    if (t.failure_type && !failureTypeByIteration.has(t.iteration)) {
+      failureTypeByIteration.set(t.iteration, t.failure_type)
+    }
+  }
+
   const plannedCount = latestSnapshot?.planned_files.length ?? 0
   const propagatedCount = latestSnapshot?.propagated_files.length ?? 0
   const planDivergence = latestSnapshot?.plan_divergence ?? false
@@ -130,10 +143,31 @@ export default function ExecutionView({ change, project }: { change: Change; pro
                           {task.system_components.name} · {task.system_components.type}
                         </p>
                       )}
-                      {task.status === 'failed' && task.last_error && (
-                        <pre className="mt-2 text-xs text-red-700 bg-red-50 rounded p-2 overflow-x-auto whitespace-pre-wrap">
-                          {task.last_error.slice(0, 300)}
-                        </pre>
+                      {(() => {
+                        const trace = latestTraceByTask.get(task.id)
+                        if (!trace) return null
+                        return (
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">{trace.context_mode}</span>
+                            {trace.confidence != null && (
+                              <span className="text-xs text-gray-400">confidence: {trace.confidence}%</span>
+                            )}
+                          </div>
+                        )
+                      })()}
+                      {task.status === 'failed' && (
+                        <div className="mt-2 flex items-center gap-2">
+                          {task.failure_type && (
+                            <span className="text-xs font-medium bg-red-100 text-red-700 px-1.5 py-0.5 rounded">
+                              {task.failure_type}
+                            </span>
+                          )}
+                          {task.last_error && (
+                            <pre className="text-xs text-red-700 bg-red-50 rounded p-2 overflow-x-auto whitespace-pre-wrap flex-1">
+                              {task.last_error.slice(0, 300)}
+                            </pre>
+                          )}
+                        </div>
                       )}
                     </div>
                     <div className="text-xs text-gray-400 capitalize">{task.status}</div>
@@ -164,6 +198,11 @@ export default function ExecutionView({ change, project }: { change: Change; pro
                           {snap.termination_reason}
                         </span>
                       )}
+                      {failureTypeByIteration.get(snap.iteration) && (
+                        <span className="text-xs font-medium bg-red-100 text-red-700 px-1.5 py-0.5 rounded">
+                          {failureTypeByIteration.get(snap.iteration)}
+                        </span>
+                      )}
                     </div>
                   </li>
                 ))}
@@ -172,7 +211,7 @@ export default function ExecutionView({ change, project }: { change: Change; pro
           )}
 
           {/* Action buttons */}
-          {(status === 'review') && (
+          {(status === 'review' || latestSnapshot?.partial_success) && (
             <div className="flex justify-end">
               <button
                 onClick={() => router.push(`/projects/${project?.id}/changes/${change.id}/review` )}
