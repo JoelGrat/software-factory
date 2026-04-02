@@ -3,18 +3,24 @@ import type { AliasMap } from './types'
 export function buildAliasMap(tsconfigContent: string): AliasMap {
   let parsed: unknown
   try {
-    // Strip single-line and block comments before parsing
-    const stripped = tsconfigContent
-      .replace(/\/\/[^\n]*/g, '')
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-    parsed = JSON.parse(stripped)
-  } catch (e) {
-    console.log('[buildAliasMap] JSON.parse failed:', e, '| first 100 chars (hex):', Buffer.from(tsconfigContent.slice(0, 20)).toString('hex'))
+    // First try raw parse (most tsconfigs are valid JSON)
+    // If that fails, strip // line comments (JSONC format) and retry
+    // Do NOT strip /* */ block comments with regex — glob patterns like @/* and **/*.ts
+    // contain /* and */ sequences that would be incorrectly matched
+    try {
+      parsed = JSON.parse(tsconfigContent)
+    } catch {
+      const stripped = tsconfigContent
+        .split('\n')
+        .map(line => line.replace(/^\s*\/\/.*$/, '').replace(/\s*\/\/[^"]*$/, ''))
+        .join('\n')
+      parsed = JSON.parse(stripped)
+    }
+  } catch {
     return {}
   }
 
   const paths = (parsed as any)?.compilerOptions?.paths as Record<string, string[]> | undefined
-  console.log('[buildAliasMap] parsed ok, paths:', JSON.stringify(paths))
   if (!paths) return {}
 
   const map: AliasMap = {}

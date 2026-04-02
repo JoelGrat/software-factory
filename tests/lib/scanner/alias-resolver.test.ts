@@ -49,4 +49,16 @@ describe('buildAliasMap', () => {
     const map = buildAliasMap(tsconfig)
     expect(map['@/']).toBe('src/')
   })
+
+  it('handles glob patterns like @/* and **/*.ts without corrupting JSON', () => {
+    // Regression: block-comment regex /*...*/ would match @/* as opening and **/*.ts as closing
+    const tsconfig = JSON.stringify({
+      compilerOptions: {
+        paths: { '@/*': ['./*'] }
+      },
+      include: ['next-env.d.ts', '**/*.ts', '**/*.tsx']
+    })
+    const map = buildAliasMap(tsconfig)
+    expect(map['@/']).toBe('')
+  })
 })

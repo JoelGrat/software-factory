@@ -82,15 +82,12 @@ export async function runFullScan(projectId: string, db: SupabaseClient): Promis
 
     // 4. Build alias map from tsconfig.json if present
     let aliasMap: Record<string, string> = {}
-    const hasTsconfig = files.includes('tsconfig.json')
-    console.log('[scan] tsconfig.json in files:', hasTsconfig, '| files sample:', files.slice(0, 5))
-    if (hasTsconfig) {
+    if (files.includes('tsconfig.json')) {
       try {
         const content = await fetcher.getContent('tsconfig.json')
         aliasMap = buildAliasMap(content)
-        console.log('[scan] buildAliasMap result:', JSON.stringify(aliasMap), '| tsconfig snippet:', content.slice(0, 200))
-      } catch (e) {
-        console.log('[scan] buildAliasMap error:', e)
+      } catch {
+        // Non-fatal: proceed with empty alias map
       }
     }
 
@@ -116,10 +113,6 @@ export async function runFullScan(projectId: string, db: SupabaseClient): Promis
 
     // 6. Parse into components
     const components: ParsedComponent[] = await parser.parse(files, fetcher, aliasMap)
-
-    // Debug: log alias map and dependency summary
-    console.log('[scan] aliasMap:', JSON.stringify(aliasMap))
-    console.log('[scan] components with dependsOn:', components.filter(c => c.dependsOn.length > 0).map(c => `${c.name} → [${c.dependsOn.join(', ')}]`))
 
     // Check for dynamic imports warning
     const hasDynamicImports = components.some(c => c.edges?.some(e =>
