@@ -177,27 +177,30 @@ export async function runFullScan(projectId: string, db: SupabaseClient): Promis
     const componentIdMap = new Map<string, string>()
     for (const c of (upsertedComponents ?? [])) componentIdMap.set(c.name, c.id)
 
-    // 10. Upsert component_assignment (one row per file)
-    for (const comp of components) {
+    // 10. Write component_assignment (delete-then-insert to work around partial unique index)
+    const allFileIds = [...fileIdMap.values()]
+    if (allFileIds.length > 0) {
+      await db.from('component_assignment').delete().in('file_id', allFileIds)
+    }
+    const assignmentRows = components.flatMap(comp => {
       const componentId = componentIdMap.get(comp.name)
-      if (!componentId) continue
-      for (const file of comp.files) {
-        const fileId = fileIdMap.get(file)
-        if (!fileId) continue
-        await db.from('component_assignment').upsert(
-          {
-            file_id: fileId,
-            component_id: componentId,
-            confidence: comp.confidence,
-            is_primary: true,
-            status: 'assigned',
-            reassignment_count: 0,
-            last_validated_at: now,
-            last_moved_at: now,
-          },
-          { onConflict: 'file_id' }
-        )
-      }
+      if (!componentId) return []
+      return comp.files
+        .map(file => fileIdMap.get(file))
+        .filter((fileId): fileId is string => !!fileId)
+        .map(fileId => ({
+          file_id: fileId,
+          component_id: componentId,
+          confidence: comp.confidence,
+          is_primary: true,
+          status: 'assigned',
+          reassignment_count: 0,
+          last_validated_at: now,
+          last_moved_at: now,
+        }))
+    })
+    if (assignmentRows.length > 0) {
+      await db.from('component_assignment').insert(assignmentRows)
     }
 
     // 11. Upsert component_graph_edges (resolved import edges)

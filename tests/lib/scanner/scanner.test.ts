@@ -47,6 +47,9 @@ function makeDb(project = { id: 'proj-1', repo_url: 'https://github.com/owner/re
         calls.push({ table, op: 'insert', data })
         return { error: null }
       },
+      delete: () => ({
+        in: () => ({ error: null }),
+      }),
       in: () => ({ eq: () => ({ data: [], error: null }) }),
       is: () => ({ order: () => ({ data: [], error: null }) }),
     }),
