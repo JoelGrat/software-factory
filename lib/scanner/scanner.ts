@@ -64,11 +64,11 @@ export async function runFullScan(projectId: string, db: SupabaseClient): Promis
     // 8. Fetch existing components for stability tracking
     const { data: existingComponents } = await db
       .from('system_components')
-      .select('id, name, scan_count, reassignment_count, status')
+      .select('id, name, scan_count, status')
       .eq('project_id', projectId)
       .is('deleted_at', null)
       .order('name' as any)
-    const existingMap = new Map<string, { id: string; scan_count: number; reassignment_count: number; status: string }>()
+    const existingMap = new Map<string, { id: string; scan_count: number; status: string }>()
     for (const c of (existingComponents ?? [])) existingMap.set(c.name, c)
 
     // 9. Upsert system_components
@@ -76,7 +76,7 @@ export async function runFullScan(projectId: string, db: SupabaseClient): Promis
     const componentRows = components.map(c => {
       const existing = existingMap.get(c.name)
       const newScanCount = (existing?.scan_count ?? 0) + 1
-      const unstable = isComponentUnstable(existing?.reassignment_count ?? 0, c.confidence)
+      const unstable = isComponentUnstable(0, c.confidence)
       const isAnchored = c.files.some(f => f.startsWith('app/api/') || f.startsWith('api/'))
       return {
         project_id: projectId,
