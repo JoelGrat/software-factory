@@ -17,37 +17,61 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
 
   if (!project) redirect('/projects')
 
-  const [
-    { data: changes },
-    { count: fileCount },
-    { count: componentCount },
-    { data: topComponents },
-  ] = await Promise.all([
+  const [{ data: changes }, { count: fileCount }, { data: allComponents }] = await Promise.all([
     db.from('change_requests')
       .select('id, title, type, priority, status, risk_level, created_at, updated_at')
       .eq('project_id', id)
       .order('updated_at', { ascending: false }),
     db.from('files').select('*', { count: 'exact', head: true }).eq('project_id', id),
-    db.from('system_components').select('*', { count: 'exact', head: true }).eq('project_id', id).is('deleted_at', null),
     db.from('system_components')
-      .select('id, name, type, status, is_anchored, scan_count')
+      .select('id, name, type, status, is_anchored')
       .eq('project_id', id)
       .is('deleted_at', null)
-      .order('scan_count', { ascending: false })
-      .limit(12),
+      .order('name'),
   ])
 
-  const { data: allCompIds } = await db
-    .from('system_components').select('id').eq('project_id', id).is('deleted_at', null)
-  const allIds = (allCompIds ?? []).map(c => c.id)
-  const { count: edgeCount } = allIds.length > 0
-    ? await db.from('component_dependencies').select('*', { count: 'exact', head: true }).in('from_id', allIds)
-    : { count: 0 }
+  const allIds = (allComponents ?? []).map(c => c.id)
 
-  const topIds = (topComponents ?? []).map(c => c.id)
-  const { count: lowConfCount } = topIds.length > 0
-    ? await db.from('component_assignment').select('*', { count: 'exact', head: true }).lt('confidence', 40).in('component_id', topIds)
-    : { count: 0 }
+  const [{ data: assignments }, { data: deps }] = allIds.length > 0
+    ? await Promise.all([
+        db.from('component_assignment').select('component_id, confidence').in('component_id', allIds).eq('is_primary', true),
+        db.from('component_dependencies').select('from_id, to_id').in('from_id', allIds).is('deleted_at', null),
+      ])
+    : [{ data: [] }, { data: [] }]
+
+  // Per-component file counts and confidence
+  const fileCountMap: Record<string, number> = {}
+  const confAccum: Record<string, { total: number; n: number }> = {}
+  for (const a of (assignments ?? [])) {
+    fileCountMap[a.component_id] = (fileCountMap[a.component_id] ?? 0) + 1
+    if (!confAccum[a.component_id]) confAccum[a.component_id] = { total: 0, n: 0 }
+    confAccum[a.component_id].total += a.confidence
+    confAccum[a.component_id].n++
+  }
+  const outgoingMap: Record<string, number> = {}
+  const incomingMap: Record<string, number> = {}
+  for (const d of (deps ?? [])) {
+    outgoingMap[d.from_id] = (outgoingMap[d.from_id] ?? 0) + 1
+    incomingMap[d.to_id] = (incomingMap[d.to_id] ?? 0) + 1
+  }
+
+  const components = (allComponents ?? []).map(c => {
+    const conf = confAccum[c.id]
+    return {
+      id: c.id,
+      name: c.name,
+      type: c.type,
+      status: c.status,
+      is_anchored: c.is_anchored,
+      fileCount: fileCountMap[c.id] ?? 0,
+      confidence: conf ? Math.round(conf.total / conf.n) : 50,
+      incomingDeps: incomingMap[c.id] ?? 0,
+      outgoingDeps: outgoingMap[c.id] ?? 0,
+    }
+  })
+
+  const totalConfSum = Object.values(confAccum).reduce((s, v) => s + v.total, 0)
+  const totalConfN   = Object.values(confAccum).reduce((s, v) => s + v.n,     0)
 
   return (
     <ProjectDashboard
@@ -55,11 +79,14 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
       initialChanges={changes ?? []}
       initialStats={{
         fileCount: fileCount ?? 0,
-        componentCount: componentCount ?? 0,
-        edgeCount: edgeCount ?? 0,
-        lowConfidenceCount: lowConfCount ?? 0,
+        componentCount: components.length,
+        edgeCount: (deps ?? []).length,
+        lowConfidenceCount: components.filter(c => c.confidence < 40).length,
+        unstableCount: components.filter(c => c.status === 'unstable').length,
+        avgConfidence: totalConfN > 0 ? Math.round(totalConfSum / totalConfN) : 0,
       }}
-      initialTopComponents={topComponents ?? []}
+      initialComponents={components}
+      allDeps={deps ?? []}
     />
   )
 }

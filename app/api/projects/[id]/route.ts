@@ -40,12 +40,17 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     ? await db.from('component_dependencies').select('*', { count: 'exact', head: true }).in('from_id', allIds)
     : { count: 0 }
 
-  // Unknown deps: components whose files have low-confidence assignments
-  const { count: lowConfCount } = await db
-    .from('component_assignment')
-    .select('*', { count: 'exact', head: true })
-    .lt('confidence', 40)
-    .in('component_id', (topComponents ?? []).map(c => c.id))
+  const { count: unstableCount } = allIds.length > 0
+    ? await db.from('system_components').select('*', { count: 'exact', head: true }).in('id', allIds).eq('status', 'unstable')
+    : { count: 0 }
+
+  const { data: confData } = allIds.length > 0
+    ? await db.from('component_assignment').select('confidence').in('component_id', allIds).eq('is_primary', true)
+    : { data: [] }
+
+  const confArr = (confData ?? []).map((r: any) => r.confidence as number)
+  const avgConfidence = confArr.length > 0 ? Math.round(confArr.reduce((s, v) => s + v, 0) / confArr.length) : 0
+  const lowConfCount = confArr.filter(v => v < 40).length
 
   return NextResponse.json({
     ...project,
@@ -53,7 +58,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       fileCount: fileCount ?? 0,
       componentCount: componentCount ?? 0,
       edgeCount: edgeCount ?? 0,
-      lowConfidenceCount: lowConfCount ?? 0,
+      lowConfidenceCount: lowConfCount,
+      unstableCount: unstableCount ?? 0,
+      avgConfidence,
     },
     topComponents: topComponents ?? [],
   })
