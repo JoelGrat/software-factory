@@ -82,12 +82,15 @@ export async function runFullScan(projectId: string, db: SupabaseClient): Promis
 
     // 4. Build alias map from tsconfig.json if present
     let aliasMap: Record<string, string> = {}
-    if (files.includes('tsconfig.json')) {
+    const hasTsconfig = files.includes('tsconfig.json')
+    console.log('[scan] tsconfig.json in files:', hasTsconfig, '| files sample:', files.slice(0, 5))
+    if (hasTsconfig) {
       try {
         const content = await fetcher.getContent('tsconfig.json')
         aliasMap = buildAliasMap(content)
-      } catch {
-        // Non-fatal: proceed with empty alias map
+        console.log('[scan] buildAliasMap result:', JSON.stringify(aliasMap), '| tsconfig snippet:', content.slice(0, 200))
+      } catch (e) {
+        console.log('[scan] buildAliasMap error:', e)
       }
     }
 
