@@ -9,13 +9,44 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
   const { data: project } = await db
     .from('projects')
-    .select('id, name, owner_id, repo_url, scan_status, scan_error, lock_version, created_at')
+    .select('id, name, owner_id, repo_url, scan_status, scan_error, scan_progress, lock_version, created_at')
     .eq('id', id)
     .eq('owner_id', user.id)
     .single()
 
   if (!project) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-  return NextResponse.json(project)
+
+  // Live counts for dashboard
+  const [{ count: fileCount }, { count: componentCount }, { count: edgeCount }, { data: topComponents }] =
+    await Promise.all([
+      db.from('files').select('*', { count: 'exact', head: true }).eq('project_id', id),
+      db.from('system_components').select('*', { count: 'exact', head: true }).eq('project_id', id).is('deleted_at', null),
+      db.from('component_graph_edges').select('*', { count: 'exact', head: true }).eq('project_id', id),
+      db.from('system_components')
+        .select('id, name, type, status, is_anchored, scan_count')
+        .eq('project_id', id)
+        .is('deleted_at', null)
+        .order('scan_count', { ascending: false })
+        .limit(12),
+    ])
+
+  // Unknown deps: components whose files have low-confidence assignments
+  const { count: lowConfCount } = await db
+    .from('component_assignment')
+    .select('*', { count: 'exact', head: true })
+    .lt('confidence', 60)
+    .in('component_id', (topComponents ?? []).map(c => c.id))
+
+  return NextResponse.json({
+    ...project,
+    stats: {
+      fileCount: fileCount ?? 0,
+      componentCount: componentCount ?? 0,
+      edgeCount: edgeCount ?? 0,
+      lowConfidenceCount: lowConfCount ?? 0,
+    },
+    topComponents: topComponents ?? [],
+  })
 }
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {

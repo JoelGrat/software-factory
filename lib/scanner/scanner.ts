@@ -6,6 +6,44 @@ import { HeuristicParser } from './heuristic-parser'
 import { isComponentUnstable } from './scan-helpers'
 import type { ParsedComponent } from './types'
 
+export interface ScanMilestone {
+  id: string
+  label: string
+  status: 'done' | 'active' | 'pending'
+  detail?: string
+}
+
+export interface ScanProgress {
+  stage: 'fetching' | 'parsing' | 'building' | 'finalizing' | 'complete' | 'failed'
+  parserType: 'typescript' | 'heuristic' | null
+  milestones: ScanMilestone[]
+  warnings: string[]
+  fileCount?: number
+  componentCount?: number
+}
+
+async function writeProgress(db: SupabaseClient, projectId: string, progress: ScanProgress) {
+  await db.from('projects').update({ scan_progress: progress as any }).eq('id', projectId)
+}
+
+const BASE_MILESTONES: ScanMilestone[] = [
+  { id: 'fetch',    label: 'Fetch repository file tree', status: 'pending' },
+  { id: 'parse',    label: 'Parse components',           status: 'pending' },
+  { id: 'build',    label: 'Build dependency graph',     status: 'pending' },
+  { id: 'finalize', label: 'Finalize system model',      status: 'pending' },
+]
+
+function milestones(doneUpTo: string, active: string, detail?: Record<string, string>): ScanMilestone[] {
+  const order = ['fetch', 'parse', 'build', 'finalize']
+  const doneIdx = order.indexOf(doneUpTo)
+  const activeIdx = order.indexOf(active)
+  return BASE_MILESTONES.map((m, i) => ({
+    ...m,
+    status: i <= doneIdx ? 'done' : i === activeIdx ? 'active' : 'pending',
+    detail: detail?.[m.id] ?? m.detail,
+  }))
+}
+
 export async function runFullScan(projectId: string, db: SupabaseClient): Promise<void> {
   // 1. Get project
   const { data: project } = await db
@@ -22,10 +60,19 @@ export async function runFullScan(projectId: string, db: SupabaseClient): Promis
     return
   }
 
-  // 2. Mark scanning
+  // 2. Mark scanning + initial progress
   await db
     .from('projects')
-    .update({ scan_status: 'scanning', scan_error: null })
+    .update({
+      scan_status: 'scanning',
+      scan_error: null,
+      scan_progress: {
+        stage: 'fetching',
+        parserType: null,
+        milestones: milestones('', 'fetch'),
+        warnings: [],
+      } satisfies ScanProgress,
+    })
     .eq('id', projectId)
 
   try {
@@ -47,10 +94,43 @@ export async function runFullScan(projectId: string, db: SupabaseClient): Promis
     // 5. Select parser
     const tsParser = new TypeScriptParser()
     const heuristicParser = new HeuristicParser()
-    const parser = tsParser.canParse(files) ? tsParser : heuristicParser
+    const useTS = tsParser.canParse(files)
+    const parser = useTS ? tsParser : heuristicParser
+    const parserType: ScanProgress['parserType'] = useTS ? 'typescript' : 'heuristic'
+    const warnings: string[] = []
+    if (!useTS) warnings.push('Heuristic parser used — dependency graph may be incomplete')
+
+    await writeProgress(db, projectId, {
+      stage: 'parsing',
+      parserType,
+      fileCount: files.length,
+      milestones: milestones('fetch', 'parse', {
+        fetch: `${files.length.toLocaleString()} files`,
+        parse: useTS ? 'TypeScript detected' : 'Heuristic parser',
+      }),
+      warnings,
+    })
 
     // 6. Parse into components
     const components: ParsedComponent[] = await parser.parse(files, fetcher, aliasMap)
+
+    // Check for dynamic imports warning
+    const hasDynamicImports = components.some(c => c.edges?.some(e =>
+      e.edgeType === 'dynamic-template' || e.edgeType === 'dynamic-computed'
+    ))
+    if (hasDynamicImports) warnings.push('Dynamic imports detected — dependency graph may be incomplete')
+
+    await writeProgress(db, projectId, {
+      stage: 'building',
+      parserType,
+      fileCount: files.length,
+      componentCount: components.length,
+      milestones: milestones('parse', 'build', {
+        fetch: `${files.length.toLocaleString()} files`,
+        parse: `${components.length} components`,
+      }),
+      warnings,
+    })
 
     // 7. Upsert files
     const fileRows = files.map(path => ({ project_id: projectId, path, hash: null }))
@@ -172,7 +252,23 @@ export async function runFullScan(projectId: string, db: SupabaseClient): Promis
     // 14. Mark ready
     await db
       .from('projects')
-      .update({ scan_status: 'ready', scan_error: null })
+      .update({
+        scan_status: 'ready',
+        scan_error: null,
+        scan_progress: {
+          stage: 'complete',
+          parserType,
+          fileCount: files.length,
+          componentCount: components.length,
+          milestones: milestones('finalize', 'finalize', {
+            fetch: `${files.length.toLocaleString()} files`,
+            parse: `${components.length} components`,
+            build: `${edgeRows.length} edges`,
+            finalize: 'System model ready',
+          }),
+          warnings,
+        } satisfies ScanProgress,
+      })
       .eq('id', projectId)
 
   } catch (err) {
