@@ -44,7 +44,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const { count: lowConfCount } = await db
     .from('component_assignment')
     .select('*', { count: 'exact', head: true })
-    .lt('confidence', 60)
+    .lt('confidence', 40)
     .in('component_id', (topComponents ?? []).map(c => c.id))
 
   return NextResponse.json({
