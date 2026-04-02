@@ -17,11 +17,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   if (!project) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
   // Live counts for dashboard
-  const [{ count: fileCount }, { count: componentCount }, { count: edgeCount }, { data: topComponents }] =
+  const [{ count: fileCount }, { count: componentCount }, { data: topComponents }] =
     await Promise.all([
       db.from('files').select('*', { count: 'exact', head: true }).eq('project_id', id),
       db.from('system_components').select('*', { count: 'exact', head: true }).eq('project_id', id).is('deleted_at', null),
-      db.from('component_graph_edges').select('*', { count: 'exact', head: true }).eq('project_id', id),
       db.from('system_components')
         .select('id, name, type, status, is_anchored, scan_count')
         .eq('project_id', id)
@@ -29,6 +28,17 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
         .order('scan_count', { ascending: false })
         .limit(12),
     ])
+
+  // Count component-to-component dependencies across all components in this project
+  const { data: allCompIds } = await db
+    .from('system_components')
+    .select('id')
+    .eq('project_id', id)
+    .is('deleted_at', null)
+  const allIds = (allCompIds ?? []).map(c => c.id)
+  const { count: edgeCount } = allIds.length > 0
+    ? await db.from('component_dependencies').select('*', { count: 'exact', head: true }).in('from_id', allIds)
+    : { count: 0 }
 
   // Unknown deps: components whose files have low-confidence assignments
   const { count: lowConfCount } = await db
