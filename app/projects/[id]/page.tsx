@@ -21,7 +21,6 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
     { data: changes },
     { count: fileCount },
     { count: componentCount },
-    { count: edgeCount },
     { data: topComponents },
   ] = await Promise.all([
     db.from('change_requests')
@@ -30,7 +29,6 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
       .order('updated_at', { ascending: false }),
     db.from('files').select('*', { count: 'exact', head: true }).eq('project_id', id),
     db.from('system_components').select('*', { count: 'exact', head: true }).eq('project_id', id).is('deleted_at', null),
-    db.from('component_graph_edges').select('*', { count: 'exact', head: true }).eq('project_id', id),
     db.from('system_components')
       .select('id, name, type, status, is_anchored, scan_count')
       .eq('project_id', id)
@@ -39,9 +37,16 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
       .limit(12),
   ])
 
+  const { data: allCompIds } = await db
+    .from('system_components').select('id').eq('project_id', id).is('deleted_at', null)
+  const allIds = (allCompIds ?? []).map(c => c.id)
+  const { count: edgeCount } = allIds.length > 0
+    ? await db.from('component_dependencies').select('*', { count: 'exact', head: true }).in('from_id', allIds)
+    : { count: 0 }
+
   const topIds = (topComponents ?? []).map(c => c.id)
   const { count: lowConfCount } = topIds.length > 0
-    ? await db.from('component_assignment').select('*', { count: 'exact', head: true }).lt('confidence', 60).in('component_id', topIds)
+    ? await db.from('component_assignment').select('*', { count: 'exact', head: true }).lt('confidence', 40).in('component_id', topIds)
     : { count: 0 }
 
   return (
