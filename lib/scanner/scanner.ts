@@ -224,7 +224,12 @@ export async function runFullScan(projectId: string, db: SupabaseClient): Promis
         .upsert(edgeRows, { onConflict: 'from_file_id,to_file_id' })
     }
 
-    // 12. Upsert component_dependencies (component-to-component)
+    // 12. Insert component_dependencies (component-to-component)
+    // Delete existing deps for these components first, then insert fresh
+    const allComponentIds = [...componentIdMap.values()]
+    if (allComponentIds.length > 0) {
+      await db.from('component_dependencies').delete().in('from_id', allComponentIds)
+    }
     const depRows = components.flatMap(comp => {
       const fromId = componentIdMap.get(comp.name)
       if (!fromId) return []
@@ -234,9 +239,8 @@ export async function runFullScan(projectId: string, db: SupabaseClient): Promis
         .map(toId => ({ from_id: fromId, to_id: toId, type: 'sync' as const, deleted_at: null }))
     })
     if (depRows.length > 0) {
-      await db
-        .from('component_dependencies')
-        .upsert(depRows, { onConflict: 'from_id,to_id' })
+      const { error: depError } = await db.from('component_dependencies').insert(depRows)
+      if (depError) throw new Error(`Failed to write component dependencies: ${depError.message}`)
     }
 
     // 13. Insert component version snapshots
@@ -266,7 +270,7 @@ export async function runFullScan(projectId: string, db: SupabaseClient): Promis
           milestones: milestones('finalize', 'finalize', {
             fetch: `${files.length.toLocaleString()} files`,
             parse: `${components.length} components`,
-            build: `${edgeRows.length} edges`,
+            build: `${edgeRows.length} file edges, ${depRows.length} component deps`,
             finalize: 'System model ready',
           }),
           warnings,

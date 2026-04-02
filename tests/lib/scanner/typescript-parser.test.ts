@@ -118,4 +118,36 @@ describe('TypeScriptParser', () => {
     expect(apiComponent).toBeDefined()
     expect(apiComponent?.type).toBe('api')  // HTTP handler signal
   })
+
+  it('populate dependsOn when one component imports from another via alias', async () => {
+    const parser = new TypeScriptParser()
+    const mockFetcher: FileFetcher = {
+      getFileTree: async () => [],
+      getContent: async (path: string) => {
+        if (path === 'lib/auth/token.ts') return `export function getToken() {}`
+        if (path === 'app/api/auth/route.ts') return `import { getToken } from '@/lib/auth/token'\nexport async function GET(req: Request) {}`
+        return ''
+      },
+    }
+    const files = ['lib/auth/token.ts', 'app/api/auth/route.ts']
+    const components = await parser.parse(files, mockFetcher, { '@/': '' })
+    const apiComponent = components.find(c => c.name === 'app/api')
+    expect(apiComponent?.dependsOn).toContain('lib/auth')
+  })
+
+  it('populate dependsOn via relative imports', async () => {
+    const parser = new TypeScriptParser()
+    const mockFetcher: FileFetcher = {
+      getFileTree: async () => [],
+      getContent: async (path: string) => {
+        if (path === 'lib/utils/format.ts') return `export function fmt(s: string) { return s }`
+        if (path === 'lib/auth/token.ts') return `import { fmt } from '../utils/format'`
+        return ''
+      },
+    }
+    const files = ['lib/utils/format.ts', 'lib/auth/token.ts']
+    const components = await parser.parse(files, mockFetcher, {})
+    const authComponent = components.find(c => c.name === 'lib/auth')
+    expect(authComponent?.dependsOn).toContain('lib/utils')
+  })
 })
