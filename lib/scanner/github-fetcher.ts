@@ -27,26 +27,22 @@ export class GithubFileFetcher {
     return h
   }
 
-  // Download and unzip the whole repo in one API call.
+  // Download and unzip the whole repo in one request.
+  // Uses the direct archive URL (not the API endpoint) to avoid rate limits.
   // Subsequent getContent() calls are served from memory.
   async getFileTree(): Promise<string[]> {
-    const url = `https://api.github.com/repos/${this.owner}/${this.repo}/zipball`
+    // Direct archive download — does NOT count against GitHub API rate limits
+    const url = `https://github.com/${this.owner}/${this.repo}/archive/HEAD.zip`
     const res = await fetch(url, { headers: this.headers })
 
-    if (res.status === 403) {
-      const body = await res.text().catch(() => '')
-      throw new Error(
-        `GitHub API rate limit exceeded. Add a GitHub Personal Access Token to your project settings to increase the limit to 5,000 requests/hour.${body ? ` (${body.slice(0, 200)})` : ''}`
-      )
-    }
-    if (res.status === 401) {
-      throw new Error('GitHub API error: 401 Unauthorized — check your repository token.')
-    }
     if (res.status === 404) {
-      throw new Error('GitHub API error: 404 — repository not found or not accessible.')
+      throw new Error('Repository not found or not accessible. Check the URL and token.')
+    }
+    if (res.status === 401 || res.status === 403) {
+      throw new Error('Repository access denied. Add a GitHub Personal Access Token for private repos.')
     }
     if (!res.ok) {
-      throw new Error(`GitHub API error: ${res.status} ${res.statusText}`)
+      throw new Error(`Failed to download repository archive: ${res.status} ${res.statusText}`)
     }
 
     const buffer = await res.arrayBuffer()

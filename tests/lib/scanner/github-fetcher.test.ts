@@ -67,7 +67,7 @@ describe('GithubFileFetcher', () => {
     const fetcher = new GithubFileFetcher('https://github.com/owner/repo', 'ghp_token')
     await fetcher.getFileTree()
     const [url, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit]
-    expect(url).toContain('/repos/owner/repo/zipball')
+    expect(url).toContain('github.com/owner/repo/archive/HEAD.zip')
     expect((init.headers as Record<string, string>)['Authorization']).toBe('Bearer ghp_token')
   })
 
@@ -83,10 +83,10 @@ describe('GithubFileFetcher', () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       ok: false, status: 403, statusText: 'Forbidden',
       arrayBuffer: async () => new ArrayBuffer(0),
-      text: async () => 'rate limit exceeded',
+      text: async () => '',
     } as Response)
     const fetcher = new GithubFileFetcher('https://github.com/owner/repo')
-    await expect(fetcher.getFileTree()).rejects.toThrow('rate limit')
+    await expect(fetcher.getFileTree()).rejects.toThrow('access denied')
   })
 
   it('getFileTree throws on 404', async () => {
@@ -96,6 +96,6 @@ describe('GithubFileFetcher', () => {
       text: async () => '',
     } as Response)
     const fetcher = new GithubFileFetcher('https://github.com/owner/repo')
-    await expect(fetcher.getFileTree()).rejects.toThrow('404')
+    await expect(fetcher.getFileTree()).rejects.toThrow('not found')
   })
 })
