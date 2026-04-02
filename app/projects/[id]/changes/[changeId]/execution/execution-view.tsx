@@ -10,11 +10,12 @@ interface Snapshot {
   tests_passed: number; tests_failed: number; error_summary: string | null
   termination_reason: string | null; planned_files: string[]
   propagated_files: string[]; plan_divergence: boolean; partial_success: boolean
+  duration_ms: number | null
 }
 
 interface TraceEntry {
   id: string; iteration: number; task_id: string; context_mode: string
-  strategy_used: string; failure_type: string | null; confidence: number | null
+  failure_type: string | null; confidence: number | null
 }
 
 interface Task {

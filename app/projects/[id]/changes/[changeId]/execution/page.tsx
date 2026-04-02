@@ -22,7 +22,7 @@ export default async function ExecutionPage({
 
   if (!change) redirect(`/projects/${id}`)
 
-  const { data: project } = await db.from('projects').select('id, name').eq('id', id).single()
+  const proj = change.projects as unknown as { id: string; name: string }
 
-  return <ExecutionView change={change} project={project} />
+  return <ExecutionView change={change} project={proj} />
 }

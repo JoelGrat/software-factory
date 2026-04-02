@@ -80,17 +80,25 @@ export async function GET(
 
   const { data: traces } = await db
     .from('execution_trace')
-    .select('id, iteration, task_id, context_mode, strategy_used, failure_type, confidence, created_at')
+    .select('id, iteration, task_id, context_mode, failure_type, confidence, created_at')
     .eq('change_id', id)
     .order('created_at', { ascending: true })
 
-  const { data: tasks } = await db
-    .from('change_plan_tasks')
-    .select('id, description, status, failure_type, last_error, order_index, system_components(name, type)')
-    .eq('plan_id',
-      (await db.from('change_plans').select('id').eq('change_id', id).order('created_at', { ascending: false }).limit(1).maybeSingle())?.data?.id ?? ''
-    )
-    .order('order_index', { ascending: true })
+  const { data: latestPlan } = await db
+    .from('change_plans')
+    .select('id')
+    .eq('change_id', id)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  const { data: tasks } = latestPlan
+    ? await db
+        .from('change_plan_tasks')
+        .select('id, description, status, failure_type, last_error, order_index, system_components(name, type)')
+        .eq('plan_id', latestPlan.id)
+        .order('order_index', { ascending: true })
+    : { data: [] }
 
   return NextResponse.json({
     status: change.status,
