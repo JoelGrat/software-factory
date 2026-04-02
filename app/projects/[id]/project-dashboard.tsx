@@ -120,8 +120,10 @@ function MilestoneRow({ milestone }: { milestone: ScanMilestone }) {
 
 function modelQuality(stats: Stats, progress: ScanProgress | null): { label: string; color: string } | null {
   if (!stats || stats.componentCount === 0) return null
-  const isHeuristic = progress?.parserType === 'heuristic'
-  if (isHeuristic) return { label: 'LOW', color: 'text-red-400 bg-red-400/10' }
+  // parserType may be absent in old scan_progress blobs — fall back to milestone detail text
+  const parserType = progress?.parserType
+    ?? (progress?.milestones?.some(m => m.detail?.includes('Heuristic')) ? 'heuristic' : 'typescript')
+  if (parserType === 'heuristic') return { label: 'LOW', color: 'text-red-400 bg-red-400/10' }
   // confidence < 40 = genuinely unresolvable; 50 = no type signals but valid TS component
   const unknownRatio = stats.componentCount > 0 ? stats.lowConfidenceCount / stats.componentCount : 0
   if (unknownRatio > 0.3) return { label: 'MEDIUM', color: 'text-amber-400 bg-amber-400/10' }
