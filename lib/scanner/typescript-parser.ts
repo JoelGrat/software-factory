@@ -110,7 +110,7 @@ export class TypeScriptParser implements LanguageParser {
     return files.some(f => f === 'tsconfig.json' || f.startsWith('next.config.'))
   }
 
-  async parse(files: string[], fetcher: FileFetcher, _aliases: AliasMap): Promise<ParsedComponent[]> {
+  async parse(files: string[], fetcher: FileFetcher, aliases: AliasMap): Promise<ParsedComponent[]> {
     // Only parse code files; skip config, tests, and lock files
     const codeFiles = files.filter(
       f =>
@@ -172,21 +172,32 @@ export class TypeScriptParser implements LanguageParser {
 
     // resolveSpecifier inline (mirrors scanner.ts logic, no external dep)
     const resolveEdgeTarget = (specifier: string, fromPath: string): string | null => {
-      if (specifier.startsWith('.')) {
+      let resolved = specifier
+
+      // Apply alias substitutions (e.g. '@/' → '')
+      for (const [prefix, target] of Object.entries(aliases)) {
+        if (resolved.startsWith(prefix)) {
+          resolved = resolved.replace(prefix, target)
+          break
+        }
+      }
+
+      if (resolved.startsWith('.')) {
         const fromDir = fromPath.split('/').slice(0, -1).join('/')
-        const joined = fromDir ? `${fromDir}/${specifier}` : specifier
+        const joined = fromDir ? `${fromDir}/${resolved}` : resolved
         const parts = joined.split('/')
         const normalized: string[] = []
         for (const p of parts) {
           if (p === '..') normalized.pop()
           else if (p !== '.') normalized.push(p)
         }
-        const base = normalized.join('/')
-        const candidates = ['', '.ts', '.tsx', '/index.ts', '/index.tsx', '.js', '.jsx', '/index.js']
-        for (const ext of candidates) {
-          const candidate = base + ext
-          if (fileToComponent.has(candidate)) return candidate
-        }
+        resolved = normalized.join('/')
+      }
+
+      const candidates = ['', '.ts', '.tsx', '/index.ts', '/index.tsx', '.js', '.jsx', '/index.js']
+      for (const ext of candidates) {
+        const candidate = resolved + ext
+        if (fileToComponent.has(candidate)) return candidate
       }
       return null
     }
