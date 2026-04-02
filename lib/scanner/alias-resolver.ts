@@ -8,11 +8,13 @@ export function buildAliasMap(tsconfigContent: string): AliasMap {
       .replace(/\/\/[^\n]*/g, '')
       .replace(/\/\*[\s\S]*?\*\//g, '')
     parsed = JSON.parse(stripped)
-  } catch {
+  } catch (e) {
+    console.log('[buildAliasMap] JSON.parse failed:', e, '| first 100 chars (hex):', Buffer.from(tsconfigContent.slice(0, 20)).toString('hex'))
     return {}
   }
 
   const paths = (parsed as any)?.compilerOptions?.paths as Record<string, string[]> | undefined
+  console.log('[buildAliasMap] parsed ok, paths:', JSON.stringify(paths))
   if (!paths) return {}
 
   const map: AliasMap = {}
