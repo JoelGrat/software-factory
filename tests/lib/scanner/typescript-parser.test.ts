@@ -52,6 +52,28 @@ describe('groupFilesByComponent', () => {
     const groups = groupFilesByComponent(['lib/index.ts'])
     expect(groups.get('lib/index')).toEqual(['lib/index.ts'])
   })
+  it('splits signal-named files into sub-components at 3 segments', () => {
+    const groups = groupFilesByComponent([
+      'lib/supabase/client.ts',
+      'lib/supabase/server.ts',
+      'lib/supabase/admin.ts',
+      'lib/supabase/types.ts',   // no signal — stays grouped
+    ])
+    expect(groups.get('lib/supabase/client')).toEqual(['lib/supabase/client.ts'])
+    expect(groups.get('lib/supabase/server')).toEqual(['lib/supabase/server.ts'])
+    expect(groups.get('lib/supabase/admin')).toEqual(['lib/supabase/admin.ts'])
+    expect(groups.get('lib/supabase')).toEqual(['lib/supabase/types.ts'])
+    expect(groups.has('lib/supabase/types')).toBe(false)
+  })
+  it('does not split signal-named files at 4+ segments', () => {
+    const groups = groupFilesByComponent(['app/api/auth/[id]/service.ts'])
+    expect(groups.get('app/api')).toBeDefined()
+    expect(groups.has('app/api/service')).toBe(false)
+  })
+  it('split signal check is case-insensitive', () => {
+    const groups = groupFilesByComponent(['lib/db/Service.ts'])
+    expect(groups.get('lib/db/service')).toEqual(['lib/db/Service.ts'])
+  })
 })
 
 import { extractImports, TypeScriptParser } from '@/lib/scanner/typescript-parser'

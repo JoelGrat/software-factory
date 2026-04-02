@@ -26,6 +26,20 @@ export function detectAnchoredPath(filePath: string): boolean {
   )
 }
 
+// Files whose stems signal independent responsibility — split into their own sub-component
+// when they live exactly one level inside a grouped directory (3-segment paths).
+// Example: lib/supabase/client.ts → lib/supabase/client (not lib/supabase)
+const SPLIT_SIGNAL_STEMS = new Set([
+  'client', 'server', 'admin',
+  'service', 'controller', 'handler', 'router',
+  'provider', 'middleware', 'worker', 'manager',
+  'store', 'context',
+])
+
+function hasSplitSignal(stem: string): boolean {
+  return SPLIT_SIGNAL_STEMS.has(stem.toLowerCase())
+}
+
 export function groupFilesByComponent(files: string[]): Map<string, string[]> {
   const groups = new Map<string, string[]>()
   for (const file of files) {
@@ -38,8 +52,17 @@ export function groupFilesByComponent(files: string[]): Map<string, string[]> {
       // one level deep — e.g. lib/index.ts → 'lib/index'
       key = `${parts[0]}/${parts[1]!.replace(/\.[^.]+$/, '')}`
     } else {
-      // deeper — group by first two path segments: lib/auth/token.ts → 'lib/auth'
-      key = `${parts[0]}/${parts[1]}`
+      // 3+ segments: default to first two path segments
+      const twoSegKey = `${parts[0]}/${parts[1]}`
+      // At exactly 3 segments, check if the filename signals a split
+      // lib/supabase/client.ts → lib/supabase/client
+      // lib/supabase/types.ts  → lib/supabase  (no signal)
+      if (parts.length === 3) {
+        const stem = parts[2]!.replace(/\.[^.]+$/, '')
+        key = hasSplitSignal(stem) ? `${twoSegKey}/${stem.toLowerCase()}` : twoSegKey
+      } else {
+        key = twoSegKey
+      }
     }
     if (!groups.has(key)) groups.set(key, [])
     groups.get(key)!.push(file)
