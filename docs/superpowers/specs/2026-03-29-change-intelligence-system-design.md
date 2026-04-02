@@ -811,4 +811,5 @@ Async operations (scan, impact analysis) write directly to DB. Client polls. No 
 - Heavy upfront requirements loops (3-iteration AI self-critique)
 - Global planning for all requirements
 - Full re-analysis of entire project on each change
+
 - Unnecessary gates between minor steps
