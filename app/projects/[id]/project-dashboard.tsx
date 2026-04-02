@@ -58,7 +58,7 @@ function Badge({ label, colorClass }: { label: string; colorClass: string }) {
   )
 }
 
-function ScanStatusStrip({ project }: { project: Project }) {
+function ScanStatusStrip({ project, onRescan }: { project: Project; onRescan: () => void }) {
   const isScanning = project.scan_status === 'scanning'
   return (
     <div className="flex items-center gap-3 px-5 py-3 rounded-xl bg-[#131b2e] border border-white/5">
@@ -81,12 +81,24 @@ function ScanStatusStrip({ project }: { project: Project }) {
            project.repo_url ? 'Repository connected — scan pending' : 'No repository connected'}
         </span>
       </div>
-      <Link
-        href={`/projects/${project.id}/system-model`}
-        className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors flex-shrink-0"
-      >
-        View model →
-      </Link>
+      <div className="flex items-center gap-3 flex-shrink-0">
+        {!isScanning && project.repo_url && (
+          <button
+            onClick={onRescan}
+            className="text-xs text-slate-400 hover:text-slate-200 transition-colors"
+          >
+            Rescan
+          </button>
+        )}
+        {project.scan_status === 'ready' && (
+          <Link
+            href={`/projects/${project.id}/system-model`}
+            className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+          >
+            View model →
+          </Link>
+        )}
+      </div>
     </div>
   )
 }
@@ -110,6 +122,12 @@ export function ProjectDashboard({ project: initial, initialChanges }: { project
     }, 3000)
     return () => clearInterval(id)
   }, [project.id, project.scan_status, router])
+
+  async function handleRescan() {
+    const res = await fetch(`/api/projects/${project.id}/scan`, { method: 'POST' })
+    if (!res.ok) return
+    setProject(p => ({ ...p, scan_status: 'scanning', scan_error: null }))
+  }
 
   return (
     <div className="flex flex-col h-screen bg-[#0b1326] text-on-surface overflow-hidden">
@@ -151,7 +169,7 @@ export function ProjectDashboard({ project: initial, initialChanges }: { project
             </div>
 
             {/* Scan status */}
-            <ScanStatusStrip project={project} />
+            <ScanStatusStrip project={project} onRescan={handleRescan} />
 
             {/* Change list */}
             <div>
