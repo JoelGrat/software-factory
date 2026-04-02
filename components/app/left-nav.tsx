@@ -1,5 +1,6 @@
 'use client'
 import Link from 'next/link'
+import { usePathname, useParams } from 'next/navigation'
 
 const FOOTER_ITEMS = [
   { href: '/settings', icon: 'settings',     label: 'Settings' },
@@ -9,12 +10,23 @@ const FOOTER_ITEMS = [
 
 interface Props {
   projectName?: string
+  projectId?: string
 }
 
-export function LeftNav({ projectName }: Props) {
+export function LeftNav({ projectName, projectId: projectIdProp }: Props) {
+  const pathname = usePathname()
+  const params = useParams()
+  const projectId = projectIdProp ?? (typeof params?.id === 'string' ? params.id : undefined)
+
+  const projectNavItems = projectId ? [
+    { href: `/projects/${projectId}`,              icon: 'dashboard',     label: 'Dashboard' },
+    { href: `/projects/${projectId}/system-model`, icon: 'account_tree',  label: 'System Model' },
+    { href: `/projects/${projectId}/changes/new`,  icon: 'add_circle',    label: 'New Change' },
+  ] : []
+
   return (
     <aside className="h-full w-64 flex-shrink-0 flex flex-col bg-[#131b2e] border-r border-white/5 font-headline text-sm font-medium">
-      {/* Header — project name when in project context, app brand otherwise */}
+      {/* Header */}
       <div className="flex items-center gap-3 px-4 h-16 border-b border-white/5 flex-shrink-0">
         <div className="w-8 h-8 rounded-lg bg-indigo-500/20 flex items-center justify-center flex-shrink-0">
           <span className="material-symbols-outlined text-indigo-400" style={{ fontSize: '18px' }}>
@@ -33,6 +45,29 @@ export function LeftNav({ projectName }: Props) {
           </div>
         )}
       </div>
+
+      {/* Project nav */}
+      {projectNavItems.length > 0 && (
+        <nav className="p-3 border-b border-white/5 flex flex-col gap-0.5">
+          {projectNavItems.map(item => {
+            const isActive = pathname === item.href
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-all ${
+                  isActive
+                    ? 'bg-indigo-500/15 text-indigo-300'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-[#171f33]'
+                }`}
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>{item.icon}</span>
+                <span>{item.label}</span>
+              </Link>
+            )
+          })}
+        </nav>
+      )}
 
       {/* Spacer */}
       <div className="flex-1" />

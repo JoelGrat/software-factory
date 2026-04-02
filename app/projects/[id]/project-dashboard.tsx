@@ -213,7 +213,7 @@ export function ProjectDashboard({
       </header>
 
       <div className="flex flex-1 overflow-hidden">
-        <LeftNav />
+        <LeftNav projectId={project.id} projectName={project.name} />
         <main className="flex-1 overflow-y-auto bg-[#0b1326] p-8">
           <div className="max-w-4xl mx-auto space-y-6">
 
