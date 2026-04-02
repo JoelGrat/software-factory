@@ -100,6 +100,114 @@ function modelQuality(stats: Stats, progress: ScanProgress | null) {
   return { label: 'HIGH', color: 'text-green-400 bg-green-400/10' }
 }
 
+// ─── Recommendation engine ───────────────────────────────────────────────────
+
+interface Recommendation {
+  id: string
+  type: 'risk' | 'structural' | 'hotspot' | 'coverage'
+  icon: string
+  headline: string
+  reasons: string[]
+  impact: string
+  suggestedAction: string
+  changeTitle: string
+  score: number
+}
+
+function generateRecommendations(components: ComponentItem[]): Recommendation[] {
+  const candidates: Recommendation[] = []
+
+  for (const c of components) {
+    // 1. Risk: high incoming deps + low/medium confidence
+    if (c.incomingDeps >= 3 && c.confidence < 75) {
+      candidates.push({
+        id: `risk-${c.id}`,
+        type: 'risk',
+        icon: '⚠',
+        headline: `Reduce risk in ${c.name}`,
+        reasons: [
+          `Used by ${c.incomingDeps} component${c.incomingDeps !== 1 ? 's' : ''}`,
+          `Confidence: ${c.confidence}%`,
+        ],
+        impact: `Changes propagate to ${c.incomingDeps} downstream component${c.incomingDeps !== 1 ? 's' : ''}`,
+        suggestedAction: 'Stabilize public interfaces and reduce coupling',
+        changeTitle: `Stabilize interfaces in ${c.name}`,
+        score: c.incomingDeps * 3 + Math.round((100 - c.confidence) / 10),
+      })
+    }
+
+    // 2. Structural: many files, potential mixed responsibilities
+    if (c.fileCount >= 6) {
+      candidates.push({
+        id: `structural-${c.id}`,
+        type: 'structural',
+        icon: '🧩',
+        headline: `Split oversized component: ${c.name}`,
+        reasons: [
+          `${c.fileCount} files — likely mixed responsibilities`,
+          c.incomingDeps > 0
+            ? `Used by ${c.incomingDeps} component${c.incomingDeps !== 1 ? 's' : ''}`
+            : `${c.outgoingDeps} outgoing dependencies`,
+        ],
+        impact: 'Large components are harder to test and change safely',
+        suggestedAction: 'Separate into focused, single-responsibility modules',
+        changeTitle: `Refactor ${c.name} into focused modules`,
+        score: Math.round(c.fileCount / 2) + c.incomingDeps + 3,
+      })
+    }
+
+    // 3. Hotspot: entry point with high outgoing dep count
+    if (c.is_anchored && c.outgoingDeps >= 3) {
+      candidates.push({
+        id: `hotspot-${c.id}`,
+        type: 'hotspot',
+        icon: '🔥',
+        headline: `Harden core component: ${c.name}`,
+        reasons: [
+          'Entry point — directly exposed to external input',
+          `Depends on ${c.outgoingDeps} component${c.outgoingDeps !== 1 ? 's' : ''}`,
+        ],
+        impact: 'Failures here are user-visible and blast-radius is high',
+        suggestedAction: 'Add input validation, error handling, and observability',
+        changeTitle: `Harden error handling in ${c.name}`,
+        score: c.outgoingDeps + c.incomingDeps * 3 + 2,
+      })
+    }
+
+    // 4. Coverage gap: widely used component with no detectable type signals
+    if (c.incomingDeps >= 2 && c.confidence <= 50) {
+      candidates.push({
+        id: `coverage-${c.id}`,
+        type: 'coverage',
+        icon: '🧪',
+        headline: `Add test coverage: ${c.name}`,
+        reasons: [
+          `Used by ${c.incomingDeps} component${c.incomingDeps !== 1 ? 's' : ''}`,
+          'No strong type signals — regression risk unquantified',
+        ],
+        impact: 'Untested shared components multiply risk across dependents',
+        suggestedAction: 'Add unit tests covering the public interface',
+        changeTitle: `Add test coverage for ${c.name}`,
+        score: c.incomingDeps * 2 + Math.max(0, 70 - c.confidence) + 2,
+      })
+    }
+  }
+
+  // One recommendation per component (highest score wins)
+  const byComp = new Map<string, Recommendation>()
+  for (const r of candidates) {
+    const key = r.id.split('-').slice(1).join('-') // component id
+    const existing = byComp.get(key)
+    if (!existing || r.score > existing.score) byComp.set(key, r)
+  }
+
+  return [...byComp.values()]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 function getDomains(components: ComponentItem[]) {
   const map: Record<string, { count: number; confTotal: number }> = {}
   for (const c of components) {
@@ -196,6 +304,7 @@ export function ProjectDashboard({
   const techStack = getTechStack(components, progress)
   const hotspots = getHotspots(components)
   const entryPoints = components.filter(c => c.is_anchored).slice(0, 4)
+  const recommendations = isReady ? generateRecommendations(components) : []
   const archCounts = components.reduce((acc, c) => { acc[c.type] = (acc[c.type] ?? 0) + 1; return acc }, {} as Record<string, number>)
   const doneChanges = changes.filter(c => c.status === 'done').length
   const hasData = components.length > 0
@@ -548,6 +657,55 @@ export function ProjectDashboard({
                       <p className="text-xs text-slate-400">Learning from <span className="text-indigo-300 font-mono">{doneChanges}</span> past change{doneChanges > 1 ? 's' : ''}</p>
                     )}
                   </div>
+                </div>
+              </div>
+            )}
+
+            {/* Suggested Improvements */}
+            {isReady && recommendations.length > 0 && (
+              <div>
+                <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">
+                  💡 Suggested Improvements
+                </h2>
+                <div className="space-y-2">
+                  {recommendations.map(r => {
+                    const typeColor =
+                      r.type === 'risk' ? 'border-amber-500/20 bg-amber-500/3' :
+                      r.type === 'structural' ? 'border-blue-500/20 bg-blue-500/3' :
+                      r.type === 'hotspot' ? 'border-red-500/20 bg-red-500/3' :
+                      'border-emerald-500/20 bg-emerald-500/3'
+                    return (
+                      <div key={r.id} className={`rounded-xl border p-4 ${typeColor}`}>
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-slate-200 mb-1">
+                              <span className="mr-1.5">{r.icon}</span>{r.headline}
+                            </p>
+                            <ul className="space-y-0.5 mb-2">
+                              {r.reasons.map(reason => (
+                                <li key={reason} className="text-xs text-slate-500 flex items-center gap-1.5">
+                                  <span className="text-slate-600">·</span>{reason}
+                                </li>
+                              ))}
+                            </ul>
+                            <p className="text-xs text-slate-400 mb-2">
+                              <span className="text-slate-600">Impact: </span>{r.impact}
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              <span className="text-slate-600">→ </span>{r.suggestedAction}
+                            </p>
+                          </div>
+                          <Link
+                            href={`/projects/${project.id}/changes/new?title=${encodeURIComponent(r.changeTitle)}`}
+                            className="flex-shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600/20 text-indigo-300 hover:bg-indigo-600/30 border border-indigo-500/20 transition-colors whitespace-nowrap"
+                          >
+                            Create Change
+                            <span className="material-symbols-outlined" style={{ fontSize: '13px' }}>arrow_forward</span>
+                          </Link>
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
             )}

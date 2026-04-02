@@ -5,8 +5,15 @@ import { ProfileAvatar } from '@/components/app/profile-avatar'
 import { ChangeIntakeForm } from '@/components/change/change-intake-form'
 import Link from 'next/link'
 
-export default async function NewChangePage({ params }: { params: Promise<{ id: string }> }) {
+export default async function NewChangePage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>
+  searchParams: Promise<{ title?: string }>
+}) {
   const { id } = await params
+  const { title: prefilledTitle } = await searchParams
   const db = createClient()
   const { data: { user } } = await db.auth.getUser()
   if (!user) redirect('/login')
@@ -49,7 +56,7 @@ export default async function NewChangePage({ params }: { params: Promise<{ id: 
               <h1 className="text-3xl font-extrabold font-headline tracking-tight text-on-surface">Submit a Change</h1>
               <p className="text-sm text-slate-400 mt-2">Describe what you want to change. The system will map it to components and compute impact.</p>
             </div>
-            <ChangeIntakeForm projectId={project.id} />
+            <ChangeIntakeForm projectId={project.id} initialTitle={prefilledTitle ?? ''} />
           </div>
         </main>
       </div>

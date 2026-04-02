@@ -8,11 +8,12 @@ const PRIORITIES = ['low', 'medium', 'high'] as const
 
 interface Props {
   projectId: string
+  initialTitle?: string
 }
 
-export function ChangeIntakeForm({ projectId }: Props) {
+export function ChangeIntakeForm({ projectId, initialTitle = '' }: Props) {
   const router = useRouter()
-  const [title, setTitle] = useState('')
+  const [title, setTitle] = useState(initialTitle)
   const [intent, setIntent] = useState('')
   const [type, setType] = useState<string>('feature')
   const [priority, setPriority] = useState<string>('medium')
