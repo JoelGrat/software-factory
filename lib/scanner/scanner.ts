@@ -114,6 +114,10 @@ export async function runFullScan(projectId: string, db: SupabaseClient): Promis
     // 6. Parse into components
     const components: ParsedComponent[] = await parser.parse(files, fetcher, aliasMap)
 
+    // Debug: log alias map and dependency summary
+    console.log('[scan] aliasMap:', JSON.stringify(aliasMap))
+    console.log('[scan] components with dependsOn:', components.filter(c => c.dependsOn.length > 0).map(c => `${c.name} → [${c.dependsOn.join(', ')}]`))
+
     // Check for dynamic imports warning
     const hasDynamicImports = components.some(c => c.edges?.some(e =>
       e.edgeType === 'dynamic-template' || e.edgeType === 'dynamic-computed'
