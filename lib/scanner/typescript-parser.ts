@@ -162,6 +162,48 @@ export class TypeScriptParser implements LanguageParser {
       })
     }
 
+    // Build file→component reverse map, then resolve cross-component dependencies
+    const fileToComponent = new Map<string, string>()
+    for (const comp of components) {
+      for (const file of comp.files) {
+        fileToComponent.set(file, comp.name)
+      }
+    }
+
+    // resolveSpecifier inline (mirrors scanner.ts logic, no external dep)
+    const resolveEdgeTarget = (specifier: string, fromPath: string): string | null => {
+      if (specifier.startsWith('.')) {
+        const fromDir = fromPath.split('/').slice(0, -1).join('/')
+        const joined = fromDir ? `${fromDir}/${specifier}` : specifier
+        const parts = joined.split('/')
+        const normalized: string[] = []
+        for (const p of parts) {
+          if (p === '..') normalized.pop()
+          else if (p !== '.') normalized.push(p)
+        }
+        const base = normalized.join('/')
+        const candidates = ['', '.ts', '.tsx', '/index.ts', '/index.tsx', '.js', '.jsx', '/index.js']
+        for (const ext of candidates) {
+          const candidate = base + ext
+          if (fileToComponent.has(candidate)) return candidate
+        }
+      }
+      return null
+    }
+
+    for (const comp of components) {
+      const depNames = new Set<string>()
+      for (const edge of comp.edges) {
+        const resolved = resolveEdgeTarget(edge.toSpecifier, edge.fromPath)
+        if (!resolved) continue
+        const targetComp = fileToComponent.get(resolved)
+        if (targetComp && targetComp !== comp.name) {
+          depNames.add(targetComp)
+        }
+      }
+      comp.dependsOn = [...depNames]
+    }
+
     return components
   }
 }
