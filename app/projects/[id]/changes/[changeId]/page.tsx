@@ -85,9 +85,10 @@ export default async function ChangeDetailPage({
     : { data: [] }
 
   // Build component_id → file paths map
+  // files is a single object (many-to-one join via file_id → files.id)
   const componentFileMap: Record<string, string[]> = {}
-  for (const row of (componentFiles ?? []) as Array<{ component_id: string; files: { path: string }[] | null }>) {
-    const path = row.files?.[0]?.path
+  for (const row of (componentFiles ?? []) as Array<{ component_id: string; files: { path: string } | null }>) {
+    const path = row.files?.path
     if (!path) continue
     if (!componentFileMap[row.component_id]) componentFileMap[row.component_id] = []
     componentFileMap[row.component_id].push(path)
