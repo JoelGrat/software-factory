@@ -53,6 +53,7 @@ export default function ExecutionView({ change, project }: { change: Change; pro
   const [traces, setTraces] = useState<TraceEntry[]>([])
   const [starting, setStarting] = useState(false)
   const [startError, setStartError] = useState<string | null>(null)
+  const [expandedIteration, setExpandedIteration] = useState<string | null>(null)
 
   const poll = useCallback(async () => {
     const res = await fetch(`/api/change-requests/${change.id}/execute`)
@@ -444,35 +445,47 @@ export default function ExecutionView({ change, project }: { change: Change; pro
                   <p className="text-xs font-bold uppercase tracking-widest text-slate-400 font-headline">Iterations</p>
                 </div>
                 <div className="divide-y divide-white/5">
-                  {snapshots.map(snap => (
-                    <div key={snap.id} className="px-5 py-3 flex items-center justify-between">
-                      <span className="text-sm text-slate-400 font-mono">Iteration {snap.iteration}</span>
-                      <div className="flex items-center gap-4">
-                        <span className="text-xs font-mono text-slate-500">
-                          <span className="text-green-400">{snap.tests_passed} passed</span>
-                          {snap.tests_failed > 0 && <> · <span className="text-red-400">{snap.tests_failed} failed</span></>}
-                        </span>
-                        <span className="text-xs font-mono text-slate-600">{snap.files_modified.length} files</span>
-                        {snap.duration_ms && (
-                          <span className="text-xs font-mono text-slate-600">{(snap.duration_ms / 1000).toFixed(1)}s</span>
-                        )}
-                        {snap.termination_reason && (
-                          <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded capitalize ${
-                            snap.termination_reason === 'passed'
-                              ? 'text-green-400 bg-green-400/10'
-                              : 'text-red-400 bg-red-400/10'
-                          }`}>
-                            {snap.termination_reason}
-                          </span>
-                        )}
-                        {failureTypeByIteration.get(snap.iteration) && (
-                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-red-400/10 text-red-400">
-                            {failureTypeByIteration.get(snap.iteration)}
-                          </span>
+                  {snapshots.map(snap => {
+                    const isExpanded = expandedIteration === snap.id
+                    const hasError = !!snap.error_summary && snap.termination_reason !== 'passed'
+                    return (
+                      <div key={snap.id}>
+                        <button
+                          type="button"
+                          onClick={() => hasError && setExpandedIteration(isExpanded ? null : snap.id)}
+                          className={`w-full px-5 py-3 flex items-center justify-between text-left ${hasError ? 'hover:bg-white/[0.02] cursor-pointer' : ''}`}
+                        >
+                          <span className="text-sm text-slate-400 font-mono">Iteration {snap.iteration}</span>
+                          <div className="flex items-center gap-4">
+                            <span className="text-xs font-mono text-slate-500">
+                              <span className="text-green-400">{snap.tests_passed} passed</span>
+                              {snap.tests_failed > 0 && <> · <span className="text-red-400">{snap.tests_failed} failed</span></>}
+                            </span>
+                            <span className="text-xs font-mono text-slate-600">{snap.files_modified.length} files</span>
+                            {snap.termination_reason && (
+                              <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded capitalize ${
+                                snap.termination_reason === 'passed'
+                                  ? 'text-green-400 bg-green-400/10'
+                                  : 'text-red-400 bg-red-400/10'
+                              }`}>
+                                {snap.termination_reason}
+                              </span>
+                            )}
+                            {hasError && (
+                              <span className="text-slate-600 text-xs">{isExpanded ? '▲' : '▼'}</span>
+                            )}
+                          </div>
+                        </button>
+                        {isExpanded && snap.error_summary && (
+                          <div className="px-5 pb-4">
+                            <pre className="text-[10px] text-red-400/80 bg-red-400/5 border border-red-400/10 rounded-lg p-3 overflow-x-auto whitespace-pre-wrap leading-relaxed max-h-80 overflow-y-auto">
+                              {snap.error_summary}
+                            </pre>
+                          </div>
                         )}
                       </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               </div>
             )}
