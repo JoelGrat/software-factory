@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { LeftNav } from '@/components/app/left-nav'
 import { ProfileAvatar } from '@/components/app/profile-avatar'
+import { ChangeIntakeForm } from '@/components/change/change-intake-form'
 import type { ScanProgress, ScanMilestone } from '@/lib/scanner/scanner'
 
 interface Project {
@@ -254,6 +255,7 @@ export function ProjectDashboard({
   const [stats, setStats] = useState(initialStats)
   const [components, setComponents] = useState(initialComponents)
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [showNewChange, setShowNewChange] = useState(false)
 
   const isScanning = project.scan_status === 'scanning'
   const isReady = project.scan_status === 'ready'
@@ -710,7 +712,16 @@ export function ProjectDashboard({
               <div>
                 <div className="flex items-center justify-between mb-3">
                   <h2 className="text-sm font-bold text-slate-300">Changes</h2>
-                  <span className="text-xs text-slate-500 font-mono">{changes.length} total</span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-slate-500 font-mono">{changes.length} total</span>
+                    <button
+                      onClick={() => setShowNewChange(true)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-500 hover:bg-indigo-400 text-white transition-colors"
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>add</span>
+                      New Change
+                    </button>
+                  </div>
                 </div>
 
                 {changes.length === 0 ? (
@@ -719,20 +730,23 @@ export function ProjectDashboard({
                     <p className="text-xs text-slate-600 mb-4">Start by describing a change to your system.</p>
                     <div className="space-y-2 mb-4">
                       {['Fix login session expiry bug', 'Add user roles and permissions', 'Refactor API authentication layer'].map(ex => (
-                        <Link
+                        <button
                           key={ex}
-                          href={`/projects/${project.id}/changes/new`}
+                          onClick={() => setShowNewChange(true)}
                           className="flex items-center gap-2 text-xs text-slate-400 hover:text-indigo-300 transition-colors"
                         >
                           <span className="material-symbols-outlined text-slate-600" style={{ fontSize: '14px' }}>arrow_forward</span>
                           {ex}
-                        </Link>
+                        </button>
                       ))}
                     </div>
-                    <Link href={`/projects/${project.id}/changes/new`} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600/20 text-indigo-300 hover:bg-indigo-600/30 transition-colors border border-indigo-500/20">
+                    <button
+                      onClick={() => setShowNewChange(true)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600/20 text-indigo-300 hover:bg-indigo-600/30 transition-colors border border-indigo-500/20"
+                    >
                       <span className="material-symbols-outlined" style={{ fontSize: '13px' }}>add</span>
                       New Change Request
-                    </Link>
+                    </button>
                   </div>
                 ) : (
                   <div className="space-y-2">
@@ -758,6 +772,33 @@ export function ProjectDashboard({
           </div>
         </main>
       </div>
+
+      {/* New Change drawer */}
+      {showNewChange && (
+        <>
+          <div
+            className="fixed inset-0 bg-black/50 z-40"
+            onClick={() => setShowNewChange(false)}
+          />
+          <div className="fixed right-0 top-0 h-full w-[520px] bg-[#0f1929] border-l border-white/10 z-50 flex flex-col shadow-2xl">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 flex-shrink-0">
+              <div>
+                <p className="text-xs uppercase tracking-widest font-bold text-indigo-400 font-headline mb-0.5">New Change</p>
+                <p className="text-sm font-semibold text-slate-200">{project.name}</p>
+              </div>
+              <button
+                onClick={() => setShowNewChange(false)}
+                className="p-1.5 text-slate-500 hover:text-slate-200 hover:bg-white/5 rounded-lg transition-all"
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>close</span>
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-6 py-6">
+              <ChangeIntakeForm projectId={project.id} />
+            </div>
+          </div>
+        </>
+      )}
     </div>
   )
 }
