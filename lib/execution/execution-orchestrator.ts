@@ -57,12 +57,13 @@ async function writeSnapshot(
   planDivergence = false,
   testsPassed = 0,
   testsFailed = 0,
-  errorSummary: string | null = null
+  errorSummary: string | null = null,
+  filesModified: string[] = []
 ): Promise<void> {
   await db.from('execution_snapshots').insert({
     change_id: changeId,
     iteration: state.iteration,
-    files_modified: [],
+    files_modified: filesModified,
     tests_passed: testsPassed,
     tests_failed: testsFailed,
     planned_files: state.executionScope.plannedFiles,
@@ -335,7 +336,7 @@ export async function runExecution(
 
       // All checks passed
       state.acceptedPatches.push(...iterationPatches)
-      await writeSnapshot(db, changeId, state, 'passed', false, testResult.testsPassed, testResult.testsFailed)
+      await writeSnapshot(db, changeId, state, 'passed', false, testResult.testsPassed, testResult.testsFailed, null, [...new Set(iterationPatches.map(p => p.path))])
 
       pendingTasks = pendingTasks.filter(t => !processedTaskIds.includes(t.id))
       if (pendingTasks.length === 0) {
