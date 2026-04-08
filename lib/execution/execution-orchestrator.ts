@@ -152,8 +152,8 @@ export async function runExecution(
           .select('file_id, files(path)')
           .eq('component_id', componentId)
           .eq('is_primary', true)
-        componentFileMap[componentId] = ((assignments ?? []) as Array<{ files: { path: string } | null }>)
-          .map(a => a.files?.path)
+        componentFileMap[componentId] = ((assignments ?? []) as Array<{ files: { path: string }[] | null }>)
+          .map(a => a.files?.[0]?.path)
           .filter(Boolean) as string[]
       }
     }
@@ -323,7 +323,7 @@ export async function runExecution(
       }
       const behavResult = await executor.runBehavioralChecks(env, behavioralScope)
       if (!behavResult.passed) {
-        const anomalyMsg = behavResult.anomalies.map(a => `[${a.severity}] ${a.message}`).join('\n')
+        const anomalyMsg = behavResult.anomalies.map(a => `[${a.severity}] ${a.description}`).join('\n')
         await writeSnapshot(db, changeId, state, 'error', false, 0, 0, anomalyMsg.slice(0, 8000))
         continue
       }

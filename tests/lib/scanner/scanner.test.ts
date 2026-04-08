@@ -38,7 +38,7 @@ function makeDb(project = { id: 'proj-1', repo_url: 'https://github.com/owner/re
           select: () => ({
             data: Array.isArray(data)
               ? data.map((d: any, i: number) => ({ ...d, id: `id-${i}` }))
-              : [{ ...data, id: 'id-0' }],
+              : [{ ...(data as object), id: 'id-0' }],
             error: null,
           }),
         }
