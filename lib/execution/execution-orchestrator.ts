@@ -140,9 +140,9 @@ export async function runExecution(
         .order('impact_weight', { ascending: false })
         .limit(20)
 
-      for (const ic of (impactComponents ?? []) as Array<{ component_id: string; system_components: { name: string; type: string } | null }>) {
-        if (ic.system_components) {
-          componentTypeMap[ic.component_id] = ic.system_components.type
+      for (const ic of (impactComponents ?? []) as Array<{ component_id: string; system_components: { name: string; type: string }[] | null }>) {
+        if (ic.system_components?.[0]) {
+          componentTypeMap[ic.component_id] = ic.system_components[0].type
         }
       }
 
@@ -301,7 +301,7 @@ export async function runExecution(
         const sig = errorSignature(typeCheck.output)
         state.errorHistory.set(sig, (state.errorHistory.get(sig) ?? 0) + 1)
         if ((state.errorHistory.get(sig) ?? 0) >= limits.stagnationWindow) break
-        await writeSnapshot(db, changeId, state, 'error', false, 0, 0, typeCheck.output.slice(0, 2000))
+        await writeSnapshot(db, changeId, state, 'error', false, 0, 0, typeCheck.output.slice(0, 8000))
         continue
       }
 
@@ -312,7 +312,7 @@ export async function runExecution(
         const sig = errorSignature(testResult.output)
         state.errorHistory.set(sig, (state.errorHistory.get(sig) ?? 0) + 1)
         if ((state.errorHistory.get(sig) ?? 0) >= limits.stagnationWindow) break
-        await writeSnapshot(db, changeId, state, 'error', false, testResult.testsPassed, testResult.testsFailed, testResult.output.slice(0, 2000))
+        await writeSnapshot(db, changeId, state, 'error', false, testResult.testsPassed, testResult.testsFailed, testResult.output.slice(0, 8000))
         continue
       }
 
@@ -324,7 +324,7 @@ export async function runExecution(
       const behavResult = await executor.runBehavioralChecks(env, behavioralScope)
       if (!behavResult.passed) {
         const anomalyMsg = behavResult.anomalies.map(a => `[${a.severity}] ${a.message}`).join('\n')
-        await writeSnapshot(db, changeId, state, 'error', false, 0, 0, anomalyMsg.slice(0, 2000))
+        await writeSnapshot(db, changeId, state, 'error', false, 0, 0, anomalyMsg.slice(0, 8000))
         continue
       }
 

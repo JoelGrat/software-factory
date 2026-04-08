@@ -293,7 +293,7 @@ export default function ExecutionView({ change, project }: { change: Change; pro
                       <div>
                         <p className="text-[10px] uppercase tracking-widest text-slate-500 font-headline mb-2">Error detail</p>
                         <pre className="text-[10px] text-red-400/70 bg-red-400/5 border border-red-400/10 rounded-lg p-3 overflow-x-auto whitespace-pre-wrap leading-relaxed">
-                          {errorMsg.slice(0, 600)}
+                          {errorMsg}
                         </pre>
                       </div>
                     )}
