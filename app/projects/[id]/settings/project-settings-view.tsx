@@ -254,8 +254,25 @@ export function ProjectSettingsView({
 
       <div className="flex flex-1 overflow-hidden">
         <LeftNav />
-        <main className="flex-1 overflow-y-auto bg-[#0b1326] p-10">
-          <div className="max-w-2xl mx-auto space-y-8">
+        <main className="flex flex-1 overflow-hidden">
+          <nav className="w-44 flex-shrink-0 bg-[#131b2e] border-r border-white/5 overflow-y-auto py-6 px-3 space-y-0.5">
+            {SECTIONS.map(({ id, label }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setActiveSection(id)}
+                className={`w-full text-left px-3 py-2 rounded-l-lg text-xs font-semibold font-headline tracking-wide transition-all ${
+                  activeSection === id
+                    ? 'bg-indigo-500/10 text-indigo-400 border-r-4 border-indigo-500'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-[#171f33] border-r-4 border-transparent'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </nav>
+          <div className="flex-1 overflow-y-auto bg-[#0b1326] p-10">
+            <div className="max-w-2xl mx-auto space-y-8">
 
             <div>
               <p className="text-xs uppercase tracking-widest font-bold text-indigo-400 font-headline mb-1">Project</p>
@@ -531,6 +548,7 @@ export function ProjectSettingsView({
               </button>
             </section>
 
+            </div>
           </div>
         </main>
       </div>
