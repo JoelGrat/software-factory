@@ -194,19 +194,17 @@ export async function runExecution(
       await executor.resetIteration(env, state.acceptedPatches)
 
       const iterationPatches: FilePatch[] = []
-      // inProgressTaskIds: processed tasks that need validation before being marked done
-      const inProgressTaskIds: string[] = []
-      // allCompletedTaskIds: union of no-file + validated tasks (used to filter pendingTasks after success)
-      const allCompletedTaskIds: string[] = []
+      // processedTaskIds: tasks touched this iteration (used to filter pendingTasks after success)
+      const processedTaskIds: string[] = []
 
       for (const task of pendingTasks) {
         if (state.aiCallCount >= limits.maxAiCalls) break
 
         const filePaths = componentFileMap[task.component_id ?? ''] ?? []
 
-        // No files to modify — mark done immediately (no code change, no need to validate)
+        // No files to modify — mark done immediately
         if (filePaths.length === 0) {
-          allCompletedTaskIds.push(task.id)
+          processedTaskIds.push(task.id)
           await db.from('change_plan_tasks').update({ status: 'done' }).eq('id', task.id).eq('plan_id', plan.id)
           continue
         }
@@ -293,16 +291,10 @@ export async function runExecution(
           iterationPatches.push(patch)
         }
 
-        inProgressTaskIds.push(task.id)
-        allCompletedTaskIds.push(task.id)
-        await db.from('change_plan_tasks').update({ status: 'in_progress' }).eq('id', task.id).eq('plan_id', plan.id)
-      }
-
-      // Helper to reset in-progress (code-touching) tasks back to pending on validation failure
-      const resetInProgress = async () => {
-        for (const taskId of inProgressTaskIds) {
-          await db.from('change_plan_tasks').update({ status: 'pending' }).eq('id', taskId).eq('plan_id', plan.id)
-        }
+        processedTaskIds.push(task.id)
+        // Mark done immediately so the UI shows live task-by-task progress.
+        // pendingTasks is tracked in-memory, so failed iterations still retry these tasks.
+        await db.from('change_plan_tasks').update({ status: 'done' }).eq('id', task.id).eq('plan_id', plan.id)
       }
 
       // Validate
@@ -310,7 +302,6 @@ export async function runExecution(
       if (!typeCheck.passed) {
         const sig = errorSignature(typeCheck.output)
         state.errorHistory.set(sig, (state.errorHistory.get(sig) ?? 0) + 1)
-        await resetInProgress()
         if ((state.errorHistory.get(sig) ?? 0) >= limits.stagnationWindow) break
         await writeSnapshot(db, changeId, state, 'error', false, 0, 0, typeCheck.output.slice(0, 8000))
         continue
@@ -322,7 +313,6 @@ export async function runExecution(
       if (!testResult.passed) {
         const sig = errorSignature(testResult.output)
         state.errorHistory.set(sig, (state.errorHistory.get(sig) ?? 0) + 1)
-        await resetInProgress()
         if ((state.errorHistory.get(sig) ?? 0) >= limits.stagnationWindow) break
         const testErrorSummary = testResult.failures.length > 0
           ? testResult.failures.map(f => `FAIL: ${f.testName}\n${f.error}`).join('\n\n---\n\n')
@@ -339,19 +329,15 @@ export async function runExecution(
       const behavResult = await executor.runBehavioralChecks(env, behavioralScope)
       if (!behavResult.passed) {
         const anomalyMsg = behavResult.anomalies.map(a => `[${a.severity}] ${a.description}`).join('\n')
-        await resetInProgress()
         await writeSnapshot(db, changeId, state, 'error', false, 0, 0, anomalyMsg.slice(0, 8000))
         continue
       }
 
-      // All checks passed — promote in-progress tasks to done
+      // All checks passed
       state.acceptedPatches.push(...iterationPatches)
-      for (const taskId of inProgressTaskIds) {
-        await db.from('change_plan_tasks').update({ status: 'done' }).eq('id', taskId).eq('plan_id', plan.id)
-      }
       await writeSnapshot(db, changeId, state, 'passed', false, testResult.testsPassed, testResult.testsFailed)
 
-      pendingTasks = pendingTasks.filter(t => !allCompletedTaskIds.includes(t.id))
+      pendingTasks = pendingTasks.filter(t => !processedTaskIds.includes(t.id))
       if (pendingTasks.length === 0) {
         fullSuccess = true
         break
