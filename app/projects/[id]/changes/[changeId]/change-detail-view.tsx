@@ -121,6 +121,7 @@ export function ChangeDetailView({
   impactComponents: initialImpactComponents,
   plan: initialPlan,
   planTasks: initialPlanTasks,
+  componentFileMap: initialComponentFileMap = {},
 }: {
   project: Project
   change: Change
@@ -129,6 +130,7 @@ export function ChangeDetailView({
   impactComponents: ImpactComponent[]
   plan: PlanData | null
   planTasks: PlanTask[]
+  componentFileMap?: Record<string, string[]>
 }) {
   const router = useRouter()
   const [change, setChange] = useState(initial)
@@ -137,7 +139,8 @@ export function ChangeDetailView({
   const [impactComponents, setImpactComponents] = useState(initialImpactComponents)
   const [plan, setPlan] = useState(initialPlan)
   const [planTasks, setPlanTasks] = useState(initialPlanTasks)
-  const [planTab, setPlanTab] = useState<'tasks' | 'spec'>('tasks')
+  const [componentFileMap] = useState(initialComponentFileMap)
+  const [planTab, setPlanTab] = useState<'tasks' | 'spec' | 'files'>('tasks')
   const [approving, setApproving] = useState(false)
   const [generatingSpec, setGeneratingSpec] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState(false)
@@ -488,25 +491,39 @@ export function ChangeDetailView({
             ) : (['planned', 'failed', 'review', 'done'].includes(change.status)) && plan ? (
               <div className="rounded-xl bg-[#131b2e] border border-white/5 overflow-hidden">
                 {/* Plan header */}
-                <div className="flex items-center justify-between px-5 py-4 border-b border-white/5">
-                  <p className="text-xs font-bold uppercase tracking-widest text-slate-400 font-headline">Implementation Plan</p>
-                  <div className="flex items-center gap-3">
-                    {plan.estimated_tasks !== null && (
-                      <span className="text-[10px] font-mono text-slate-500">{plan.estimated_tasks} tasks</span>
-                    )}
-                    <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded uppercase tracking-wider ${
-                      plan.status === 'approved'
-                        ? 'bg-green-400/10 text-green-400'
-                        : 'bg-slate-700 text-slate-400'
-                    }`}>
-                      {plan.status}
-                    </span>
-                  </div>
-                </div>
+                {(() => {
+                  const allFiles = [...new Set(planTasks.flatMap(t => componentFileMap[t.component_id ?? ''] ?? []))]
+                  const mappedFileCount = allFiles.length
+                  const estimatedFileCount = plan.estimated_files ?? mappedFileCount
+                  const newFileCount = Math.max(0, estimatedFileCount - mappedFileCount)
+                  return (
+                    <div className="flex items-center justify-between px-5 py-4 border-b border-white/5">
+                      <p className="text-xs font-bold uppercase tracking-widest text-slate-400 font-headline">Implementation Plan</p>
+                      <div className="flex items-center gap-3">
+                        {plan.estimated_tasks !== null && (
+                          <span className="text-[10px] font-mono text-slate-500">{plan.estimated_tasks} tasks</span>
+                        )}
+                        {mappedFileCount > 0 && (
+                          <span className="text-[10px] font-mono text-slate-500">
+                            {mappedFileCount} file{mappedFileCount !== 1 ? 's' : ''}
+                            {newFileCount > 0 && <span className="text-indigo-400"> +{newFileCount} new</span>}
+                          </span>
+                        )}
+                        <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded uppercase tracking-wider ${
+                          plan.status === 'approved'
+                            ? 'bg-green-400/10 text-green-400'
+                            : 'bg-slate-700 text-slate-400'
+                        }`}>
+                          {plan.status}
+                        </span>
+                      </div>
+                    </div>
+                  )
+                })()}
 
                 {/* Tab bar */}
                 <div className="flex border-b border-white/5">
-                  {(['tasks', 'spec'] as const).map(tab => (
+                  {(['tasks', 'files', 'spec'] as const).map(tab => (
                     <button
                       key={tab}
                       onClick={() => setPlanTab(tab)}
@@ -527,27 +544,66 @@ export function ChangeDetailView({
                     {planTasks.length === 0 ? (
                       <p className="px-5 py-6 text-sm text-slate-500 text-center">No tasks generated.</p>
                     ) : (
-                      planTasks.map((task) => (
-                        <div key={task.id} className="px-5 py-3 flex items-start gap-3">
-                          <span className={`mt-0.5 h-2 w-2 rounded-full flex-shrink-0 ${
-                            task.status === 'done' ? 'bg-green-400' : 'bg-slate-600'
-                          }`} />
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm text-slate-300">{task.description}</p>
-                            {task.system_components?.[0] && (
-                              <span className="text-[10px] font-mono text-slate-600 mt-0.5 block">
-                                {task.system_components[0].name}
-                              </span>
-                            )}
+                      planTasks.map((task) => {
+                        const files = componentFileMap[task.component_id ?? ''] ?? []
+                        return (
+                          <div key={task.id} className="px-5 py-3 flex items-start gap-3">
+                            <span className={`mt-0.5 h-2 w-2 rounded-full flex-shrink-0 ${
+                              task.status === 'done' ? 'bg-green-400' : 'bg-slate-600'
+                            }`} />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm text-slate-300">{task.description}</p>
+                              {task.system_components?.[0] && (
+                                <span className="text-[10px] font-mono text-slate-600 mt-0.5 block">
+                                  {task.system_components[0].name}
+                                </span>
+                              )}
+                              {files.length > 0 && (
+                                <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
+                                  {files.map(f => (
+                                    <span key={f} className="text-[10px] font-mono text-indigo-400/60">{f}</span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                            <span className="text-[10px] font-mono text-slate-600 flex-shrink-0">
+                              #{task.order_index + 1}
+                            </span>
                           </div>
-                          <span className="text-[10px] font-mono text-slate-600 flex-shrink-0">
-                            #{task.order_index + 1}
-                          </span>
-                        </div>
-                      ))
+                        )
+                      })
                     )}
                   </div>
                 )}
+
+                {/* Files tab */}
+                {planTab === 'files' && (() => {
+                  const allFiles = [...new Set(planTasks.flatMap(t => componentFileMap[t.component_id ?? ''] ?? []))]
+                  const estimatedTotal = plan.estimated_files ?? allFiles.length
+                  const newFileCount = Math.max(0, estimatedTotal - allFiles.length)
+                  return (
+                    <div className="divide-y divide-white/5">
+                      {allFiles.length === 0 && newFileCount === 0 ? (
+                        <p className="px-5 py-6 text-sm text-slate-500 text-center">No file mappings available.</p>
+                      ) : (
+                        <>
+                          {allFiles.map(file => (
+                            <div key={file} className="px-5 py-2.5 flex items-center gap-2.5">
+                              <span className="material-symbols-outlined text-slate-600 flex-shrink-0" style={{ fontSize: '14px' }}>draft</span>
+                              <span className="text-xs font-mono text-slate-300">{file}</span>
+                            </div>
+                          ))}
+                          {newFileCount > 0 && (
+                            <div className="px-5 py-3 flex items-center gap-2.5">
+                              <span className="material-symbols-outlined text-indigo-400/60 flex-shrink-0" style={{ fontSize: '14px' }}>add_circle</span>
+                              <span className="text-xs font-mono text-indigo-400/70">+{newFileCount} new file{newFileCount !== 1 ? 's' : ''} (estimated)</span>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )
+                })()}
 
                 {/* Spec tab */}
                 {planTab === 'spec' && (

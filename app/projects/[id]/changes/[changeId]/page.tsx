@@ -71,6 +71,28 @@ export default async function ChangeDetailPage({
         .order('order_index', { ascending: true })
     : { data: [] }
 
+  // Fetch file paths for each component in the plan
+  const componentIds = (planTasks ?? [])
+    .map((t: any) => t.component_id)
+    .filter(Boolean) as string[]
+
+  const { data: componentFiles } = componentIds.length > 0
+    ? await db
+        .from('component_assignment')
+        .select('component_id, files(path)')
+        .in('component_id', componentIds)
+        .eq('is_primary', true)
+    : { data: [] }
+
+  // Build component_id → file paths map
+  const componentFileMap: Record<string, string[]> = {}
+  for (const row of (componentFiles ?? []) as Array<{ component_id: string; files: { path: string }[] | null }>) {
+    const path = row.files?.[0]?.path
+    if (!path) continue
+    if (!componentFileMap[row.component_id]) componentFileMap[row.component_id] = []
+    componentFileMap[row.component_id].push(path)
+  }
+
   return (
     <ChangeDetailView
       project={project}
@@ -80,6 +102,7 @@ export default async function ChangeDetailPage({
       impactComponents={(impactComponents ?? []) as any[]}
       plan={plan ?? null}
       planTasks={(planTasks ?? []) as any[]}
+      componentFileMap={componentFileMap}
     />
   )
 }
