@@ -172,6 +172,7 @@ export default function ExecutionView({ change, project }: { change: Change; pro
   }
 
   const doneTasks = tasks.filter(t => t.status === 'done').length
+  const inProgressTasks = tasks.filter(t => t.status === 'in_progress').length
   const failedTasks = tasks.filter(t => t.status === 'failed').length
 
   return (
@@ -372,7 +373,9 @@ export default function ExecutionView({ change, project }: { change: Change; pro
                 <p className="text-xs font-bold uppercase tracking-widest text-slate-400 font-headline">Tasks</p>
                 {tasks.length > 0 && (
                   <span className="text-[10px] font-mono text-slate-500">
-                    {doneTasks}/{tasks.length} done{failedTasks > 0 && ` · ${failedTasks} failed`}
+                    {doneTasks}/{tasks.length} done
+                    {inProgressTasks > 0 && ` · ${inProgressTasks} running`}
+                    {failedTasks > 0 && ` · ${failedTasks} failed`}
                   </span>
                 )}
               </div>
@@ -390,6 +393,11 @@ export default function ExecutionView({ change, project }: { change: Change; pro
                           <span className="h-2 w-2 rounded-full bg-green-400 block" />
                         ) : task.status === 'failed' ? (
                           <span className="h-2 w-2 rounded-full bg-red-400 block" />
+                        ) : task.status === 'in_progress' ? (
+                          <span className="relative flex h-2 w-2">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-60" />
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-400" />
+                          </span>
                         ) : (
                           <span className="h-2 w-2 rounded-full bg-slate-700 block" />
                         )}
@@ -428,9 +436,11 @@ export default function ExecutionView({ change, project }: { change: Change; pro
                       </div>
                       <span className={`text-[10px] font-mono flex-shrink-0 capitalize ${
                         task.status === 'done' ? 'text-green-400' :
-                        task.status === 'failed' ? 'text-red-400' : 'text-slate-600'
+                        task.status === 'failed' ? 'text-red-400' :
+                        task.status === 'in_progress' ? 'text-amber-400' :
+                        'text-slate-600'
                       }`}>
-                        {task.status}
+                        {task.status === 'in_progress' ? 'running' : task.status}
                       </span>
                     </div>
                   )
@@ -439,7 +449,7 @@ export default function ExecutionView({ change, project }: { change: Change; pro
             </div>
 
             {/* Iterations */}
-            {snapshots.length > 0 && (
+            {(snapshots.length > 0 || status === 'executing') && (
               <div className="rounded-xl bg-[#131b2e] border border-white/5 overflow-hidden">
                 <div className="px-5 py-4 border-b border-white/5">
                   <p className="text-xs font-bold uppercase tracking-widest text-slate-400 font-headline">Iterations</p>
@@ -486,6 +496,18 @@ export default function ExecutionView({ change, project }: { change: Change; pro
                       </div>
                     )
                   })}
+                  {status === 'executing' && (
+                    <div className="px-5 py-3 flex items-center justify-between">
+                      <div className="flex items-center gap-2.5">
+                        <span className="relative flex h-2 w-2 flex-shrink-0">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-60" />
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-400" />
+                        </span>
+                        <span className="text-sm text-slate-400 font-mono">Iteration {snapshots.length + 1}</span>
+                      </div>
+                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded text-amber-400 bg-amber-400/10">running</span>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
