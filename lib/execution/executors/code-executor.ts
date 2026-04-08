@@ -22,6 +22,9 @@ export interface CodeExecutor {
   /** Apply a patch by AST-replacing the target node in localWorkDir, then syncing to container */
   applyPatch(env: ExecutionEnvironment, patch: FilePatch): Promise<PatchResult>
 
+  /** Write a brand-new file to the environment (localWorkDir + container) */
+  createFile(env: ExecutionEnvironment, path: string, content: string): Promise<PatchResult>
+
   /** Run `tsc --noEmit` inside the container */
   runTypeCheck(env: ExecutionEnvironment): Promise<TypeCheckResult>
 
@@ -70,6 +73,11 @@ export class MockCodeExecutor implements CodeExecutor {
 
   async applyPatch(_env: ExecutionEnvironment, _patch: FilePatch): Promise<PatchResult> {
     this.calls.push('applyPatch')
+    return this.patchResult
+  }
+
+  async createFile(_env: ExecutionEnvironment, _path: string, _content: string): Promise<PatchResult> {
+    this.calls.push('createFile')
     return this.patchResult
   }
 

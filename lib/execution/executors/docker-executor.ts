@@ -1,8 +1,8 @@
 // lib/execution/executors/docker-executor.ts
 import { exec as execCb } from 'node:child_process'
 import { promisify } from 'node:util'
-import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { mkdtemp, rm, writeFile, readFile, mkdir } from 'node:fs/promises'
+import { join, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
 import { Project } from 'ts-morph'
 import type { CodeExecutor } from './code-executor'
@@ -96,6 +96,21 @@ export class DockerExecutor implements CodeExecutor {
       await dockerExec(env.containerId, `mkdir -p ${containerDir}`)
       await exec(`docker cp ${localPath} ${env.containerId}:${containerPath}`)
 
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: (err as Error).message }
+    }
+  }
+
+  async createFile(env: ExecutionEnvironment, path: string, content: string): Promise<PatchResult> {
+    const localPath = join(env.localWorkDir, path)
+    try {
+      await mkdir(dirname(localPath), { recursive: true })
+      await writeFile(localPath, content, 'utf8')
+      const containerPath = `${env.containerWorkDir}/${path}`
+      const containerDir = containerPath.substring(0, containerPath.lastIndexOf('/'))
+      await dockerExec(env.containerId, `mkdir -p ${containerDir}`)
+      await exec(`docker cp ${localPath} ${env.containerId}:${containerPath}`)
       return { success: true }
     } catch (err) {
       return { success: false, error: (err as Error).message }
