@@ -181,6 +181,20 @@ export function ProjectSettingsView({
 
   const [activeSection, setActiveSection] = useState<SectionId>('general')
 
+  const saveBar = (
+    <div className="flex items-center gap-3 pt-2">
+      <button
+        type="submit"
+        disabled={saving}
+        className="px-5 py-2 rounded-lg text-sm font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {saving ? 'Saving…' : 'Save changes'}
+      </button>
+      {saveSuccess && <span className="text-xs text-emerald-400 font-medium">Saved</span>}
+      {saveError && <span className="text-xs text-red-400">{saveError}</span>}
+    </div>
+  )
+
   function patchSettings<K extends keyof Settings>(key: K, val: Settings[K]) {
     setSettings(s => ({ ...s, [key]: val }))
   }
@@ -295,158 +309,193 @@ export function ProjectSettingsView({
               <form onSubmit={handleSave} className="space-y-6">
 
                 {/* Execution Behavior */}
-                <div className={sectionClass}>
-                  <SectionTitle>Execution Behavior</SectionTitle>
-                  <Row label="Max iterations" hint="Maximum fix-attempt loops per change">
-                    <div className="flex items-center gap-2">
-                      <input type="number" min={1} max={50} value={settings.execution.maxIterations}
-                        onChange={e => patchSettings('execution', { ...settings.execution, maxIterations: Number(e.target.value) })}
-                        className={numberInputClass} />
-                      <span className="text-xs text-slate-500">iterations</span>
+                {activeSection === 'execution' && (
+                  <>
+                    <div className={sectionClass}>
+                      <SectionTitle>Execution Behavior</SectionTitle>
+                      <Row label="Max iterations" hint="Maximum fix-attempt loops per change">
+                        <div className="flex items-center gap-2">
+                          <input type="number" min={1} max={50} value={settings.execution.maxIterations}
+                            onChange={e => patchSettings('execution', { ...settings.execution, maxIterations: Number(e.target.value) })}
+                            className={numberInputClass} />
+                          <span className="text-xs text-slate-500">iterations</span>
+                        </div>
+                      </Row>
+                      <Row label="Max cost" hint="AI spend limit per execution">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-slate-500">$</span>
+                          <input type="number" min={0} max={100} step={0.5} value={settings.execution.maxCostUsd}
+                            onChange={e => patchSettings('execution', { ...settings.execution, maxCostUsd: Number(e.target.value) })}
+                            className={numberInputClass} />
+                        </div>
+                      </Row>
+                      <Row label="Timeout" hint="Wall-clock limit per execution">
+                        <div className="flex items-center gap-2">
+                          <input type="number" min={1} max={60} value={settings.execution.timeoutMinutes}
+                            onChange={e => patchSettings('execution', { ...settings.execution, timeoutMinutes: Number(e.target.value) })}
+                            className={numberInputClass} />
+                          <span className="text-xs text-slate-500">min</span>
+                        </div>
+                      </Row>
+                      <Row label="Max affected files" hint="Files touched before execution is halted">
+                        <div className="flex items-center gap-2">
+                          <input type="number" min={1} max={100} value={settings.execution.maxAffectedFiles}
+                            onChange={e => patchSettings('execution', { ...settings.execution, maxAffectedFiles: Number(e.target.value) })}
+                            className={numberInputClass} />
+                          <span className="text-xs text-slate-500">files</span>
+                        </div>
+                      </Row>
                     </div>
-                  </Row>
-                  <Row label="Max cost" hint="AI spend limit per execution">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-slate-500">$</span>
-                      <input type="number" min={0} max={100} step={0.5} value={settings.execution.maxCostUsd}
-                        onChange={e => patchSettings('execution', { ...settings.execution, maxCostUsd: Number(e.target.value) })}
-                        className={numberInputClass} />
-                    </div>
-                  </Row>
-                  <Row label="Timeout" hint="Wall-clock limit per execution">
-                    <div className="flex items-center gap-2">
-                      <input type="number" min={1} max={60} value={settings.execution.timeoutMinutes}
-                        onChange={e => patchSettings('execution', { ...settings.execution, timeoutMinutes: Number(e.target.value) })}
-                        className={numberInputClass} />
-                      <span className="text-xs text-slate-500">min</span>
-                    </div>
-                  </Row>
-                  <Row label="Max affected files" hint="Files touched before execution is halted">
-                    <div className="flex items-center gap-2">
-                      <input type="number" min={1} max={100} value={settings.execution.maxAffectedFiles}
-                        onChange={e => patchSettings('execution', { ...settings.execution, maxAffectedFiles: Number(e.target.value) })}
-                        className={numberInputClass} />
-                      <span className="text-xs text-slate-500">files</span>
-                    </div>
-                  </Row>
-                </div>
+                    {saveBar}
+                  </>
+                )}
 
                 {/* Risk Policy */}
-                <div className={sectionClass}>
-                  <div>
-                    <SectionTitle>Risk Policy</SectionTitle>
-                    <p className="text-xs text-slate-500 mt-1">Controls how changes are handled based on their computed risk level.</p>
-                  </div>
-                  {(['low', 'medium', 'high'] as const).map(level => (
-                    <Row
-                      key={level}
-                      label={`${level.charAt(0).toUpperCase() + level.slice(1)} risk`}
-                    >
-                      <SegmentedControl<RiskAction>
-                        value={settings.riskPolicy[level]}
-                        onChange={v => patchSettings('riskPolicy', { ...settings.riskPolicy, [level]: v })}
-                        options={[
-                          { value: 'auto',     label: 'Auto-execute' },
-                          { value: 'approval', label: 'Require approval' },
-                          { value: 'manual',   label: 'Manual only' },
-                        ]}
-                      />
-                    </Row>
-                  ))}
-                </div>
+                {activeSection === 'risk-policy' && (
+                  <>
+                    <div className={sectionClass}>
+                      <div>
+                        <SectionTitle>Risk Policy</SectionTitle>
+                        <p className="text-xs text-slate-500 mt-1">Controls how changes are handled based on their computed risk level.</p>
+                      </div>
+                      {(['low', 'medium', 'high'] as const).map(level => (
+                        <Row
+                          key={level}
+                          label={`${level.charAt(0).toUpperCase() + level.slice(1)} risk`}
+                        >
+                          <SegmentedControl<RiskAction>
+                            value={settings.riskPolicy[level]}
+                            onChange={v => patchSettings('riskPolicy', { ...settings.riskPolicy, [level]: v })}
+                            options={[
+                              { value: 'auto',     label: 'Auto-execute' },
+                              { value: 'approval', label: 'Require approval' },
+                              { value: 'manual',   label: 'Manual only' },
+                            ]}
+                          />
+                        </Row>
+                      ))}
+                    </div>
+                    {saveBar}
+                  </>
+                )}
 
                 {/* Scan & Model */}
-                <div className={sectionClass}>
-                  <SectionTitle>Scan &amp; Model</SectionTitle>
-                  <Row label="Scan mode" hint="Incremental re-uses existing data; full re-scans everything">
-                    <SegmentedControl<ScanMode>
-                      value={settings.scan.mode}
-                      onChange={v => patchSettings('scan', { ...settings.scan, mode: v })}
-                      options={[
-                        { value: 'incremental', label: 'Incremental' },
-                        { value: 'full',        label: 'Full' },
-                      ]}
-                    />
-                  </Row>
-                  <Row label="Dependency depth" hint="BFS hops when resolving import chains">
-                    <div className="flex items-center gap-2">
-                      <input type="number" min={1} max={10} value={settings.scan.dependencyDepth}
-                        onChange={e => patchSettings('scan', { ...settings.scan, dependencyDepth: Number(e.target.value) })}
-                        className={numberInputClass} />
-                      <span className="text-xs text-slate-500">hops</span>
+                {activeSection === 'scan-model' && (
+                  <>
+                    <div className={sectionClass}>
+                      <SectionTitle>Scan &amp; Model</SectionTitle>
+                      <Row label="Scan mode" hint="Incremental re-uses existing data; full re-scans everything">
+                        <SegmentedControl<ScanMode>
+                          value={settings.scan.mode}
+                          onChange={v => patchSettings('scan', { ...settings.scan, mode: v })}
+                          options={[
+                            { value: 'incremental', label: 'Incremental' },
+                            { value: 'full',        label: 'Full' },
+                          ]}
+                        />
+                      </Row>
+                      <Row label="Dependency depth" hint="BFS hops when resolving import chains">
+                        <div className="flex items-center gap-2">
+                          <input type="number" min={1} max={10} value={settings.scan.dependencyDepth}
+                            onChange={e => patchSettings('scan', { ...settings.scan, dependencyDepth: Number(e.target.value) })}
+                            className={numberInputClass} />
+                          <span className="text-xs text-slate-500">hops</span>
+                        </div>
+                      </Row>
+                      <Row label="Auto re-scan" hint="Re-scan automatically after each change is completed">
+                        <Toggle value={settings.scan.autoRescan}
+                          onChange={v => patchSettings('scan', { ...settings.scan, autoRescan: v })} />
+                      </Row>
                     </div>
-                  </Row>
-                  <Row label="Auto re-scan" hint="Re-scan automatically after each change is completed">
-                    <Toggle value={settings.scan.autoRescan}
-                      onChange={v => patchSettings('scan', { ...settings.scan, autoRescan: v })} />
-                  </Row>
-                </div>
+                    {saveBar}
+                  </>
+                )}
 
                 {/* Test Strategy */}
-                <div className={sectionClass}>
-                  <SectionTitle>Test Strategy</SectionTitle>
-                  <Row label="Default" hint="Test selection approach for normal executions">
-                    <SegmentedControl<TestDefault>
-                      value={settings.testStrategy.default}
-                      onChange={v => patchSettings('testStrategy', { ...settings.testStrategy, default: v })}
-                      options={[
-                        { value: 'scoped_first', label: 'Scoped first' },
-                        { value: 'full_suite',   label: 'Full suite' },
-                      ]}
-                    />
-                  </Row>
-                  <Row label="High risk" hint="High-risk changes always run the full suite">
-                    <span className="text-xs font-mono text-slate-500 bg-[#0f1929] border border-white/10 px-3 py-1.5 rounded-lg">Always full suite</span>
-                  </Row>
-                </div>
+                {activeSection === 'test-strategy' && (
+                  <>
+                    <div className={sectionClass}>
+                      <SectionTitle>Test Strategy</SectionTitle>
+                      <Row label="Default" hint="Test selection approach for normal executions">
+                        <SegmentedControl<TestDefault>
+                          value={settings.testStrategy.default}
+                          onChange={v => patchSettings('testStrategy', { ...settings.testStrategy, default: v })}
+                          options={[
+                            { value: 'scoped_first', label: 'Scoped first' },
+                            { value: 'full_suite',   label: 'Full suite' },
+                          ]}
+                        />
+                      </Row>
+                      <Row label="High risk" hint="High-risk changes always run the full suite">
+                        <span className="text-xs font-mono text-slate-500 bg-[#0f1929] border border-white/10 px-3 py-1.5 rounded-lg">Always full suite</span>
+                      </Row>
+                    </div>
+                    {saveBar}
+                  </>
+                )}
 
                 {/* Execution Environment */}
-                <div className={sectionClass}>
-                  <SectionTitle>Execution Environment</SectionTitle>
-                  <Row label="Mode" hint="Where code changes are applied and tested">
-                    <SegmentedControl<ExecMode>
-                      value={settings.executionMode}
-                      onChange={v => patchSettings('executionMode', v)}
-                      options={[
-                        { value: 'container', label: 'Container' },
-                        { value: 'ci',        label: 'CI only' },
-                        { value: 'hybrid',    label: 'Hybrid' },
-                      ]}
-                    />
-                  </Row>
-                </div>
+                {activeSection === 'exec-environment' && (
+                  <>
+                    <div className={sectionClass}>
+                      <SectionTitle>Execution Environment</SectionTitle>
+                      <Row label="Mode" hint="Where code changes are applied and tested">
+                        <SegmentedControl<ExecMode>
+                          value={settings.executionMode}
+                          onChange={v => patchSettings('executionMode', v)}
+                          options={[
+                            { value: 'container', label: 'Container' },
+                            { value: 'ci',        label: 'CI only' },
+                            { value: 'hybrid',    label: 'Hybrid' },
+                          ]}
+                        />
+                      </Row>
+                    </div>
+                    {saveBar}
+                  </>
+                )}
 
                 {/* Notifications */}
-                <div className={sectionClass}>
-                  <SectionTitle>Notifications</SectionTitle>
-                  <Row label="On failure">
-                    <SegmentedControl<OnFailure>
-                      value={settings.onFailure}
-                      onChange={v => patchSettings('onFailure', v)}
-                      options={[
-                        { value: 'notify',         label: 'Notify' },
-                        { value: 'create_change',  label: 'Create change' },
-                        { value: 'nothing',        label: 'Silent' },
-                      ]}
-                    />
-                  </Row>
-                </div>
+                {activeSection === 'notifications' && (
+                  <>
+                    <div className={sectionClass}>
+                      <SectionTitle>Notifications</SectionTitle>
+                      <Row label="On failure">
+                        <SegmentedControl<OnFailure>
+                          value={settings.onFailure}
+                          onChange={v => patchSettings('onFailure', v)}
+                          options={[
+                            { value: 'notify',         label: 'Notify' },
+                            { value: 'create_change',  label: 'Create change' },
+                            { value: 'nothing',        label: 'Silent' },
+                          ]}
+                        />
+                      </Row>
+                    </div>
+                    {saveBar}
+                  </>
+                )}
 
                 {/* Automation */}
-                <div className={sectionClass}>
-                  <SectionTitle>Automation</SectionTitle>
-                  <Row label="Auto-create on production error" hint="Creates a change request when a production error is detected">
-                    <Toggle value={settings.automation.autoCreateOnError}
-                      onChange={v => patchSettings('automation', { ...settings.automation, autoCreateOnError: v })} />
-                  </Row>
-                  <Row label="Suggest refactor on drift" hint="Flags components when dependency patterns shift significantly">
-                    <Toggle value={settings.automation.suggestOnDrift}
-                      onChange={v => patchSettings('automation', { ...settings.automation, suggestOnDrift: v })} />
-                  </Row>
-                </div>
+                {activeSection === 'automation' && (
+                  <>
+                    <div className={sectionClass}>
+                      <SectionTitle>Automation</SectionTitle>
+                      <Row label="Auto-create on production error" hint="Creates a change request when a production error is detected">
+                        <Toggle value={settings.automation.autoCreateOnError}
+                          onChange={v => patchSettings('automation', { ...settings.automation, autoCreateOnError: v })} />
+                      </Row>
+                      <Row label="Suggest refactor on drift" hint="Flags components when dependency patterns shift significantly">
+                        <Toggle value={settings.automation.suggestOnDrift}
+                          onChange={v => patchSettings('automation', { ...settings.automation, suggestOnDrift: v })} />
+                      </Row>
+                    </div>
+                    {saveBar}
+                  </>
+                )}
 
                 {/* Model Health — read-only */}
-                {modelHealth.componentCount > 0 && (
+                {activeSection === 'model-health' && modelHealth.componentCount > 0 && (
                   <div className={sectionClass}>
                     <SectionTitle>Model Health</SectionTitle>
                     <div className="grid grid-cols-2 gap-3">
@@ -468,85 +517,87 @@ export function ProjectSettingsView({
                 )}
 
                 {/* General */}
-                <div className={sectionClass}>
-                  <SectionTitle>General</SectionTitle>
-                  <div>
-                    <label className={`${labelClass} block mb-1.5`}>Project name</label>
-                    <input value={name} onChange={e => setName(e.target.value)} required className={inputClass} placeholder="My project" />
-                  </div>
-                  <div>
-                    <p className={labelClass}>Created</p>
-                    <p className="text-sm text-slate-500 font-mono mt-1">{new Date(project.created_at).toLocaleString('en-GB')}</p>
-                  </div>
-                </div>
+                {activeSection === 'general' && (
+                  <>
+                    <div className={sectionClass}>
+                      <SectionTitle>General</SectionTitle>
+                      <div>
+                        <label className={`${labelClass} block mb-1.5`}>Project name</label>
+                        <input value={name} onChange={e => setName(e.target.value)} required className={inputClass} placeholder="My project" />
+                      </div>
+                      <div>
+                        <p className={labelClass}>Created</p>
+                        <p className="text-sm text-slate-500 font-mono mt-1">{new Date(project.created_at).toLocaleString('en-GB')}</p>
+                      </div>
+                    </div>
+                    {saveBar}
+                  </>
+                )}
 
                 {/* Repository */}
-                <div className={sectionClass}>
-                  <div>
-                    <SectionTitle>Repository</SectionTitle>
-                    <p className="text-xs text-slate-500 mt-1">GitHub repository used for scanning and change execution.</p>
-                  </div>
-                  <div>
-                    <label className={`${labelClass} block mb-1.5`}>Repository URL</label>
-                    <input value={repoUrl} onChange={e => setRepoUrl(e.target.value)} placeholder="https://github.com/org/repo" className={inputClass} />
-                  </div>
-                  <div>
-                    <label className={`${labelClass} block mb-1.5`}>Access token</label>
-                    <div className="relative">
-                      <input
-                        type={showToken ? 'text' : 'password'}
-                        value={repoToken}
-                        onChange={e => setRepoToken(e.target.value)}
-                        placeholder={project.repo_token ? '••••••••••••••••' : 'ghp_...'}
-                        className={`${inputClass} pr-10`}
-                      />
-                      <button type="button" onClick={() => setShowToken(v => !v)}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors">
-                        <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>{showToken ? 'visibility_off' : 'visibility'}</span>
-                      </button>
+                {activeSection === 'repository' && (
+                  <>
+                    <div className={sectionClass}>
+                      <div>
+                        <SectionTitle>Repository</SectionTitle>
+                        <p className="text-xs text-slate-500 mt-1">GitHub repository used for scanning and change execution.</p>
+                      </div>
+                      <div>
+                        <label className={`${labelClass} block mb-1.5`}>Repository URL</label>
+                        <input value={repoUrl} onChange={e => setRepoUrl(e.target.value)} placeholder="https://github.com/org/repo" className={inputClass} />
+                      </div>
+                      <div>
+                        <label className={`${labelClass} block mb-1.5`}>Access token</label>
+                        <div className="relative">
+                          <input
+                            type={showToken ? 'text' : 'password'}
+                            value={repoToken}
+                            onChange={e => setRepoToken(e.target.value)}
+                            placeholder={project.repo_token ? '••••••••••••••••' : 'ghp_...'}
+                            className={`${inputClass} pr-10`}
+                          />
+                          <button type="button" onClick={() => setShowToken(v => !v)}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors">
+                            <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>{showToken ? 'visibility_off' : 'visibility'}</span>
+                          </button>
+                        </div>
+                        <p className="text-[11px] text-slate-600 mt-1.5">Needs <span className="font-mono text-slate-500">repo</span> scope. Leave blank to keep current token.</p>
+                      </div>
                     </div>
-                    <p className="text-[11px] text-slate-600 mt-1.5">Needs <span className="font-mono text-slate-500">repo</span> scope. Leave blank to keep current token.</p>
-                  </div>
-                </div>
-
-                {/* Save */}
-                <div className="flex items-center gap-3">
-                  <button type="submit" disabled={saving}
-                    className="px-5 py-2 rounded-lg text-sm font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
-                    {saving ? 'Saving…' : 'Save changes'}
-                  </button>
-                  {saveSuccess && <span className="text-xs text-emerald-400 font-medium">Saved</span>}
-                  {saveError && <span className="text-xs text-red-400">{saveError}</span>}
-                </div>
+                    {saveBar}
+                  </>
+                )}
               </form>
 
               {/* Danger Zone */}
-              <section className="rounded-xl border border-red-500/20 p-6 space-y-4">
-                <h2 className="text-sm font-bold text-red-400 font-headline">Danger zone</h2>
-                <p className="text-sm text-slate-400">
-                  Permanently delete <span className="font-semibold text-slate-200">{project.name}</span> and all its data. This cannot be undone.
-                </p>
-                <div className="flex items-center gap-4 text-xs font-mono text-slate-500">
-                  <span>{dangerStats.componentCount} components</span>
-                  <span className="text-slate-700">·</span>
-                  <span>{dangerStats.changeCount} changes</span>
-                  <span className="text-slate-700">·</span>
-                  <span>{dangerStats.executionCount} executions</span>
-                </div>
-                <div className="space-y-2">
-                  <label className={labelClass}>
-                    Type <span className="font-mono text-slate-300 normal-case tracking-normal">{project.name}</span> to confirm
-                  </label>
-                  <input value={deleteConfirm} onChange={e => setDeleteConfirm(e.target.value)}
-                    placeholder={project.name}
-                    className="rounded-lg px-3 py-2 text-sm outline-none transition-all bg-[#0f1929] border border-white/10 text-slate-200 placeholder:text-slate-600 focus:border-red-500 font-mono w-full" />
-                </div>
-                {deleteError && <p className="text-xs text-red-400">{deleteError}</p>}
-                <button onClick={handleDelete} disabled={deleteConfirm !== project.name || deleting}
-                  className="px-5 py-2 rounded-lg text-sm font-semibold bg-red-600/20 text-red-300 border border-red-500/30 hover:bg-red-600/30 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
-                  {deleting ? 'Deleting…' : 'Delete project'}
-                </button>
-              </section>
+              {activeSection === 'danger-zone' && (
+                <section className="rounded-xl border border-red-500/20 p-6 space-y-4">
+                  <h2 className="text-sm font-bold text-red-400 font-headline">Danger zone</h2>
+                  <p className="text-sm text-slate-400">
+                    Permanently delete <span className="font-semibold text-slate-200">{project.name}</span> and all its data. This cannot be undone.
+                  </p>
+                  <div className="flex items-center gap-4 text-xs font-mono text-slate-500">
+                    <span>{dangerStats.componentCount} components</span>
+                    <span className="text-slate-700">·</span>
+                    <span>{dangerStats.changeCount} changes</span>
+                    <span className="text-slate-700">·</span>
+                    <span>{dangerStats.executionCount} executions</span>
+                  </div>
+                  <div className="space-y-2">
+                    <label className={labelClass}>
+                      Type <span className="font-mono text-slate-300 normal-case tracking-normal">{project.name}</span> to confirm
+                    </label>
+                    <input value={deleteConfirm} onChange={e => setDeleteConfirm(e.target.value)}
+                      placeholder={project.name}
+                      className="rounded-lg px-3 py-2 text-sm outline-none transition-all bg-[#0f1929] border border-white/10 text-slate-200 placeholder:text-slate-600 focus:border-red-500 font-mono w-full" />
+                  </div>
+                  {deleteError && <p className="text-xs text-red-400">{deleteError}</p>}
+                  <button onClick={handleDelete} disabled={deleteConfirm !== project.name || deleting}
+                    className="px-5 py-2 rounded-lg text-sm font-semibold bg-red-600/20 text-red-300 border border-red-500/30 hover:bg-red-600/30 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                    {deleting ? 'Deleting…' : 'Delete project'}
+                  </button>
+                </section>
+              )}
 
             </div>
           </div>
