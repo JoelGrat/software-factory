@@ -37,6 +37,25 @@ interface Settings {
   automation: { autoCreateOnError: boolean; suggestOnDrift: boolean }
 }
 
+type SectionId =
+  | 'general' | 'repository' | 'execution' | 'risk-policy'
+  | 'scan-model' | 'test-strategy' | 'exec-environment'
+  | 'notifications' | 'automation' | 'model-health' | 'danger-zone'
+
+const SECTIONS: { id: SectionId; label: string }[] = [
+  { id: 'general',          label: 'General' },
+  { id: 'repository',       label: 'Repository' },
+  { id: 'execution',        label: 'Execution' },
+  { id: 'risk-policy',      label: 'Risk Policy' },
+  { id: 'scan-model',       label: 'Scan & Model' },
+  { id: 'test-strategy',    label: 'Test Strategy' },
+  { id: 'exec-environment', label: 'Exec Environment' },
+  { id: 'notifications',    label: 'Notifications' },
+  { id: 'automation',       label: 'Automation' },
+  { id: 'model-health',     label: 'Model Health' },
+  { id: 'danger-zone',      label: 'Danger Zone' },
+]
+
 const DEFAULTS: Settings = {
   execution: { maxIterations: 10, maxCostUsd: 5, timeoutMinutes: 10, maxAffectedFiles: 20 },
   riskPolicy: { low: 'auto', medium: 'approval', high: 'manual' },
@@ -159,6 +178,8 @@ export function ProjectSettingsView({
   const [deleting, setDeleting] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState('')
   const [deleteError, setDeleteError] = useState<string | null>(null)
+
+  const [activeSection, setActiveSection] = useState<SectionId>('general')
 
   function patchSettings<K extends keyof Settings>(key: K, val: Settings[K]) {
     setSettings(s => ({ ...s, [key]: val }))
