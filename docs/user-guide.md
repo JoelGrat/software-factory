@@ -1,159 +1,234 @@
-# Software Factory — User Guide
+# FactoryOS — User Guide
 
-Software Factory is an AI-powered platform that transforms raw product requirements into working code. You paste in requirements, the AI structures and validates them, then an agent writes and tests the code — with you reviewing at every key step.
+FactoryOS connects to your GitHub repository, learns its architecture, and lets you describe changes in plain English. The AI analyses the impact, writes the code in an isolated environment, runs your tests, and asks for your approval before anything is final.
+
+---
+
+## Prerequisites
+
+- A GitHub repository (public or private)
+- A GitHub **personal access token** with `repo` scope (read + write access)
+- Docker Desktop running locally (required for code execution)
 
 ---
 
 ## Quick Start
 
-1. Sign up and log in
-2. Create a project and set its target path (the local directory where code will be written)
-3. Paste your requirements and click **Analyze**
-4. Resolve any gaps the AI identifies
-5. Mark requirements as **Ready for Development**
-6. Run the agent, approve the plan, watch it code
-7. Review the generated code and accept the changes
+1. Sign up and log in at `/`
+2. Create a project and connect your GitHub repository
+3. Wait for the repository scan to complete
+4. Create a change request describing what you want
+5. Review the impact analysis
+6. Approve the generated implementation plan
+7. Watch the AI execute and test the code
+8. Review the result and approve
 
 ---
 
 ## Step-by-Step Walkthrough
 
-### 1. Creating a Project
+### 1. Create a Project
 
-Go to **Projects** (`/projects`) and click **New Project**.
+Go to **Projects** and click **New Project**.
 
 Fill in:
-- **Name** — a descriptive project name
-- **Target path** — the absolute path to the local codebase the agent will write into (e.g. `/home/user/my-app`)
-- **Test command** (optional) — the command the agent runs to verify its work (e.g. `npm test`)
+- **Name** — a label for this project
+- **Repository URL** — the full GitHub URL, e.g. `https://github.com/org/repo`
+- **Access token** — a GitHub PAT with `repo` scope (read + write). This is validated immediately for push access.
 
-Your project appears in the project list. Click it to open the requirements workspace.
-
----
-
-### 2. Analyzing Requirements
-
-Open your project and go to the **Requirements** tab.
-
-Paste your requirements into the **Input** tab — any format works: bullet points, plain prose, user stories, meeting notes, or a mix.
-
-Click **Analyze**. The pipeline runs in four stages, with live progress:
-
-| Stage | What happens |
-|---|---|
-| **Parse** | Extracts structured items: functional requirements, non-functional requirements, constraints, and assumptions |
-| **Detect Gaps** | Finds missing, ambiguous, conflicting, or incomplete requirements |
-| **Generate Questions** | Creates clarifying questions for each gap |
-| **Create Tasks** | Generates investigation tasks to resolve ambiguities |
+Click **Create Project**. The system immediately starts scanning the repository.
 
 ---
 
-### 3. Reviewing Structured Items
+### 2. Wait for the Repository Scan
 
-Switch to the **Structured** tab to see your requirements organized by type:
+The scan appears as a progress strip on the project dashboard. It runs through several milestones:
 
-- **Functional** — what the system must do
-- **Non-functional** — performance, security, auditability
-- **Constraints** — hard limits and boundaries
-- **Assumptions** — things being taken as given
+- Fetching file tree
+- Parsing TypeScript files (AST-level)
+- Identifying system components
+- Building dependency graph
+- Storing file → component mappings
 
-Each item shows its priority (high / medium / low) and any linked gaps. A counter at the top tells you how many items are blocking development.
+When complete, the dashboard shows **Model quality** (`HIGH` / `MEDIUM` / `LOW`) and a count of components, files, and dependencies.
 
----
+You can explore the full system model at **System Model** in the left navigation. Components are colour-coded by type (`api`, `service`, `db`, `ui`, `module`) and you can expand each to see its files and dependencies.
 
-### 4. Resolving Gaps
+> If the scan fails, check that the repository URL is correct and the access token has read access.
 
-Switch to the **Gaps** tab to see what the AI flagged.
-
-Each gap shows:
-- **Severity**: critical, major, or minor
-- **Category**: missing, ambiguous, conflicting, or incomplete
-- **Confidence score**: how certain the AI is this is a real problem
-
-For each gap you can:
-
-| Action | When to use |
-|---|---|
-| **Answer a question** | The AI generated a clarifying question — type your answer |
-| **Record a decision** | Document a design decision and your rationale |
-| **Generate questions** | Ask the AI to create questions for gaps it didn't auto-generate for |
-| **Dismiss** | Mark a gap as not relevant |
-
-The sidebar shows overall coverage %, how many critical gaps remain blocking, and current status.
-
-Critical gaps must be resolved before you can proceed.
+To re-scan after code changes, click **Rescan** on the dashboard.
 
 ---
 
-### 5. Marking Ready for Development
+### 3. Create a Change Request
 
-Once all critical gaps are resolved, click **Mark Ready for Development**.
+From the project dashboard, click **New Change** (top right of the Changes section). A drawer opens with the intake form.
 
-This locks the requirements and enables the **Run Agent** button.
+Fill in:
+- **Title** — a short description, e.g. "Fix user session expiry bug"
+- **Intent** — a detailed explanation of what needs to change and why. The more specific, the better. Click **Generate** to have the AI write this from your title, or **Improve** to refine what you've already written.
+- **Type** — `bug` / `feature` / `refactor` / `hotfix`
+- **Priority** — `low` / `medium` / `high`
+- **Tags** — optional labels (press Enter to add)
 
----
-
-### 6. Running the Planning Agent
-
-Click **Run Agent**. The planner agent reads your requirements and the actual project files at the target path, then generates an implementation plan.
-
-You are taken to the **Plan Review** page, which shows:
-- Files to **create** (green)
-- Files to **modify** (orange)
-- **Test approach** — how the agent will verify its work
-- **Implementation tasks** — numbered steps with descriptions and affected files
-
-Review the plan carefully. When satisfied, click **Approve Plan → Start Coding**. To abort, click **Cancel**.
+Click **Submit Change**. You are taken to the change detail page.
 
 ---
 
-### 7. Watching the Coding Agent
+### 4. Review the Impact Analysis
 
-After approval you are taken to the **Execution** page. The agent works through the plan in a test-driven loop:
+Impact analysis runs automatically after the change is created. The status strip on the change page shows live progress through the analysis phases.
 
-1. Generates code changes and applies them to your target path
-2. Runs the test command
-3. If tests fail, feeds the errors back and retries (up to 10 iterations)
-4. If tests pass, creates a git branch and moves to review
+When complete you see:
 
-The live log shows:
-- Current iteration number
-- Number of files changed
-- Test pass/fail counts
-- Any errors (highlighted in red)
+**Risk summary**
+- Risk level: `low` / `medium` / `high`
+- Risk score (0–100)
+- Blast radius — number of downstream components affected
+- Flags: migration required, data change required
 
-Logs auto-scroll. You can watch the full process or leave and come back.
+**Affected components** — ranked by impact weight, showing which parts of the codebase will be touched and why (directly mapped, via dependency, or via file proximity).
 
----
-
-### 8. Reviewing Generated Code
-
-When the agent finishes you land on the **Review** page, which shows:
-- A git diff of every change made
-- Test result summary
-
-If the changes look good, accept them. The branch is committed to your local repository.
-
-If something is wrong, you can cancel and restart from the requirements step with updated input.
+**Risk factors** — specific reasons the risk was scored as it was (e.g. "touches auth layer", "high incoming dependency count").
 
 ---
 
-## Key Concepts
+### 5. Generate and Approve the Implementation Plan
 
-**Gap** — an issue in your requirements that could cause problems during implementation. Resolving gaps before coding prevents the agent from making wrong assumptions.
+Once analysis is complete, click **Generate Plan**.
 
-**Job** — one run of the agent against a set of requirements. Each job has a plan, an execution log, and a review step.
+The AI produces:
+- A set of **tasks** — one or more per affected component, each with a concrete description
+- **File mappings** — which existing files each task touches (visible in the Tasks tab and the Files tab)
+- An estimate of how many new files will be created
+- A **spec** — a full markdown description of the implementation approach
 
-**Target path** — the local directory the agent reads from and writes to. Make sure it is a git repository with a clean working tree before running the agent.
+**Review the plan carefully:**
 
-**Iteration** — one pass of the coding loop (write → test → evaluate). The agent retries automatically until tests pass or the iteration limit is reached.
+- Switch between the **Tasks**, **Files**, and **Spec** tabs
+- The Tasks tab shows each task with its component name and the specific file(s) it will edit
+- The Files tab shows a deduplicated list of all affected files, plus an estimate of new files
+
+If the plan looks wrong, click **Regenerate** to produce a new one.
+
+When satisfied, click **Approve Plan**. This is **Human Gate 1** — once approved, execution can begin.
+
+---
+
+### 6. Execute
+
+Click **Execute** on the approved plan (or navigate to **Execution** in the breadcrumb).
+
+The system:
+1. Launches a Docker container (`node:20-slim`)
+2. Installs git and dependencies inside the container
+3. Clones your repository and creates a branch (`sf/<id>-<slug>`)
+4. Runs `npm install`
+5. Processes each task: reads the relevant file, calls the AI to generate a code patch, applies it via AST replacement
+6. Runs `npx tsc --noEmit` (type check)
+7. Runs `npx vitest run` (test suite)
+8. If checks fail, records the error and retries (up to 10 iterations)
+9. If all checks pass, commits and pushes to the branch
+
+**What you see on the execution screen:**
+
+- **Tasks panel** (left) — each task turns green as it is processed, one by one
+- **Iterations** — each completed iteration appears with pass/fail counts; a live "running" row shows the current iteration
+- **Log sidebar** (right) — real-time log of every action: Docker commands (`$`), orchestrator steps (`›`), successes (`✓`), errors (`✗`)
+
+You can leave the page and come back — execution runs in the background and the screen polls for updates every 2 seconds.
+
+**If execution fails:**
+- The last error snapshot is shown with a diagnosis (Docker not running, type errors, failing tests, etc.)
+- Fix the underlying problem then click **Retry Execution**
+
+---
+
+### 7. Review and Approve
+
+When execution succeeds, the status changes to **review** and you are prompted to go to the Review page.
+
+The review page shows:
+- **Stats** — tasks completed, tests passed, files modified, iterations taken
+- **Commit** — branch name and commit hash, with links to view the commit and compare the diff on GitHub
+- **Files modified** — every file changed by the execution
+- **Tasks** — the full task list with done status
+
+If everything looks correct, click **Approve**. The change moves to `done`. The branch remains open on GitHub for you to open a pull request manually.
+
+If something is wrong, click **Re-run** to start another execution cycle from scratch.
+
+---
+
+## The Change Lifecycle
+
+```
+Created → Analyzing → Analyzed → [Generate Plan] → Planned
+    → [Approve Plan] → Executing → Review → [Approve] → Done
+                                → Failed  → [Re-run]  → Executing
+```
+
+Every state is visible on the change detail page with a step indicator at the top.
+
+---
+
+## Project Settings
+
+Go to **Settings** in the left navigation (or the gear icon in the header).
+
+**General** — edit project name and description.
+
+**Repository** — update the GitHub URL and access token. When you save, the system validates that the token has push access to the repository. The token hint shows whether a token is already saved.
+
+---
+
+## The System Model
+
+The system model browser (`/projects/[id]/system-model`) lets you explore your codebase:
+
+- Search components by name
+- Filter by type (`api`, `service`, `db`, `ui`, `module`)
+- Expand a component to see its files and dependencies (what it depends on, what depends on it)
+- See confidence scores and stability status
+
+The model is used as the foundation for every impact analysis and plan. Re-scanning after significant refactors keeps it accurate.
+
+---
+
+## Dashboard Insights
+
+The project dashboard shows:
+
+- **Scan status and model quality** — confidence in the system model
+- **System overview** — component count, file count, dependency edges, confidence distribution
+- **Architecture breakdown** — how many components of each type
+- **Tech stack** — detected technologies
+- **Hotspots** — most highly connected components (high blast radius)
+- **Suggested improvements** — AI-generated recommendations based on structural patterns (high coupling, oversized components, etc.), each with a one-click "Create Change" button pre-filling the title
+- **Changes** — all change requests for this project with status badges
 
 ---
 
 ## Tips
 
-- The more specific your requirements, the fewer gaps will be detected and the better the generated code.
-- Answer AI questions with as much context as you have — those answers go directly into the agent's prompt.
-- Set a real test command in your project settings. Without it the agent cannot verify its own work.
-- Review the plan before approving. Cancelling after coding has started is possible but wastes a run.
-- The agent writes to your actual filesystem. Commit or stash any in-progress work before running a job.
+- **Write a detailed intent.** The AI uses your intent to map the change to components. Vague intent → wrong components → wrong plan.
+- **Use the Generate button** for intent if you are unsure how to phrase it — then edit what comes back.
+- **Review the Files tab in the plan** before approving. If key files are missing, regenerate.
+- **Keep Docker Desktop running** before clicking Execute. If Docker is not running, the execution will fail immediately with a clear error.
+- **Check the log sidebar** during execution. It shows exactly what the AI is doing and surfaces errors immediately.
+- **Re-scan after major refactors.** The system model only knows what it has scanned. Stale models lead to incorrect impact analysis.
+- **The branch stays open after approval.** Open a pull request on GitHub manually when ready to merge.
+
+---
+
+## Common Errors
+
+| Error | Cause | Fix |
+|---|---|---|
+| "Docker is not running" | Docker Desktop not started | Open Docker Desktop, wait for the engine to show Running |
+| "No repository configured" | Missing repo URL in settings | Go to Settings → Repository |
+| "No access token configured" | Missing GitHub token | Go to Settings → Repository, add a token with `repo` scope |
+| "Repository access failed" | Wrong URL or token without push access | Check the URL and token in Settings → Repository |
+| "Git installation failed" | Docker container can't reach the internet | Check Docker Desktop's network settings / proxy config |
+| "Type check failed" | The repository already has TypeScript errors | Fix the pre-existing type errors in your codebase before re-running |
+| "Tests failed" | Pre-existing test failures or AI introduced a regression | Review the error detail in the expanded iteration row |
