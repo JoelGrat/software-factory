@@ -196,7 +196,7 @@ export class DockerExecutor implements CodeExecutor {
 
 function parseVitestJson(output: string): TestResult {
   try {
-    const jsonStart = output.lastIndexOf('{')
+    const jsonStart = output.indexOf('{')
     if (jsonStart === -1) throw new Error('No JSON found')
     const json = JSON.parse(output.slice(jsonStart))
     const numTotalTests = json.numTotalTests ?? 0
