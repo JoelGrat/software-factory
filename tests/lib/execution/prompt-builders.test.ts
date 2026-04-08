@@ -4,6 +4,7 @@ import {
   buildSymbolPatchPrompt,
   buildMultiSymbolPatchPrompt,
   buildFilePatchPrompt,
+  buildNewFilePrompt,
 } from '@/lib/execution/prompt-builders'
 import type { SymbolContext } from '@/lib/execution/types'
 
@@ -62,5 +63,44 @@ describe('buildFilePatchPrompt', () => {
   it('includes the full file content', () => {
     const p = buildFilePatchPrompt(TASK, 'full file content here', CTX.filePath)
     expect(p).toContain('full file content here')
+  })
+})
+
+describe('buildNewFilePrompt', () => {
+  it('includes the target file path', () => {
+    const p = buildNewFilePrompt(
+      { description: 'Create UserRepository class', intent: 'add user CRUD' },
+      'lib/repositories/user-repository.ts'
+    )
+    expect(p).toContain('lib/repositories/user-repository.ts')
+  })
+
+  it('includes the task description and intent', () => {
+    const p = buildNewFilePrompt(
+      { description: 'Create UserRepository class', intent: 'add user CRUD' },
+      'lib/repositories/user-repository.ts'
+    )
+    expect(p).toContain('Create UserRepository class')
+    expect(p).toContain('add user CRUD')
+  })
+
+  it('asks for newFileContent, confidence and requiresPropagation in the output schema', () => {
+    const p = buildNewFilePrompt(
+      { description: 'Create UserRepository class', intent: 'add user CRUD' },
+      'lib/repositories/user-repository.ts'
+    )
+    expect(p).toContain('newFileContent')
+    expect(p).toContain('confidence')
+    expect(p).toContain('requiresPropagation')
+  })
+
+  it('includes previous error when provided', () => {
+    const p = buildNewFilePrompt(
+      { description: 'Create UserRepository class', intent: 'add user CRUD' },
+      'lib/repositories/user-repository.ts',
+      'syntax error: unexpected token on line 5'
+    )
+    expect(p).toContain('syntax error: unexpected token on line 5')
+    expect(p).toContain('Previous Attempt Failed')
   })
 })

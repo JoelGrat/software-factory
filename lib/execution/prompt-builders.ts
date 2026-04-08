@@ -107,3 +107,29 @@ Return a JSON object:
   "reasoning": "<one sentence>"
 }`
 }
+
+export function buildNewFilePrompt(
+  task: PatchTask,
+  filePath: string,
+  previousError?: string
+): string {
+  return `You are a TypeScript code generation expert. Create a new file to implement the task below.
+
+## Task
+${task.description}
+
+## Intent
+${task.intent}
+
+## New File Path
+${filePath}
+${previousError ? `\n## Previous Attempt Failed\n${previousError}\nDo NOT repeat the same approach.\n` : ''}
+## Output
+Return a JSON object:
+{
+  "newFileContent": "<complete, valid TypeScript file content>",
+  "confidence": <0-100 integer — your confidence this is correct>,
+  "requiresPropagation": <true if this new file changes any existing public interface or re-exports a type that callers already depend on, false otherwise>,
+  "reasoning": "<one sentence explanation>"
+}`
+}

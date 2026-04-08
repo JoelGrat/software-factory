@@ -20,6 +20,7 @@ ${componentList}
 
 Design the high-level approach for implementing this change.
 For each component, describe what needs to change and how.
+If this change requires creating brand-new files not yet in the codebase, list their paths in newFilePaths.
 
 Respond with JSON:
 {
@@ -29,7 +30,8 @@ Respond with JSON:
   "estimatedFiles": 5,
   "componentApproaches": {
     "ComponentName": "Approach for this component"
-  }
+  },
+  "newFilePaths": ["relative/path/to/new-file.ts"]
 }`
 }
 
