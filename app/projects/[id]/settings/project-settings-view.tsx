@@ -172,6 +172,7 @@ export function ProjectSettingsView({
   const [settings, setSettings] = useState<Settings>(() => mergeSettings(initial.project_settings ?? {}))
 
   const [saving, setSaving] = useState(false)
+  const [checkingAccess, setCheckingAccess] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState(false)
 
@@ -185,10 +186,10 @@ export function ProjectSettingsView({
     <div className="flex items-center gap-3 pt-2">
       <button
         type="submit"
-        disabled={saving}
+        disabled={saving || checkingAccess}
         className="px-5 py-2 rounded-lg text-sm font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        {saving ? 'Saving…' : 'Save changes'}
+        {checkingAccess ? 'Checking access…' : saving ? 'Saving…' : 'Save changes'}
       </button>
       {saveSuccess && <span className="text-xs text-emerald-400 font-medium">Saved</span>}
       {saveError && <span className="text-xs text-red-400">{saveError}</span>}
@@ -199,11 +200,45 @@ export function ProjectSettingsView({
     setSettings(s => ({ ...s, [key]: val }))
   }
 
+  async function checkGitHubAccess(url: string, token: string): Promise<string | null> {
+    const match = url.trim().match(/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?(?:\/.*)?$/)
+    if (!match) return 'Could not parse GitHub repository URL'
+    const [, owner, repo] = match
+    try {
+      const res = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
+        headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
+      })
+      if (res.status === 401) return 'Access token is invalid or expired'
+      if (res.status === 403) return 'Token does not have permission to access this repository'
+      if (res.status === 404) return 'Repository not found — check the URL and token scope'
+      if (!res.ok) return `GitHub returned ${res.status}`
+      const data = await res.json()
+      if (!data.permissions?.push) return 'Token needs read/write (push) access to this repository'
+      return null
+    } catch {
+      return 'Could not reach GitHub to verify access'
+    }
+  }
+
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
-    setSaving(true)
     setSaveError(null)
     setSaveSuccess(false)
+
+    if (activeSection === 'repository' && repoUrl.trim() && repoToken.trim()) {
+      setCheckingAccess(true)
+      try {
+        const accessError = await checkGitHubAccess(repoUrl, repoToken)
+        if (accessError) {
+          setSaveError(accessError)
+          return
+        }
+      } finally {
+        setCheckingAccess(false)
+      }
+    }
+
+    setSaving(true)
     try {
       const res = await fetch(`/api/projects/${project.id}`, {
         method: 'PATCH',
@@ -544,7 +579,7 @@ export function ProjectSettingsView({
                       </div>
                       <div>
                         <label className={`${labelClass} block mb-1.5`}>Repository URL</label>
-                        <input value={repoUrl} onChange={e => setRepoUrl(e.target.value)} placeholder="https://github.com/org/repo" className={inputClass} />
+                        <input value={repoUrl} onChange={e => setRepoUrl(e.target.value)} required placeholder="https://github.com/org/repo" className={inputClass} />
                       </div>
                       <div>
                         <label className={`${labelClass} block mb-1.5`}>Access token</label>
@@ -553,6 +588,7 @@ export function ProjectSettingsView({
                             type={showToken ? 'text' : 'password'}
                             value={repoToken}
                             onChange={e => setRepoToken(e.target.value)}
+                            required={!project.repo_token}
                             placeholder={project.repo_token ? '••••••••••••••••' : 'ghp_...'}
                             className={`${inputClass} pr-10`}
                           />
@@ -561,7 +597,10 @@ export function ProjectSettingsView({
                             <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>{showToken ? 'visibility_off' : 'visibility'}</span>
                           </button>
                         </div>
-                        <p className="text-[11px] text-slate-600 mt-1.5">Needs <span className="font-mono text-slate-500">repo</span> scope. Leave blank to keep current token.</p>
+                        <p className="text-[11px] text-slate-600 mt-1.5">
+                          Needs <span className="font-mono text-slate-500">repo</span> scope.{' '}
+                          {project.repo_token ? 'Leave blank to keep current token.' : ''}
+                        </p>
                       </div>
                     </div>
                     {saveBar}

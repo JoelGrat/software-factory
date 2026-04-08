@@ -31,24 +31,30 @@ export async function POST(
 
   const { data: change } = await db
     .from('change_requests')
-    .select('id, status, projects!inner(owner_id, repo_url)')
+    .select('id, status, projects!inner(owner_id, repo_url, repo_token)')
     .eq('id', id)
     .eq('projects.owner_id', user.id)
     .single()
 
   if (!change) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  const project = change.projects as unknown as { owner_id: string; repo_url: string | null }
+  const project = change.projects as unknown as { owner_id: string; repo_url: string | null; repo_token: string | null }
   if (!project.repo_url) {
     return NextResponse.json(
       { error: 'No repository configured', detail: 'Set a repository URL in Project Settings before executing.' },
       { status: 422 }
     )
   }
-
-  if (!['planned', 'failed'].includes(change.status)) {
+  if (!project.repo_token) {
     return NextResponse.json(
-      { error: `Cannot execute from status '${change.status}'. Change must be 'planned' or 'failed'.` },
+      { error: 'No access token configured', detail: 'Set a GitHub access token in Project Settings → Repository before executing.' },
+      { status: 422 }
+    )
+  }
+
+  if (!['planned', 'failed', 'review', 'done'].includes(change.status)) {
+    return NextResponse.json(
+      { error: `Cannot execute from status '${change.status}'.` },
       { status: 409 }
     )
   }
@@ -75,6 +81,23 @@ export async function POST(
   }
 
   const adminDb = createAdminClient()
+
+  // Clear previous execution history before re-running
+  await adminDb.from('execution_snapshots').delete().eq('change_id', id)
+  await adminDb.from('execution_trace').delete().eq('change_id', id)
+
+  // Reset plan task statuses to pending
+  const { data: latestPlan } = await adminDb
+    .from('change_plans')
+    .select('id')
+    .eq('change_id', id)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (latestPlan) {
+    await adminDb.from('change_plan_tasks').update({ status: 'pending' }).eq('plan_id', latestPlan.id)
+  }
+
   const ai = getProvider()
   const executor = new DockerExecutor()
 

@@ -104,15 +104,30 @@ export default function ExecutionView({ change, project }: { change: Change; pro
     if (m.includes('no repository configured') || m.includes('repo_url')) {
       return {
         title: 'No repository configured',
-        steps: ['Go to Project Settings and set a valid Git repository URL.'],
+        steps: ['Go to Project Settings → Repository and set a valid GitHub URL.'],
       }
     }
-    if (m.includes('git clone') || m.includes('git: not found') || m.includes('authentication') || m.includes('403') || m.includes('401')) {
+    if (m.includes('no access token configured')) {
+      return {
+        title: 'No access token configured',
+        steps: ['Go to Project Settings → Repository and add a GitHub access token with read/write access.'],
+      }
+    }
+    if (m.includes('failed to install git') || m.includes('git: not found')) {
+      return {
+        title: 'Git installation failed',
+        steps: [
+          'The Docker container could not install git — check that Docker has internet access.',
+          'If running behind a proxy, configure Docker Desktop with your proxy settings.',
+        ],
+      }
+    }
+    if (m.includes('git clone') || m.includes('authentication') || m.includes('403') || m.includes('401')) {
       return {
         title: 'Repository access failed',
         steps: [
-          'Check the repo URL and access token in Project Settings.',
-          'Ensure the token has read/write access to the repository.',
+          'Check the repo URL and access token in Project Settings → Repository.',
+          'Ensure the token has read/write (push) access to the repository.',
         ],
       }
     }
@@ -125,7 +140,16 @@ export default function ExecutionView({ change, project }: { change: Change; pro
         ],
       }
     }
-    if (m.includes('no approved plan') || m.includes('plan')) {
+    if (m.includes('error ts') || m.includes('error TS') || /\(\d+,\d+\): error/.test(m)) {
+      return {
+        title: 'TypeScript type check failed',
+        steps: [
+          'The repository has type errors that must be fixed before execution can proceed.',
+          'Review the error detail below to find the affected files.',
+        ],
+      }
+    }
+    if (m.includes('no approved plan found')) {
       return {
         title: 'No approved plan found',
         steps: ['Go back to the change and approve the plan before executing.'],
@@ -446,17 +470,37 @@ export default function ExecutionView({ change, project }: { change: Change; pro
 
             {/* Review CTA */}
             {(status === 'review' || latestSnapshot?.partial_success) && (
-              <div className="rounded-xl p-5 bg-[#131b2e] border border-white/5 flex items-center justify-between">
+              <div className="rounded-xl p-5 bg-[#131b2e] border border-white/5 flex items-center justify-between gap-4">
                 <div>
                   <p className="text-sm font-semibold text-slate-200 mb-1">Execution complete</p>
                   <p className="text-xs text-slate-500">Review the changes before merging.</p>
                 </div>
-                <button
-                  onClick={() => router.push(`/projects/${project?.id}/changes/${change.id}/review`)}
-                  className="px-4 py-2 rounded-lg bg-green-500 hover:bg-green-400 text-white text-sm font-bold font-headline transition-colors"
-                >
-                  Go to Review
-                </button>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <button
+                    disabled={starting}
+                    onClick={async () => {
+                      setStarting(true)
+                      setStartError(null)
+                      const res = await fetch(`/api/change-requests/${change.id}/execute`, { method: 'POST' })
+                      if (res.ok) {
+                        setStatus('executing'); setSnapshots([]); setTasks([]); setTraces([])
+                      } else {
+                        const data = await res.json().catch(() => ({}))
+                        setStartError(data.detail ?? data.error ?? 'Failed to start execution')
+                      }
+                      setStarting(false)
+                    }}
+                    className="px-4 py-2 rounded-lg bg-[#0f1929] border border-white/10 hover:border-white/20 text-slate-300 text-sm font-semibold font-headline transition-colors disabled:opacity-50"
+                  >
+                    {starting ? 'Starting…' : 'Re-run'}
+                  </button>
+                  <button
+                    onClick={() => router.push(`/projects/${project?.id}/changes/${change.id}/review`)}
+                    className="px-4 py-2 rounded-lg bg-green-500 hover:bg-green-400 text-white text-sm font-bold font-headline transition-colors"
+                  >
+                    Go to Review
+                  </button>
+                </div>
               </div>
             )}
 

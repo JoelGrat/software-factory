@@ -20,6 +20,16 @@ async function dockerExec(containerId: string, command: string): Promise<{ stdou
   return exec(`docker exec ${containerId} sh -c "${command.replace(/"/g, '\\"')}"`)
 }
 
+async function dockerCpToLocal(containerId: string, containerWorkDir: string, localWorkDir: string): Promise<void> {
+  // Move node_modules aside temporarily — Windows can't create the symlinks in .bin/
+  await dockerExec(containerId, `mv ${containerWorkDir}/node_modules /tmp/_nm 2>/dev/null || true`)
+  try {
+    await exec(`docker cp ${containerId}:${containerWorkDir}/. ${localWorkDir}/`)
+  } finally {
+    await dockerExec(containerId, `mv /tmp/_nm ${containerWorkDir}/node_modules 2>/dev/null || true`)
+  }
+}
+
 export class DockerExecutor implements CodeExecutor {
   private readonly image: string
 
@@ -31,23 +41,28 @@ export class DockerExecutor implements CodeExecutor {
     project: { repoUrl: string; repoToken: string | null; id: string },
     branch: string
   ): Promise<ExecutionEnvironment> {
+    if (!project.repoUrl) throw new Error('No repository URL configured for this project')
+    if (!project.repoToken) throw new Error('No access token configured for this project')
+
     const localWorkDir = await mkdtemp(join(tmpdir(), `sf-exec-${project.id}-`))
 
     const { stdout } = await exec(`docker run -d --rm ${this.image} tail -f /dev/null`)
     const containerId = stdout.trim()
     const containerWorkDir = '/app'
 
-    await dockerExec(containerId, `apt-get update -qq && apt-get install -y git --no-install-recommends -qq`)
+    try {
+      await dockerExec(containerId, `DEBIAN_FRONTEND=noninteractive apt-get update -qq && apt-get install -y git ca-certificates --no-install-recommends -qq 2>&1`)
+    } catch (err) {
+      throw new Error(`Failed to install git in container: ${(err as Error).message}`)
+    }
 
-    const authedUrl = project.repoToken
-      ? project.repoUrl.replace('https://', `https://oauth2:${project.repoToken}@`)
-      : project.repoUrl
+    const authedUrl = project.repoUrl.replace('https://', `https://oauth2:${project.repoToken}@`)
 
     await dockerExec(containerId, `git clone --depth 1 ${authedUrl} ${containerWorkDir}`)
     await dockerExec(containerId, `cd ${containerWorkDir} && git checkout -b ${branch}`)
     await dockerExec(containerId, `cd ${containerWorkDir} && npm install --silent`)
 
-    await exec(`docker cp ${containerId}:${containerWorkDir}/. ${localWorkDir}/`)
+    await dockerCpToLocal(containerId, containerWorkDir, localWorkDir)
 
     return { containerId, containerWorkDir, localWorkDir, branch, projectId: project.id, repoUrl: project.repoUrl }
   }
@@ -150,6 +165,11 @@ export class DockerExecutor implements CodeExecutor {
   async commitAndPush(env: ExecutionEnvironment, branch: string, message: string): Promise<CommitResult> {
     await dockerExec(env.containerId, `cd ${env.containerWorkDir} && git config user.email "sf@softwarefactory.ai"`)
     await dockerExec(env.containerId, `cd ${env.containerWorkDir} && git config user.name "Software Factory"`)
+    const { stdout: statusOut } = await dockerExec(env.containerId, `cd ${env.containerWorkDir} && git status --porcelain`)
+    const { stdout: headHash } = await dockerExec(env.containerId, `cd ${env.containerWorkDir} && git rev-parse HEAD`)
+    if (!statusOut.trim()) {
+      return { commitHash: headHash.trim(), branch }
+    }
     await dockerExec(env.containerId, `cd ${env.containerWorkDir} && git add -A && git commit -m "${message.replace(/"/g, '\\"')}"`)
     await dockerExec(env.containerId, `cd ${env.containerWorkDir} && git push origin ${branch}`)
     const { stdout } = await dockerExec(env.containerId, `cd ${env.containerWorkDir} && git rev-parse HEAD`)
@@ -158,7 +178,7 @@ export class DockerExecutor implements CodeExecutor {
 
   async resetIteration(env: ExecutionEnvironment, acceptedPatches: FilePatch[]): Promise<void> {
     await dockerExec(env.containerId, `cd ${env.containerWorkDir} && git reset --hard HEAD`)
-    await exec(`docker cp ${env.containerId}:${env.containerWorkDir}/. ${env.localWorkDir}/`)
+    await dockerCpToLocal(env.containerId, env.containerWorkDir, env.localWorkDir)
     for (const patch of acceptedPatches) {
       await this.applyPatch(env, patch)
     }

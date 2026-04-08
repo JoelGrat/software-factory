@@ -9,6 +9,7 @@ export function CreateProjectForm() {
   const [repoUrl, setRepoUrl] = useState('')
   const [repoToken, setRepoToken] = useState('')
   const [loading, setLoading] = useState(false)
+  const [checkingAccess, setCheckingAccess] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const router = useRouter()
 
@@ -20,10 +21,39 @@ export function CreateProjectForm() {
     setError(null)
   }
 
+  async function checkGitHubAccess(url: string, token: string): Promise<string | null> {
+    const match = url.trim().match(/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?(?:\/.*)?$/)
+    if (!match) return 'Could not parse GitHub repository URL'
+    const [, owner, repo] = match
+    try {
+      const res = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
+        headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
+      })
+      if (res.status === 401) return 'Access token is invalid or expired'
+      if (res.status === 403) return 'Token does not have permission to access this repository'
+      if (res.status === 404) return 'Repository not found — check the URL and token scope'
+      if (!res.ok) return `GitHub returned ${res.status}`
+      const data = await res.json()
+      if (!data.permissions?.push) return 'Token needs read/write (push) access to this repository'
+      return null
+    } catch {
+      return 'Could not reach GitHub to verify access'
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    setLoading(true)
     setError(null)
+
+    setCheckingAccess(true)
+    try {
+      const accessError = await checkGitHubAccess(repoUrl, repoToken)
+      if (accessError) { setError(accessError); return }
+    } finally {
+      setCheckingAccess(false)
+    }
+
+    setLoading(true)
     try {
       const res = await fetch('/api/projects', {
         method: 'POST',
@@ -76,7 +106,8 @@ export function CreateProjectForm() {
       <input
         value={repoUrl}
         onChange={e => setRepoUrl(e.target.value)}
-        placeholder="GitHub repo URL (optional)"
+        placeholder="https://github.com/org/repo"
+        required
         className="w-full rounded-lg px-3 py-2 text-sm outline-none transition-all"
         style={inputStyle}
         onFocus={e => { e.currentTarget.style.borderColor = 'var(--border-accent)' }}
@@ -86,7 +117,8 @@ export function CreateProjectForm() {
       <input
         value={repoToken}
         onChange={e => setRepoToken(e.target.value)}
-        placeholder="GitHub token (optional)"
+        placeholder="ghp_..."
+        required
         type="password"
         className="w-full rounded-lg px-3 py-2 text-sm outline-none transition-all"
         style={inputStyle}
@@ -95,7 +127,9 @@ export function CreateProjectForm() {
       />
 
       <div className="flex items-center gap-2 pt-1">
-        <Button type="submit" loading={loading}>Create</Button>
+        <Button type="submit" loading={loading || checkingAccess}>
+          {checkingAccess ? 'Checking access…' : 'Create'}
+        </Button>
         <Button type="button" variant="ghost" onClick={reset}>Cancel</Button>
       </div>
 

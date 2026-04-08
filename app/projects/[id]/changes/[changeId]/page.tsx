@@ -77,9 +77,9 @@ export default async function ChangeDetailPage({
       change={change}
       impact={impact ?? null}
       riskFactors={riskFactors ?? []}
-      impactComponents={impactComponents ?? []}
+      impactComponents={(impactComponents ?? []) as any[]}
       plan={plan ?? null}
-      planTasks={planTasks ?? []}
+      planTasks={(planTasks ?? []) as any[]}
     />
   )
 }

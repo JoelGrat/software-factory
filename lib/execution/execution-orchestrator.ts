@@ -56,7 +56,8 @@ async function writeSnapshot(
   terminationReason: string,
   planDivergence = false,
   testsPassed = 0,
-  testsFailed = 0
+  testsFailed = 0,
+  errorSummary: string | null = null
 ): Promise<void> {
   await db.from('execution_snapshots').insert({
     change_id: changeId,
@@ -69,6 +70,7 @@ async function writeSnapshot(
     plan_divergence: planDivergence,
     partial_success: false,
     termination_reason: terminationReason,
+    error_summary: errorSummary,
   })
 }
 
@@ -109,6 +111,8 @@ export async function runExecution(
       .eq('id', change.project_id)
       .single()
     if (!project) throw new Error('Project not found')
+    if (!(project as any).repo_url) throw new Error('No repository configured')
+    if (!(project as any).repo_token) throw new Error('No access token configured')
 
     // Load tasks
     const { data: rawTasks } = await db
@@ -297,7 +301,7 @@ export async function runExecution(
         const sig = errorSignature(typeCheck.output)
         state.errorHistory.set(sig, (state.errorHistory.get(sig) ?? 0) + 1)
         if ((state.errorHistory.get(sig) ?? 0) >= limits.stagnationWindow) break
-        await writeSnapshot(db, changeId, state, 'error')
+        await writeSnapshot(db, changeId, state, 'error', false, 0, 0, typeCheck.output.slice(0, 2000))
         continue
       }
 
@@ -308,7 +312,7 @@ export async function runExecution(
         const sig = errorSignature(testResult.output)
         state.errorHistory.set(sig, (state.errorHistory.get(sig) ?? 0) + 1)
         if ((state.errorHistory.get(sig) ?? 0) >= limits.stagnationWindow) break
-        await writeSnapshot(db, changeId, state, 'error', false, testResult.testsPassed, testResult.testsFailed)
+        await writeSnapshot(db, changeId, state, 'error', false, testResult.testsPassed, testResult.testsFailed, testResult.output.slice(0, 2000))
         continue
       }
 
@@ -319,7 +323,8 @@ export async function runExecution(
       }
       const behavResult = await executor.runBehavioralChecks(env, behavioralScope)
       if (!behavResult.passed) {
-        await writeSnapshot(db, changeId, state, 'error')
+        const anomalyMsg = behavResult.anomalies.map(a => `[${a.severity}] ${a.message}`).join('\n')
+        await writeSnapshot(db, changeId, state, 'error', false, 0, 0, anomalyMsg.slice(0, 2000))
         continue
       }
 
@@ -352,7 +357,7 @@ export async function runExecution(
       await writeSnapshot(db, changeId, state, state.iteration >= limits.maxIterations ? 'max_iterations' : 'error')
     }
 
-    await db.from('change_requests').update({ status: 'review' }).eq('id', changeId)
+    await db.from('change_requests').update({ status: fullSuccess ? 'review' : 'failed' }).eq('id', changeId)
 
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err)

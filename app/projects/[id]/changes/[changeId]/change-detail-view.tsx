@@ -26,7 +26,7 @@ interface ImpactComponent {
   component_id: string
   impact_weight: number
   source: string
-  system_components: { name: string; type: string } | null
+  system_components: { name: string; type: string }[] | null
 }
 
 interface PlanData {
@@ -44,7 +44,7 @@ interface PlanTask {
   description: string
   order_index: number
   status: string
-  system_components: { name: string; type: string } | null
+  system_components: { name: string; type: string }[] | null
 }
 
 interface Change {
@@ -91,9 +91,9 @@ function ComponentImpactRow({ ic }: { ic: ImpactComponent }) {
     <div className="flex items-center justify-between gap-3">
       <div className="flex items-center gap-2 min-w-0">
         <span className="text-[10px] font-mono px-1 py-0.5 rounded bg-indigo-400/10 text-indigo-300 uppercase flex-shrink-0">
-          {ic.system_components?.type ?? '?'}
+          {ic.system_components?.[0]?.type ?? '?'}
         </span>
-        <span className="text-sm text-slate-300 truncate">{ic.system_components?.name ?? ic.component_id}</span>
+        <span className="text-sm text-slate-300 truncate">{ic.system_components?.[0]?.name ?? ic.component_id}</span>
       </div>
       <div className="flex items-center gap-2 flex-shrink-0">
         <div className="w-24 h-1.5 bg-slate-700 rounded-full overflow-hidden">
@@ -485,7 +485,7 @@ export function ChangeDetailView({
               <div className="rounded-xl p-6 bg-[#131b2e] border border-white/5 text-center">
                 <p className="text-sm text-slate-500">Analysis complete but impact data unavailable.</p>
               </div>
-            ) : (change.status === 'planned' || change.status === 'failed') && plan ? (
+            ) : (['planned', 'failed', 'review', 'done'].includes(change.status)) && plan ? (
               <div className="rounded-xl bg-[#131b2e] border border-white/5 overflow-hidden">
                 {/* Plan header */}
                 <div className="flex items-center justify-between px-5 py-4 border-b border-white/5">
@@ -534,9 +534,9 @@ export function ChangeDetailView({
                           }`} />
                           <div className="flex-1 min-w-0">
                             <p className="text-sm text-slate-300">{task.description}</p>
-                            {task.system_components && (
+                            {task.system_components?.[0] && (
                               <span className="text-[10px] font-mono text-slate-600 mt-0.5 block">
-                                {task.system_components.name}
+                                {task.system_components[0].name}
                               </span>
                             )}
                           </div>
@@ -586,13 +586,15 @@ export function ChangeDetailView({
                 {plan.status === 'approved' && (
                   <div className="px-5 py-4 border-t border-white/5 flex items-center justify-between">
                     <p className="text-xs text-slate-500">
-                      {change.status === 'failed' ? 'Previous execution failed — retry when ready' : 'Plan approved — ready to execute'}
+                      {change.status === 'failed' ? 'Previous execution failed — retry when ready'
+                        : change.status === 'review' || change.status === 'done' ? 'Execution complete — re-run to apply changes again'
+                        : 'Plan approved — ready to execute'}
                     </p>
                     <Link
                       href={`/projects/${project.id}/changes/${change.id}/execution`}
                       className="px-4 py-2 rounded-lg bg-green-500 hover:bg-green-400 text-white text-sm font-bold font-headline transition-colors"
                     >
-                      Execute
+                      {change.status === 'review' || change.status === 'done' ? 'Re-run' : 'Execute'}
                     </Link>
                   </div>
                 )}
