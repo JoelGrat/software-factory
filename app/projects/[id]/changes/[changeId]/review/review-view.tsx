@@ -34,7 +34,23 @@ export default function ReviewView({
 }) {
   const router = useRouter()
   const [approving, setApproving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  async function handleDelete() {
+    setDeleting(true)
+    setError(null)
+    const res = await fetch(`/api/change-requests/${change.id}`, { method: 'DELETE' })
+    if (res.ok) {
+      router.push(`/projects/${project?.id}`)
+    } else {
+      const data = await res.json().catch(() => ({}))
+      setError(data.error ?? 'Delete failed')
+      setDeleting(false)
+      setDeleteConfirm(false)
+    }
+  }
 
   const doneTasks = tasks.filter(t => t.status === 'done').length
   const githubCommitUrl = commit && project?.repo_url
@@ -222,6 +238,32 @@ export default function ReviewView({
                 <p className="text-xs text-slate-500 mt-0.5">Approving marks this change as done. The branch stays open for manual merge.</p>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
+                {deleteConfirm ? (
+                  <>
+                    <span className="text-xs text-slate-400">Delete this change?</span>
+                    <button
+                      onClick={handleDelete}
+                      disabled={deleting}
+                      className="px-3 py-1.5 rounded-lg bg-red-500 hover:bg-red-400 disabled:opacity-50 text-white text-xs font-bold font-headline transition-colors"
+                    >
+                      {deleting ? 'Deleting…' : 'Yes, delete'}
+                    </button>
+                    <button
+                      onClick={() => setDeleteConfirm(false)}
+                      className="px-3 py-1.5 rounded-lg bg-[#0f1929] border border-white/10 hover:border-white/20 text-slate-300 text-xs font-semibold font-headline transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={() => setDeleteConfirm(true)}
+                    className="p-2 text-slate-600 hover:text-red-400 hover:bg-red-400/5 rounded-lg transition-colors"
+                    title="Delete change"
+                  >
+                    <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>delete</span>
+                  </button>
+                )}
                 <Link
                   href={`/projects/${project?.id}/changes/${change.id}/execution`}
                   className="px-4 py-2 rounded-lg bg-[#0f1929] border border-white/10 hover:border-white/20 text-slate-300 text-sm font-semibold font-headline transition-colors"

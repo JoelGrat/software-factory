@@ -81,16 +81,50 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
 
   const { data: change } = await db
     .from('change_requests')
-    .select('id, status, projects!inner(owner_id)')
+    .select('id, status, project_id, projects!inner(owner_id, repo_url, repo_token)')
     .eq('id', id)
     .eq('projects.owner_id', user.id)
     .single()
 
   if (!change) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  const BLOCKED = ['executing', 'done']
-  if (BLOCKED.includes(change.status)) {
-    return NextResponse.json({ error: 'Cannot delete a change that is executing or done' }, { status: 409 })
+  if (change.status === 'executing') {
+    return NextResponse.json({ error: 'Cannot delete a change that is currently executing' }, { status: 409 })
+  }
+
+  // Best-effort: delete the git branch from GitHub before removing DB records
+  const project = (change as any).projects as { repo_url: string | null; repo_token: string | null } | null
+  if (project?.repo_url && project?.repo_token) {
+    const { data: commit } = await db
+      .from('change_commits')
+      .select('branch_name')
+      .eq('change_id', id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    const branchName = commit?.branch_name ?? (await db
+      .from('change_plans')
+      .select('branch_name')
+      .eq('change_id', id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+      .then(r => r.data?.branch_name))
+
+    if (branchName) {
+      const repoPath = project.repo_url
+        .replace(/^https?:\/\/github\.com\//, '')
+        .replace(/\.git$/, '')
+      const ghUrl = `https://api.github.com/repos/${repoPath}/git/refs/heads/${branchName}`
+      await fetch(ghUrl, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${project.repo_token}`,
+          Accept: 'application/vnd.github+json',
+        },
+      }).catch(() => { /* branch may not exist — ignore */ })
+    }
   }
 
   const { error } = await db.from('change_requests').delete().eq('id', id)

@@ -73,7 +73,9 @@
       "Read(//c/Users/joelg/AppData/Local/Programs/**)",
       "Bash(cmd.exe /c \"rd /s /q .worktrees\\\\plan6-execution\")",
       "Bash(npm ls:*)",
-      "Bash(gh pr create --title 'feat: project settings inner sidebar with tab-style section switching' --body ':*)"
+      "Bash(gh pr create --title 'feat: project settings inner sidebar with tab-style section switching' --body ':*)",
+      "Bash(npx jest:*)",
+      "Bash(python -c \"import sys,json; p=json.load\\(sys.stdin\\); print\\(json.dumps\\(p.get\\('scripts',{}\\), indent=2\\)\\)\")"
     ]
   }
 }
