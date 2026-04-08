@@ -135,6 +135,11 @@ function makeMockDb(opts: { planStatus?: string } = {}): { db: SupabaseClient; u
           insert: () => Promise.resolve({ error: null }),
         }
       }
+      if (table === 'execution_logs') {
+        return {
+          insert: () => Promise.resolve({ error: null }),
+        }
+      }
       return {
         select: () => ({ eq: () => ({ single: () => Promise.resolve({ data: null }) }) }),
       }
@@ -192,5 +197,77 @@ describe('runExecution', () => {
     const executor = new MockCodeExecutor()
     await runExecution('cr1', db, new MockAIProvider(), executor)
     expect(executor.calls).toContain('commitAndPush')
+  })
+
+  it('calls createFile when task has new_file_path', async () => {
+    const newFileTasks = [
+      { id: 't2', plan_id: 'plan-1', component_id: null, description: 'Create new file: lib/foo.ts', order_index: 0, status: 'pending', new_file_path: 'lib/foo.ts' },
+    ]
+    const { db } = makeMockDb()
+    // Build a db that returns new-file tasks
+    const dbWithNewFile = {
+      from: (table: string) => {
+        if (table === 'change_plan_tasks') {
+          return {
+            select: () => ({
+              eq: () => ({
+                order: () => Promise.resolve({ data: newFileTasks }),
+              }),
+            }),
+            update: () => ({ eq: () => ({ eq: () => Promise.resolve({ error: null }) }) }),
+          }
+        }
+        return (db as any).from(table)
+      },
+    } as unknown as SupabaseClient
+
+    const executor = new MockCodeExecutor()
+    const ai = new MockAIProvider()
+    ai.setDefaultResponse(JSON.stringify({ newFileContent: 'export const foo = 1', confidence: 90, reasoning: 'simple' }))
+
+    await runExecution('cr1', dbWithNewFile, ai, executor)
+
+    expect(executor.calls).toContain('createFile')
+  })
+
+  it('snapshot files_modified includes new file path when createFile succeeds', async () => {
+    const newFileTasks = [
+      { id: 't3', plan_id: 'plan-1', component_id: null, description: 'Create new file: lib/bar.ts', order_index: 0, status: 'pending', new_file_path: 'lib/bar.ts' },
+    ]
+    const snapshotInserts: any[] = []
+    const { db } = makeMockDb()
+
+    const dbCapture = {
+      from: (table: string) => {
+        if (table === 'change_plan_tasks') {
+          return {
+            select: () => ({
+              eq: () => ({
+                order: () => Promise.resolve({ data: newFileTasks }),
+              }),
+            }),
+            update: () => ({ eq: () => ({ eq: () => Promise.resolve({ error: null }) }) }),
+          }
+        }
+        if (table === 'execution_snapshots') {
+          return {
+            insert: (data: any) => {
+              snapshotInserts.push(data)
+              return Promise.resolve({ data: [{ id: 'snap-1' }], error: null })
+            },
+          }
+        }
+        return (db as any).from(table)
+      },
+    } as unknown as SupabaseClient
+
+    const executor = new MockCodeExecutor()
+    const ai = new MockAIProvider()
+    ai.setDefaultResponse(JSON.stringify({ newFileContent: 'export const bar = 2', confidence: 90, reasoning: 'simple' }))
+
+    await runExecution('cr1', dbCapture, ai, executor)
+
+    const successSnapshot = snapshotInserts.find((s: any) => s.termination_reason === 'passed')
+    expect(successSnapshot?.files_modified).toContain('lib/bar.ts')
   })
 })

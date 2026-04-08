@@ -9,13 +9,14 @@ import type { CodeExecutor } from './executors/code-executor'
 import type {
   FilePatch, SymbolContext, ExecutionScope, ExecutionLimits,
   ContextMode, TestScope, BehavioralScope, ExecutionEnvironment,
+  NewFileCreation,
 } from './types'
 import { DEFAULT_LIMITS } from './types'
 import { extractSymbol } from './symbol-extractor'
 import { validatePatch } from './patch-validator'
 import { selectTests } from './test-selector'
 import { hashInput, hashOutput, recordTrace } from './execution-tracer'
-import { buildSymbolPatchPrompt, buildFilePatchPrompt } from './prompt-builders'
+import { buildSymbolPatchPrompt, buildFilePatchPrompt, buildNewFilePrompt } from './prompt-builders'
 import { makeLogger } from './execution-logger'
 
 function errorSignature(output: string): string {
@@ -38,6 +39,7 @@ interface PlanTask {
   description: string
   order_index: number
   status: string
+  new_file_path: string | null
 }
 
 interface ExecutionState {
@@ -45,6 +47,7 @@ interface ExecutionState {
   aiCallCount: number
   startedAt: number
   acceptedPatches: FilePatch[]
+  acceptedNewFiles: NewFileCreation[]
   executionScope: ExecutionScope
   errorHistory: Map<string, number>
   limits: ExecutionLimits
@@ -119,7 +122,7 @@ export async function runExecution(
     // Load tasks
     const { data: rawTasks } = await db
       .from('change_plan_tasks')
-      .select('id, component_id, description, order_index, status')
+      .select('id, component_id, description, order_index, status, new_file_path')
       .eq('plan_id', plan.id)
       .order('order_index', { ascending: true })
     const allTasks: PlanTask[] = rawTasks ?? []
@@ -176,6 +179,7 @@ export async function runExecution(
       aiCallCount: 0,
       startedAt: Date.now(),
       acceptedPatches: [],
+      acceptedNewFiles: [],
       executionScope: { plannedFiles, addedViaPropagation: [] },
       errorHistory: new Map(),
       limits,
@@ -201,8 +205,12 @@ export async function runExecution(
       state.iteration++
       await log('info', `── Iteration ${state.iteration} ──`)
       await executor.resetIteration(env, state.acceptedPatches)
+      for (const nf of state.acceptedNewFiles) {
+        await executor.createFile(env, nf.path, nf.content)
+      }
 
       const iterationPatches: FilePatch[] = []
+      const iterationNewFiles: NewFileCreation[] = []
       // processedTaskIds: tasks touched this iteration (used to filter pendingTasks after success)
       const processedTaskIds: string[] = []
 
@@ -212,11 +220,37 @@ export async function runExecution(
         await log('info', `Task: ${task.description}`)
         const filePaths = componentFileMap[task.component_id ?? ''] ?? []
 
-        // No files to modify — mark done immediately
+        // No files to modify — mark done immediately (or create new file if specified)
         if (filePaths.length === 0) {
+          if (task.new_file_path && state.aiCallCount < limits.maxAiCalls) {
+            const prompt = buildNewFilePrompt(
+              { description: task.description, intent: (change as { intent: string }).intent },
+              task.new_file_path
+            )
+            state.aiCallCount++
+            const aiResult = await ai.complete(prompt, { maxTokens: 4096 })
+            let parsed: { newFileContent?: string; confidence?: number } = {}
+            try { parsed = JSON.parse(aiResult.content) } catch { /* skip */ }
+            const newContent = parsed.newFileContent ?? ''
+            const confidence = parsed.confidence ?? 0
+            if (newContent && confidence >= limits.confidenceThreshold) {
+              const result = await executor.createFile(env, task.new_file_path, newContent)
+              if (result.success) {
+                iterationNewFiles.push({ path: task.new_file_path, content: newContent })
+                await log('success', `Created ${task.new_file_path}`)
+              } else {
+                await log('error', `Failed to create ${task.new_file_path}: ${result.error}`)
+              }
+            }
+          }
           processedTaskIds.push(task.id)
           await db.from('change_plan_tasks').update({ status: 'done' }).eq('id', task.id).eq('plan_id', plan.id)
-          await log('success', `Done (no files to modify)`)
+          if (task.new_file_path) {
+            const created = iterationNewFiles.some(f => f.path === task.new_file_path)
+            await log(created ? 'success' : 'error', created ? `Done` : `Done (new file not created — low confidence or AI error)`)
+          } else {
+            await log('success', `Done (no files to modify)`)
+          }
           continue
         }
 
@@ -356,7 +390,15 @@ export async function runExecution(
 
       // All checks passed
       state.acceptedPatches.push(...iterationPatches)
-      await writeSnapshot(db, changeId, state, 'passed', false, testResult.testsPassed, testResult.testsFailed, null, [...new Set(iterationPatches.map(p => p.path))])
+      state.acceptedNewFiles.push(...iterationNewFiles)
+      await writeSnapshot(
+        db, changeId, state, 'passed', false,
+        testResult.testsPassed, testResult.testsFailed, null,
+        [...new Set([
+          ...iterationPatches.map(p => p.path),
+          ...iterationNewFiles.map(f => f.path),
+        ])]
+      )
 
       pendingTasks = pendingTasks.filter(t => !processedTaskIds.includes(t.id))
       if (pendingTasks.length === 0) {
