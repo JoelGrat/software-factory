@@ -16,6 +16,7 @@ import { validatePatch } from './patch-validator'
 import { selectTests } from './test-selector'
 import { hashInput, hashOutput, recordTrace } from './execution-tracer'
 import { buildSymbolPatchPrompt, buildFilePatchPrompt } from './prompt-builders'
+import { makeLogger } from './execution-logger'
 
 function errorSignature(output: string): string {
   return createHash('sha256').update(output.slice(0, 500)).digest('hex').slice(0, 12)
@@ -169,10 +170,6 @@ export async function runExecution(
     })
 
     const branch = (plan as { branch_name?: string }).branch_name ?? `sf/${changeId.slice(0, 8)}-exec`
-    env = await executor.prepareEnvironment(
-      { id: project.id, repoUrl: (project as any).repo_url ?? '', repoToken: (project as any).repo_token ?? null },
-      branch
-    )
 
     const state: ExecutionState = {
       iteration: 0,
@@ -184,6 +181,16 @@ export async function runExecution(
       limits,
     }
 
+    const log = makeLogger(db, changeId, () => state.iteration)
+
+    await log('info', `Cloning ${(project as any).repo_url} into container…`)
+    env = await executor.prepareEnvironment(
+      { id: project.id, repoUrl: (project as any).repo_url ?? '', repoToken: (project as any).repo_token ?? null },
+      branch,
+      log,
+    )
+    await log('success', `Environment ready · branch ${branch}`)
+
     let pendingTasks = sortedTasks.filter(t => t.status === 'pending')
     let fullSuccess = false
 
@@ -192,6 +199,7 @@ export async function runExecution(
       if (state.aiCallCount >= limits.maxAiCalls) break
 
       state.iteration++
+      await log('info', `── Iteration ${state.iteration} ──`)
       await executor.resetIteration(env, state.acceptedPatches)
 
       const iterationPatches: FilePatch[] = []
@@ -201,12 +209,14 @@ export async function runExecution(
       for (const task of pendingTasks) {
         if (state.aiCallCount >= limits.maxAiCalls) break
 
+        await log('info', `Task: ${task.description}`)
         const filePaths = componentFileMap[task.component_id ?? ''] ?? []
 
         // No files to modify — mark done immediately
         if (filePaths.length === 0) {
           processedTaskIds.push(task.id)
           await db.from('change_plan_tasks').update({ status: 'done' }).eq('id', task.id).eq('plan_id', plan.id)
+          await log('success', `Done (no files to modify)`)
           continue
         }
 
@@ -296,22 +306,30 @@ export async function runExecution(
         // Mark done immediately so the UI shows live task-by-task progress.
         // pendingTasks is tracked in-memory, so failed iterations still retry these tasks.
         await db.from('change_plan_tasks').update({ status: 'done' }).eq('id', task.id).eq('plan_id', plan.id)
+        await log('success', `Done`)
       }
 
       // Validate
+      await log('info', `Running type check…`)
       const typeCheck = await executor.runTypeCheck(env)
       if (!typeCheck.passed) {
+        const errCount = typeCheck.errors.length
+        await log('error', `Type check failed · ${errCount} error${errCount !== 1 ? 's' : ''}`)
         const sig = errorSignature(typeCheck.output)
         state.errorHistory.set(sig, (state.errorHistory.get(sig) ?? 0) + 1)
         if ((state.errorHistory.get(sig) ?? 0) >= limits.stagnationWindow) break
         await writeSnapshot(db, changeId, state, 'error', false, 0, 0, typeCheck.output.slice(0, 8000))
         continue
       }
+      await log('success', `Type check passed`)
 
       const testScope: TestScope = await selectTests(db, [], (change as { risk_level: string | null }).risk_level ?? 'low')
+      const totalTests = testScope.directTests.length + testScope.dependentTests.length
+      await log('info', `Running ${totalTests > 0 ? totalTests + ' test file' + (totalTests !== 1 ? 's' : '') : 'all tests'}…`)
       const testResult = await executor.runTests(env, testScope)
 
       if (!testResult.passed) {
+        await log('error', `Tests failed · ${testResult.testsFailed} failed, ${testResult.testsPassed} passed`)
         const sig = errorSignature(testResult.output)
         state.errorHistory.set(sig, (state.errorHistory.get(sig) ?? 0) + 1)
         if ((state.errorHistory.get(sig) ?? 0) >= limits.stagnationWindow) break
@@ -321,6 +339,7 @@ export async function runExecution(
         await writeSnapshot(db, changeId, state, 'error', false, testResult.testsPassed, testResult.testsFailed, testErrorSummary.slice(0, 8000))
         continue
       }
+      await log('success', `Tests passed · ${testResult.testsPassed} passed`)
 
       // Behavioral checks
       const behavioralScope: BehavioralScope = {
@@ -330,6 +349,7 @@ export async function runExecution(
       const behavResult = await executor.runBehavioralChecks(env, behavioralScope)
       if (!behavResult.passed) {
         const anomalyMsg = behavResult.anomalies.map(a => `[${a.severity}] ${a.description}`).join('\n')
+        await log('error', `Behavioral check failed\n${anomalyMsg}`)
         await writeSnapshot(db, changeId, state, 'error', false, 0, 0, anomalyMsg.slice(0, 8000))
         continue
       }
@@ -346,6 +366,7 @@ export async function runExecution(
     }
 
     // Commit and push
+    await log('info', `Committing and pushing to ${branch}…`)
     await executor.getDiff(env)
     const commitMsg = `feat: ${(change as { title: string }).title} (${changeId.slice(0, 8)})`
     const commitResult = await executor.commitAndPush(env, branch, commitMsg)
@@ -355,11 +376,13 @@ export async function runExecution(
       branch_name: commitResult.branch,
       commit_hash: commitResult.commitHash,
     })
+    await log('success', `Committed ${commitResult.commitHash.slice(0, 7)} → ${commitResult.branch}`)
 
     if (!fullSuccess) {
       await writeSnapshot(db, changeId, state, state.iteration >= limits.maxIterations ? 'max_iterations' : 'error')
     }
 
+    await log(fullSuccess ? 'success' : 'error', fullSuccess ? 'Execution complete — ready for review' : 'Execution finished with errors')
     await db.from('change_requests').update({ status: fullSuccess ? 'review' : 'failed' }).eq('id', changeId)
 
   } catch (err) {

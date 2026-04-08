@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { LeftNav } from '@/components/app/left-nav'
@@ -22,6 +22,10 @@ interface Task {
   id: string; description: string; status: string
   failure_type: string | null; last_error: string | null; order_index: number
   system_components: { name: string; type: string } | null
+}
+
+interface LogEntry {
+  id: number; iteration: number | null; level: string; message: string; created_at: string
 }
 
 interface Change { id: string; title: string; status: string; risk_level: string | null }
@@ -51,9 +55,11 @@ export default function ExecutionView({ change, project }: { change: Change; pro
   const [snapshots, setSnapshots] = useState<Snapshot[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
   const [traces, setTraces] = useState<TraceEntry[]>([])
+  const [logs, setLogs] = useState<LogEntry[]>([])
   const [starting, setStarting] = useState(false)
   const [startError, setStartError] = useState<string | null>(null)
   const [expandedIteration, setExpandedIteration] = useState<string | null>(null)
+  const logEndRef = useRef<HTMLDivElement>(null)
 
   const poll = useCallback(async () => {
     const res = await fetch(`/api/change-requests/${change.id}/execute`)
@@ -63,6 +69,7 @@ export default function ExecutionView({ change, project }: { change: Change; pro
     setSnapshots(data.snapshots ?? [])
     setTasks(data.tasks ?? [])
     setTraces(data.traces ?? [])
+    setLogs(data.logs ?? [])
   }, [change.id])
 
   useEffect(() => {
@@ -71,6 +78,10 @@ export default function ExecutionView({ change, project }: { change: Change; pro
     const timer = setInterval(poll, 2000)
     return () => clearInterval(timer)
   }, [status, poll])
+
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [logs.length])
 
   const latestSnapshot = snapshots[snapshots.length - 1]
   const latestTraceByTask = new Map<string, TraceEntry>()
@@ -203,7 +214,9 @@ export default function ExecutionView({ change, project }: { change: Change; pro
 
       <div className="flex flex-1 overflow-hidden">
         <LeftNav />
-        <main className="flex-1 overflow-y-auto bg-[#0b1326] p-10">
+        <main className="flex-1 overflow-hidden flex">
+          {/* Main content */}
+          <div className="flex-1 overflow-y-auto p-10">
           <div className="max-w-3xl mx-auto space-y-6">
 
             {/* Page header */}
@@ -315,7 +328,7 @@ export default function ExecutionView({ change, project }: { change: Change; pro
                           setStartError(null)
                           const res = await fetch(`/api/change-requests/${change.id}/execute`, { method: 'POST' })
                           if (res.ok) {
-                            setStatus('executing'); setSnapshots([]); setTasks([]); setTraces([])
+                            setStatus('executing'); setSnapshots([]); setTasks([]); setTraces([]); setLogs([])
                           } else {
                             const data = await res.json().catch(() => ({}))
                             setStartError(data.detail ?? data.error ?? 'Failed to start execution')
@@ -517,7 +530,7 @@ export default function ExecutionView({ change, project }: { change: Change; pro
                       setStartError(null)
                       const res = await fetch(`/api/change-requests/${change.id}/execute`, { method: 'POST' })
                       if (res.ok) {
-                        setStatus('executing'); setSnapshots([]); setTasks([]); setTraces([])
+                        setStatus('executing'); setSnapshots([]); setTasks([]); setTraces([]); setLogs([])
                       } else {
                         const data = await res.json().catch(() => ({}))
                         setStartError(data.detail ?? data.error ?? 'Failed to start execution')
@@ -538,6 +551,43 @@ export default function ExecutionView({ change, project }: { change: Change; pro
               </div>
             )}
 
+          </div>
+          </div>
+
+          {/* Log sidebar */}
+          <div className="w-96 flex-shrink-0 border-l border-white/5 flex flex-col bg-[#080f1e]">
+            <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between flex-shrink-0">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 font-headline">Execution Log</p>
+              {status === 'executing' && (
+                <span className="relative flex h-1.5 w-1.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-60" />
+                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-amber-400" />
+                </span>
+              )}
+            </div>
+            <div className="flex-1 overflow-y-auto px-3 py-2 font-mono text-[11px] space-y-0.5">
+              {logs.length === 0 && (
+                <p className="text-slate-700 py-4 text-center">
+                  {status === 'planned' ? 'Logs will appear once execution starts.' : 'No logs yet…'}
+                </p>
+              )}
+              {logs.map(entry => (
+                <div key={entry.id} className={`flex gap-2 py-0.5 leading-relaxed ${
+                  entry.level === 'success' ? 'text-green-400' :
+                  entry.level === 'error' ? 'text-red-400' :
+                  entry.level === 'docker' ? 'text-slate-500' :
+                  'text-slate-300'
+                }`}>
+                  <span className="flex-shrink-0 text-slate-700 select-none">
+                    {entry.level === 'success' ? '✓' :
+                     entry.level === 'error' ? '✗' :
+                     entry.level === 'docker' ? '$' : '›'}
+                  </span>
+                  <span className="whitespace-pre-wrap break-all">{entry.message}</span>
+                </div>
+              ))}
+              <div ref={logEndRef} />
+            </div>
           </div>
         </main>
       </div>

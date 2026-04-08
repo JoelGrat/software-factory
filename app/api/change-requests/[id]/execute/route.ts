@@ -154,10 +154,17 @@ export async function GET(
         .order('order_index', { ascending: true })
     : { data: [] }
 
+  const { data: logs } = await db
+    .from('execution_logs')
+    .select('id, iteration, level, message, created_at')
+    .eq('change_id', id)
+    .order('id', { ascending: true })
+
   return NextResponse.json({
     status: change.status,
     snapshots: snapshots ?? [],
     traces: traces ?? [],
     tasks: tasks ?? [],
+    logs: logs ?? [],
   })
 }

@@ -1,6 +1,7 @@
 // lib/execution/executors/code-executor.ts
 import type {
   ExecutionEnvironment,
+  ExecLogger,
   FilePatch,
   PatchResult,
   TypeCheckResult,
@@ -12,9 +13,11 @@ import type {
   TestScope,
 } from '../types'
 
+export type { ExecLogger }
+
 export interface CodeExecutor {
   /** Spin up isolated environment, clone repo, install deps, create branch */
-  prepareEnvironment(project: { repoUrl: string; repoToken: string | null; id: string }, branch: string): Promise<ExecutionEnvironment>
+  prepareEnvironment(project: { repoUrl: string; repoToken: string | null; id: string }, branch: string, log?: ExecLogger): Promise<ExecutionEnvironment>
 
   /** Apply a patch by AST-replacing the target node in localWorkDir, then syncing to container */
   applyPatch(env: ExecutionEnvironment, patch: FilePatch): Promise<PatchResult>
@@ -52,7 +55,7 @@ export class MockCodeExecutor implements CodeExecutor {
   behavioralResult: BehavioralResult = { passed: true, anomalies: [] }
   patchResult: PatchResult = { success: true }
 
-  async prepareEnvironment(): Promise<ExecutionEnvironment> {
+  async prepareEnvironment(_project?: unknown, _branch?: string, log?: ExecLogger): Promise<ExecutionEnvironment> {
     this.calls.push('prepareEnvironment')
     return {
       containerId: 'mock-container',
@@ -61,6 +64,7 @@ export class MockCodeExecutor implements CodeExecutor {
       branch: 'sf/test-branch',
       projectId: 'proj-1',
       repoUrl: 'https://github.com/test/repo',
+      log: log ?? (async () => {}),
     }
   }
 

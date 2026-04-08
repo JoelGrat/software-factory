@@ -7,10 +7,12 @@ import { tmpdir } from 'node:os'
 import { Project } from 'ts-morph'
 import type { CodeExecutor } from './code-executor'
 import type {
-  ExecutionEnvironment, FilePatch, PatchResult, TypeCheckResult,
+  ExecutionEnvironment, ExecLogger, FilePatch, PatchResult, TypeCheckResult,
   TestResult, BehavioralResult, BehavioralScope, DiffSummary,
   CommitResult, TestScope,
 } from '../types'
+
+const noop: ExecLogger = async () => {}
 import { resolveNode } from '../node-locator'
 import { checkBehavior } from '../behavioral-guardrail'
 
@@ -39,18 +41,21 @@ export class DockerExecutor implements CodeExecutor {
 
   async prepareEnvironment(
     project: { repoUrl: string; repoToken: string | null; id: string },
-    branch: string
+    branch: string,
+    log: ExecLogger = noop,
   ): Promise<ExecutionEnvironment> {
     if (!project.repoUrl) throw new Error('No repository URL configured for this project')
     if (!project.repoToken) throw new Error('No access token configured for this project')
 
     const localWorkDir = await mkdtemp(join(tmpdir(), `sf-exec-${project.id}-`))
 
+    await log('docker', `docker run -d --rm ${this.image} tail -f /dev/null`)
     const { stdout } = await exec(`docker run -d --rm ${this.image} tail -f /dev/null`)
     const containerId = stdout.trim()
     const containerWorkDir = '/app'
 
     try {
+      await log('docker', `apt-get install git ca-certificates`)
       await dockerExec(containerId, `DEBIAN_FRONTEND=noninteractive apt-get update -qq && apt-get install -y git ca-certificates --no-install-recommends -qq 2>&1`)
     } catch (err) {
       throw new Error(`Failed to install git in container: ${(err as Error).message}`)
@@ -58,13 +63,16 @@ export class DockerExecutor implements CodeExecutor {
 
     const authedUrl = project.repoUrl.replace('https://', `https://oauth2:${project.repoToken}@`)
 
+    await log('docker', `git clone --depth 1 ${project.repoUrl} /app`)
     await dockerExec(containerId, `git clone --depth 1 ${authedUrl} ${containerWorkDir}`)
+    await log('docker', `git checkout -b ${branch}`)
     await dockerExec(containerId, `cd ${containerWorkDir} && git checkout -b ${branch}`)
+    await log('docker', `npm install`)
     await dockerExec(containerId, `cd ${containerWorkDir} && npm install --silent`)
-
+    await log('docker', `docker cp → local`)
     await dockerCpToLocal(containerId, containerWorkDir, localWorkDir)
 
-    return { containerId, containerWorkDir, localWorkDir, branch, projectId: project.id, repoUrl: project.repoUrl }
+    return { containerId, containerWorkDir, localWorkDir, branch, projectId: project.id, repoUrl: project.repoUrl, log }
   }
 
   async applyPatch(env: ExecutionEnvironment, patch: FilePatch): Promise<PatchResult> {
@@ -95,6 +103,7 @@ export class DockerExecutor implements CodeExecutor {
   }
 
   async runTypeCheck(env: ExecutionEnvironment): Promise<TypeCheckResult> {
+    await env.log('docker', `npx tsc --noEmit`)
     try {
       const { stdout, stderr } = await dockerExec(env.containerId, `cd ${env.containerWorkDir} && npx tsc --noEmit 2>&1`)
       const output = stdout + stderr
@@ -125,6 +134,7 @@ export class DockerExecutor implements CodeExecutor {
       ? `cd ${env.containerWorkDir} && npx vitest run ${filter} --reporter=json 2>&1`
       : `cd ${env.containerWorkDir} && npx vitest run --reporter=json 2>&1`
 
+    await env.log('docker', filter ? `npx vitest run ${filter}` : `npx vitest run`)
     try {
       const { stdout } = await dockerExec(env.containerId, cmd)
       return parseVitestJson(stdout)
@@ -168,8 +178,10 @@ export class DockerExecutor implements CodeExecutor {
     const { stdout: statusOut } = await dockerExec(env.containerId, `cd ${env.containerWorkDir} && git status --porcelain`)
     const { stdout: headHash } = await dockerExec(env.containerId, `cd ${env.containerWorkDir} && git rev-parse HEAD`)
     if (!statusOut.trim()) {
+      await env.log('docker', `git status: nothing to commit`)
       return { commitHash: headHash.trim(), branch }
     }
+    await env.log('docker', `git add -A && git commit && git push origin ${branch}`)
     await dockerExec(env.containerId, `cd ${env.containerWorkDir} && git add -A && git commit -m "${message.replace(/"/g, '\\"')}"`)
     await dockerExec(env.containerId, `cd ${env.containerWorkDir} && git push origin ${branch}`)
     const { stdout } = await dockerExec(env.containerId, `cd ${env.containerWorkDir} && git rev-parse HEAD`)

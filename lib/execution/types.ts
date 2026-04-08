@@ -55,6 +55,8 @@ export interface ValidationResult {
 
 // ── Execution environment ─────────────────────────────────────────────────────
 
+export type ExecLogger = (level: 'info' | 'success' | 'error' | 'docker', message: string) => Promise<void>
+
 export interface ExecutionEnvironment {
   containerId: string
   containerWorkDir: string  // '/app' inside container
@@ -62,6 +64,7 @@ export interface ExecutionEnvironment {
   branch: string
   projectId: string
   repoUrl: string
+  log: ExecLogger
 }
 
 // ── Test scope ────────────────────────────────────────────────────────────────
