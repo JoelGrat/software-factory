@@ -270,4 +270,53 @@ describe('runExecution', () => {
     const successSnapshot = snapshotInserts.find((s: any) => s.termination_reason === 'passed')
     expect(successSnapshot?.files_modified).toContain('lib/bar.ts')
   })
+
+  it('populates componentFileMap from single-object files join and calls applyPatch', async () => {
+    // Regression test: Supabase returns files/system_components as single objects (not arrays)
+    // for forward FK joins. Previously these were accessed as [0] causing componentFileMap
+    // to always be empty and applyPatch to never be called.
+    const { writeFile, mkdir, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+
+    const tmpDir = join(tmpdir(), 'sf-orch-test-' + Math.random().toString(36).slice(2))
+    await mkdir(join(tmpDir, 'src'), { recursive: true })
+    await writeFile(join(tmpDir, 'src/auth.ts'), 'export function getUser(id: string) { return id }')
+
+    const executor = new MockCodeExecutor()
+    const origPrepare = executor.prepareEnvironment.bind(executor)
+    executor.prepareEnvironment = async (_p: unknown, _b: string, log?: unknown) => ({
+      ...await origPrepare(_p as any, _b, log as any),
+      localWorkDir: tmpDir,
+    })
+
+    const { db } = makeMockDb()
+    const dbWithFiles = {
+      from: (table: string) => {
+        if (table === 'component_assignment') {
+          // files is a single object — matches Supabase forward FK join shape
+          return {
+            select: () => ({
+              eq: () => ({
+                eq: () => Promise.resolve({ data: [{ file_id: 'f1', files: { path: 'src/auth.ts' } }] }),
+              }),
+            }),
+          }
+        }
+        return (db as any).from(table)
+      },
+    } as unknown as SupabaseClient
+
+    const ai = new MockAIProvider()
+    ai.setDefaultResponse(JSON.stringify({
+      newContent: 'export function getUser(id: string) { return id + "_v2" }',
+      confidence: 90, requiresPropagation: false, reasoning: 'test',
+    }))
+
+    await runExecution('cr1', dbWithFiles, ai, executor)
+
+    expect(executor.calls).toContain('applyPatch')
+
+    await rm(tmpDir, { recursive: true, force: true })
+  })
 })

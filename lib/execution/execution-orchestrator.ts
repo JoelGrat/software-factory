@@ -145,9 +145,9 @@ export async function runExecution(
         .order('impact_weight', { ascending: false })
         .limit(20)
 
-      for (const ic of (impactComponents ?? []) as Array<{ component_id: string; system_components: { name: string; type: string }[] | null }>) {
-        if (ic.system_components?.[0]) {
-          componentTypeMap[ic.component_id] = ic.system_components[0].type
+      for (const ic of (impactComponents ?? []) as Array<{ component_id: string; system_components: { name: string; type: string } | null }>) {
+        if (ic.system_components) {
+          componentTypeMap[ic.component_id] = ic.system_components.type
         }
       }
 
@@ -157,8 +157,8 @@ export async function runExecution(
           .select('file_id, files(path)')
           .eq('component_id', componentId)
           .eq('is_primary', true)
-        componentFileMap[componentId] = ((assignments ?? []) as Array<{ files: { path: string }[] | null }>)
-          .map(a => a.files?.[0]?.path)
+        componentFileMap[componentId] = ((assignments ?? []) as Array<{ files: { path: string } | null }>)
+          .map(a => a.files?.path)
           .filter(Boolean) as string[]
       }
     }
