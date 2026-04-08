@@ -13,6 +13,7 @@ export interface PlannerArchitecture {
   testApproach: string
   estimatedFiles: number
   componentApproaches: Record<string, string>  // componentName → approach
+  newFilePaths: string[]  // new files the plan requires creating
 }
 
 export interface PlannerTask {
@@ -20,4 +21,5 @@ export interface PlannerTask {
   componentId: string
   componentName: string
   orderIndex: number
+  newFilePath?: string  // set when task creates a new file rather than modifying an existing one
 }

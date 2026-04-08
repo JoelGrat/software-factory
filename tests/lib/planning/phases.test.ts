@@ -133,6 +133,7 @@ describe('runSpecPhase', () => {
       testApproach: 'Unit tests',
       estimatedFiles: 2,
       componentApproaches: {},
+      newFilePaths: [],
     }
     const tasks: PlannerTask[] = []
     const spec = await runSpecPhase(CHANGE, architecture, tasks, ai)
@@ -144,7 +145,7 @@ describe('runSpecPhase', () => {
     ai.setDefaultResponse = () => { throw new Error('AI failure') }
     // Will use default response '{}' which is fine for a text response
     const architecture: PlannerArchitecture = {
-      approach: '', branchName: 'sf/x', testApproach: '', estimatedFiles: 0, componentApproaches: {},
+      approach: '', branchName: 'sf/x', testApproach: '', estimatedFiles: 0, componentApproaches: {}, newFilePaths: [],
     }
     // runSpecPhase should not throw even if AI fails
     const result = await runSpecPhase(CHANGE, architecture, [], ai)

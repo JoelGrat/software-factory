@@ -45,6 +45,13 @@ export interface FilePatch {
   allowedChanges: AllowedChanges
 }
 
+// ── New file creation ─────────────────────────────────────────────────────────
+
+export interface NewFileCreation {
+  path: string
+  content: string
+}
+
 // ── Validation ────────────────────────────────────────────────────────────────
 
 export interface ValidationResult {

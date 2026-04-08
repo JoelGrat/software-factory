@@ -43,6 +43,7 @@ export async function runArchitecturePhase(
     testApproach: parsed.testApproach,
     estimatedFiles: parsed.estimatedFiles ?? 0,
     componentApproaches: parsed.componentApproaches ?? {},
+    newFilePaths: parsed.newFilePaths ?? [],
   }
 }
 

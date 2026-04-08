@@ -20,6 +20,7 @@ const ARCHITECTURE: PlannerArchitecture = {
   testApproach: 'Unit test token validation',
   estimatedFiles: 4,
   componentApproaches: {},
+  newFilePaths: [],
 }
 
 describe('buildArchitecturePrompt', () => {

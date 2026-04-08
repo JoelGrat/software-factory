@@ -47,7 +47,7 @@ export async function POST(
   const ai = getProvider()
   const specMarkdown = await runSpecPhase(
     { title: change.title, intent: change.intent, type: change.type },
-    { approach: '', branchName: '', testApproach: '', estimatedFiles: plan.estimated_files ?? 0, componentApproaches: {} },
+    { approach: '', branchName: '', testApproach: '', estimatedFiles: plan.estimated_files ?? 0, componentApproaches: {}, newFilePaths: [] },
     tasks,
     ai
   )
