@@ -26,7 +26,8 @@ interface ImpactComponent {
   component_id: string
   impact_weight: number
   source: string
-  system_components: { name: string; type: string }[] | null
+  source_detail: string | null
+  system_components: { name: string; type: string } | null
 }
 
 interface PlanData {
@@ -44,7 +45,7 @@ interface PlanTask {
   description: string
   order_index: number
   status: string
-  system_components: { name: string; type: string }[] | null
+  system_components: { name: string; type: string } | null
 }
 
 interface Change {
@@ -81,6 +82,9 @@ const ANALYSIS_STEPS = [
   { label: 'Mapping intent → components', statuses: ['analyzing', 'analyzing_mapping'] },
   { label: 'Propagating dependency graph', statuses: ['analyzing_propagation'] },
   { label: 'Computing risk score', statuses: ['analyzing_scoring'] },
+]
+
+const PLANNING_STEPS = [
   { label: 'Generating implementation plan', statuses: ['planning'] },
 ]
 
@@ -91,9 +95,9 @@ function ComponentImpactRow({ ic }: { ic: ImpactComponent }) {
     <div className="flex items-center justify-between gap-3">
       <div className="flex items-center gap-2 min-w-0">
         <span className="text-[10px] font-mono px-1 py-0.5 rounded bg-indigo-400/10 text-indigo-300 uppercase flex-shrink-0">
-          {ic.system_components?.[0]?.type ?? '?'}
+          {ic.system_components?.type ?? '?'}
         </span>
-        <span className="text-sm text-slate-300 truncate">{ic.system_components?.[0]?.name ?? ic.component_id}</span>
+        <span className="text-sm text-slate-300 truncate">{ic.system_components?.name ?? ic.component_id}</span>
       </div>
       <div className="flex items-center gap-2 flex-shrink-0">
         <div className="w-24 h-1.5 bg-slate-700 rounded-full overflow-hidden">
@@ -140,7 +144,9 @@ export function ChangeDetailView({
   const [plan, setPlan] = useState(initialPlan)
   const [planTasks, setPlanTasks] = useState(initialPlanTasks)
   const [componentFileMap] = useState(initialComponentFileMap)
-  const [planTab, setPlanTab] = useState<'tasks' | 'spec' | 'files'>('tasks')
+  const [planTab, setPlanTab] = useState<'review' | 'tasks' | 'files' | 'spec'>(
+    initialPlan && initialPlan.status !== 'approved' ? 'review' : 'tasks'
+  )
   const [approving, setApproving] = useState(false)
   const [generatingSpec, setGeneratingSpec] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState(false)
@@ -170,8 +176,186 @@ export function ChangeDetailView({
     data_component: { label: 'Data layer involved', desc: 'Database or repository component affected' },
     dynamic_imports: { label: 'Dynamic imports', desc: 'Lazy-loaded modules may cascade unpredictably' },
   }
-  const directComponents = impactComponents.filter(ic => ic.source === 'seed')
-  const propagatedComponents = impactComponents.filter(ic => ic.source === 'file_graph')
+  const directComponents = impactComponents.filter(ic => ic.source === 'directly_mapped')
+  const propagatedComponents = impactComponents.filter(ic => ic.source === 'via_file')
+  const confidenceLabel = confidence >= 80 ? 'HIGH' : confidence >= 60 ? 'MEDIUM' : 'LOW'
+  const riskLabel = (change.risk_level ?? 'low').toUpperCase()
+  const recommendation =
+    change.risk_level === 'high' && confidence < 60 ? 'REVIEW BEFORE PLANNING' :
+    change.risk_level === 'high' || change.risk_level === 'medium' ? 'PROCEED WITH CAUTION' :
+    'SAFE TO PLAN'
+  const recColor =
+    recommendation === 'REVIEW BEFORE PLANNING' ? 'text-red-400' :
+    recommendation === 'PROCEED WITH CAUTION' ? 'text-amber-400' :
+    'text-green-400'
+  const topDrivers = riskFactors.slice(0, 3)
+  const CRITICAL_TYPES = ['auth', 'db', 'database', 'payment', 'security', 'session']
+
+  // Descriptive driver text — uses actual component names where available
+  const driverDescriptions: string[] = topDrivers.map(rf => {
+    switch (rf.factor) {
+      case 'blast_radius': {
+        const topComp = directComponents[0]?.system_components?.name
+        return topComp
+          ? `${topComp} change propagates to ${impact?.blast_radius ?? '?'} upstream component(s)`
+          : `${impact?.blast_radius ?? '?'} component(s) in blast radius`
+      }
+      case 'auth_component': {
+        const auth = directComponents.find(ic => ic.system_components?.type === 'auth')
+        return auth
+          ? `${auth.system_components!.name} (auth) directly affected — high blast radius`
+          : 'Auth component touched — carries inherent risk'
+      }
+      case 'data_component': {
+        const data = directComponents.find(ic => ['db', 'database', 'repository'].includes(ic.system_components?.type ?? ''))
+        return data
+          ? `${data.system_components!.name} (${data.system_components!.type}) in scope — migration risk`
+          : 'Data layer involved — migration risk'
+      }
+      case 'unknown_deps':
+        return `${Math.ceil(rf.weight / 2)} component(s) with unresolved dependency chains`
+      case 'dynamic_imports':
+        return `${rf.weight} dynamic import(s) — lazy-loaded modules may cascade unpredictably`
+      case 'low_confidence':
+        return 'Some component matches have low confidence — plan may have gaps'
+      default:
+        return rf.factor.replace(/_/g, ' ')
+    }
+  })
+
+  // Unknowns: specific components or patterns that could break planning
+  const unknownItems: string[] = []
+  if (riskFactors.find(f => f.factor === 'dynamic_imports')) {
+    const dynComp = propagatedComponents.find(ic => ic.source_detail?.includes('dynamic'))
+    unknownItems.push(dynComp
+      ? `Dynamic import via ${dynComp.system_components?.name ?? 'unknown'} may hide dependencies`
+      : 'Dynamic imports present — lazy-loaded modules not traversed in analysis')
+  }
+  for (const ic of propagatedComponents.filter(ic => CRITICAL_TYPES.includes(ic.system_components?.type ?? '') && ic.impact_weight < 0.5).slice(0, 2)) {
+    unknownItems.push(`${ic.system_components?.name ?? 'Component'} inferred via file graph (${Math.round(ic.impact_weight * 100)}%) — no direct integration context`)
+  }
+  if (riskFactors.find(f => f.factor === 'low_confidence')) {
+    const lowConf = directComponents.find(ic => ic.impact_weight < 0.6)
+    if (lowConf) unknownItems.push(`${lowConf.system_components?.name ?? 'A component'} matched with low confidence — verify it's correct`)
+  }
+
+  // Plan Gaps: high-weight propagated components in critical domains not guaranteed to be planned
+  const planGaps: string[] = []
+  for (const ic of propagatedComponents.filter(ic => ic.impact_weight >= 0.5 && CRITICAL_TYPES.includes(ic.system_components?.type ?? '')).slice(0, 2)) {
+    planGaps.push(`${ic.system_components?.name} propagated at ${Math.round(ic.impact_weight * 100)}% — verify plan explicitly covers it`)
+  }
+  if (impact?.requires_migration) planGaps.push('Schema migration required — ensure plan includes a migration step')
+  if (impact?.requires_data_change) planGaps.push('Data migration required — plan must account for data transforms')
+
+  const criticalDomains = [...new Set(
+    impactComponents
+      .filter(ic => ic.impact_weight >= 0.4)
+      .map(ic => ic.system_components?.type)
+      .filter(Boolean)
+  )]
+
+  // ── Post-plan review derived data ─────────────────────────────────────────
+  const reviewAllFiles = [...new Set(planTasks.flatMap(t => componentFileMap[t.component_id ?? ''] ?? []))]
+  const reviewNewFileCount = Math.max(0, (plan?.estimated_files ?? reviewAllFiles.length) - reviewAllFiles.length)
+
+  // Reverse map: file → ImpactComponent
+  const fileToImpact = new Map<string, ImpactComponent>()
+  for (const task of planTasks) {
+    const ic = impactComponents.find(c => c.component_id === task.component_id)
+    if (ic) {
+      for (const file of componentFileMap[task.component_id ?? ''] ?? []) {
+        if (!fileToImpact.has(file)) fileToImpact.set(file, ic)
+      }
+    }
+  }
+
+  // Per-file risk: derive from path + component type + weight
+  function fileRiskLevel(filePath: string, compType: string | undefined, weight: number): 'LOW' | 'MEDIUM' | 'HIGH' {
+    const p = filePath.toLowerCase()
+    if (p.includes('auth') || compType === 'auth') return 'HIGH'
+    if (p.includes('route') || p.includes('router') || p.includes('nav') || p.includes('sidebar')) return 'MEDIUM'
+    if (weight > 0.6) return 'MEDIUM'
+    return 'LOW'
+  }
+  function fileRiskNote(filePath: string, compType: string | undefined, isNew: boolean): string {
+    const p = filePath.toLowerCase()
+    if (isNew) return 'No existing dependencies — isolated new code'
+    if (p.includes('route') || p.includes('router')) return 'Route registration — param mismatches cause silent broken links'
+    if (p.includes('sidebar') || p.includes('nav') || p.includes('menu')) return 'Navigation target change — active state logic may fail on nested routes'
+    if (p.includes('auth') || compType === 'auth') return 'Auth-touching file — verify route guards on all new pages'
+    if (p.includes('test') || p.includes('spec')) return 'Test file — no runtime impact'
+    if (p.includes('page') || p.includes('view') || p.includes('screen')) return 'UI component — isolated, no backend impact'
+    if (compType === 'db' || compType === 'database') return 'Data layer — verify schema compatibility'
+    return 'Shared component — verify no unintended callers'
+  }
+
+  // Verdict notes — 2 contextual lines based on what's actually in scope
+  const reviewCompTypes = [...new Set(impactComponents.map(ic => ic.system_components?.type).filter(Boolean))]
+  const reviewVerdictNotes: string[] = []
+  const hasRouting = reviewAllFiles.some(f => /route|router/i.test(f))
+  const hasNav = reviewAllFiles.some(f => /sidebar|nav|menu/i.test(f))
+  const hasAuthComp = reviewCompTypes.includes('auth')
+  const hasDataComp = reviewCompTypes.some(t => ['db', 'database', 'repository'].includes(t ?? ''))
+  const allUI = reviewCompTypes.length > 0 && reviewCompTypes.every(t => ['ui', 'page', 'component', 'view'].includes(t ?? ''))
+  if (allUI && !hasAuthComp && !hasDataComp) reviewVerdictNotes.push('Changes isolated to UI layer — no backend or shared domain logic affected')
+  if (hasRouting || hasNav) reviewVerdictNotes.push('Routing and navigation changes — risk is in param passing and active state, not data correctness')
+  if (hasAuthComp) reviewVerdictNotes.push('Auth component in scope — ensure all new routes have appropriate guards')
+  if (hasDataComp) reviewVerdictNotes.push('Data layer involved — verify schema compatibility')
+  if (reviewVerdictNotes.length === 0) reviewVerdictNotes.push('Scope appears contained — verify no cross-domain dependencies were missed')
+
+  // Hidden risks — specific, derived from actual file paths + task descriptions
+  const hiddenRisks: string[] = []
+  const taskDescs = planTasks.map(t => t.description.toLowerCase())
+  if (hasRouting && (hasNav || taskDescs.some(d => /param|:id|props/i.test(d)))) {
+    hiddenRisks.push('Route param mismatch — verify the correct param (e.g. :projectId) is passed through every route definition and consumed correctly')
+  } else if (hasRouting) {
+    hiddenRisks.push('Route registration may silently succeed but link to wrong component — test direct URL access, not just in-app navigation')
+  }
+  if (hasNav && hasRouting) {
+    hiddenRisks.push('Sidebar/nav active state detection may fail for new nested routes — check active matching logic against the new route shape')
+  }
+  if (hasAuthComp || reviewAllFiles.some(f => /guard|middleware/i.test(f))) {
+    hiddenRisks.push('Missing route guard on new page allows unauthenticated access — confirm guard is applied at route level, not just in the component')
+  }
+  if (impact?.requires_migration) {
+    hiddenRisks.push('Schema migration required — if migration fails mid-deploy, new code runs against old schema and may crash silently')
+  }
+  if (riskFactors.find(f => f.factor === 'dynamic_imports')) {
+    hiddenRisks.push('Dynamic imports in propagation graph — lazy-loaded modules not fully traversed, actual blast radius may be wider than reported')
+  }
+  if (hiddenRisks.length === 0 && change.risk_level === 'low') {
+    hiddenRisks.push('No hidden risk patterns detected — low-risk routing/UI changes are still the most common source of silent breakage; confirm with an end-to-end navigation test')
+  }
+
+  // Coverage gaps — scan task descriptions for test coverage quality
+  const testTasks = planTasks.filter(t => /test|spec/i.test(t.description))
+  const coveredItems: string[] = []
+  const missingItems: string[] = []
+  if (testTasks.some(t => /render|mount|display|shows?/i.test(t.description))) coveredItems.push('Component rendering covered')
+  if (testTasks.some(t => /navigat|click|link|route/i.test(t.description))) coveredItems.push('Navigation behavior covered')
+  if (!testTasks.some(t => /invalid|not.?found|error|404|missing/i.test(t.description))) {
+    missingItems.push(`Invalid ${hasRouting ? 'route param' : 'ID'} handling (e.g. missing or malformed ID)`)
+  }
+  if (!testTasks.some(t => /direct|url|bookmark|deep.?link/i.test(t.description))) {
+    missingItems.push('Direct URL access without in-app navigation — state may not be initialized correctly')
+  }
+
+  // Plan quality — structural observations
+  const qualityStrengths: string[] = []
+  const qualityGaps: string[] = []
+  const uniquePlanComponents = new Set(planTasks.map(t => t.component_id).filter(Boolean))
+  if (uniquePlanComponents.size > 1) qualityStrengths.push('Good separation of concerns — tasks mapped to distinct components')
+  if (planTasks.length <= 8 && (impact?.blast_radius ?? 0) <= 4) qualityStrengths.push('Contained scope — low blast radius, manageable task count')
+  if (!reviewAllFiles.some((_, i) => i > reviewAllFiles.length * 0.8)) qualityStrengths.push('No unnecessary file spread — change is well-contained')
+  if (impact?.requires_migration && !taskDescs.some(d => /migrat/i.test(d))) {
+    qualityGaps.push('Migration flagged by analysis but no migration task in plan — either the flag is a false positive, or the plan has a gap')
+  }
+  if (!taskDescs.some(d => /error|empty|fallback|not.?found/i.test(d))) {
+    qualityGaps.push('No explicit error or empty-state handling task — new pages/routes need graceful failure paths')
+  }
+  if (planTasks.length > 12) {
+    qualityGaps.push(`${planTasks.length} tasks is high for this blast radius — check for over-splitting artificial steps`)
+  }
 
   async function handleDelete() {
     setDeleting(true)
@@ -286,11 +470,14 @@ export function ChangeDetailView({
             {/* Analysis state */}
             {isAnalyzing ? (
               <div className="rounded-xl p-6 bg-[#131b2e] border border-white/5">
-                <p className="text-xs font-bold uppercase tracking-widest text-slate-400 font-headline mb-4">Impact Analysis</p>
+                <p className="text-xs font-bold uppercase tracking-widest text-slate-400 font-headline mb-4">
+                  {change.status === 'planning' ? 'Generating Plan' : 'Impact Analysis'}
+                </p>
                 <div className="space-y-3">
                   {(() => {
-                    const currentStepIndex = ANALYSIS_STEPS.findIndex(s => s.statuses.includes(change.status))
-                    return ANALYSIS_STEPS.map((step, i) => {
+                    const steps = change.status === 'planning' ? PLANNING_STEPS : ANALYSIS_STEPS
+                    const currentStepIndex = steps.findIndex(s => s.statuses.includes(change.status))
+                    return steps.map((step, i) => {
                       const isActive = step.statuses.includes(change.status)
                       const isDone = i < currentStepIndex
                       return (
@@ -330,164 +517,158 @@ export function ChangeDetailView({
                   Run Analysis
                 </button>
               </div>
-            ) : change.status === 'analyzed' && impact ? (
-              <div className="rounded-xl bg-[#131b2e] border border-white/5 overflow-hidden">
-                  {/* Header */}
-                  <div className="flex items-center justify-between px-5 py-4 border-b border-white/5">
-                    <p className="text-xs font-bold uppercase tracking-widest text-slate-400 font-headline">Impact Analysis</p>
-                    {impact.analysis_quality && (
-                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-700 text-slate-400 uppercase tracking-wider">
-                        {impact.analysis_quality === 'high' ? 'keyword matched' : 'ai assisted'}
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Confidence */}
-                  <div className="px-5 py-4 border-b border-white/5">
-                    <div className="flex items-center justify-between mb-2">
-                      <p className="text-[10px] uppercase tracking-widest text-slate-500 font-headline">Analysis Confidence</p>
-                      <span className={`text-sm font-extrabold font-mono ${confTextColor}`}>{confidence}%</span>
-                    </div>
-                    <div className="w-full h-1.5 bg-slate-700 rounded-full overflow-hidden mb-2">
-                      <div className={`h-full rounded-full transition-all ${confBarColor}`} style={{ width: `${confidence}%` }} />
-                    </div>
-                    <p className="text-[11px] text-slate-500 leading-relaxed">
-                      {confidenceReasons.join(' · ')}
-                    </p>
-                  </div>
-
-                  {/* Risk level + score */}
-                  <div className="grid grid-cols-2 divide-x divide-white/5 border-b border-white/5">
-                    <div className="px-5 py-4">
-                      <p className="text-[10px] uppercase tracking-widest text-slate-500 font-headline mb-1">Risk Level</p>
-                      <p className={`text-lg font-extrabold font-headline capitalize ${
-                        change.risk_level === 'high' ? 'text-red-400' :
-                        change.risk_level === 'medium' ? 'text-amber-400' : 'text-green-400'
-                      }`}>{change.risk_level ?? '—'}</p>
-                      <p className="text-[10px] text-slate-600 mt-1 font-mono">
-                        {change.risk_level === 'low' ? '< 10 pts' : change.risk_level === 'medium' ? '10–24 pts' : '≥ 25 pts'}
-                      </p>
-                    </div>
-                    <div className="px-5 py-4">
-                      <div className="flex items-baseline justify-between mb-2">
-                        <p className="text-[10px] uppercase tracking-widest text-slate-500 font-headline">Risk Score</p>
-                        <span className="text-lg font-extrabold font-mono text-on-surface">{impactScore}<span className="text-xs font-normal text-slate-600">/{RISK_MAX}</span></span>
-                      </div>
-                      <div className="w-full h-1.5 bg-slate-700 rounded-full overflow-hidden mb-3">
-                        <div
-                          className={`h-full rounded-full ${impactScore < 10 ? 'bg-green-500' : impactScore < 25 ? 'bg-amber-500' : 'bg-red-500'}`}
-                          style={{ width: `${Math.round((impactScore / RISK_MAX) * 100)}%` }}
-                        />
-                      </div>
-                      {riskFactors.length > 0 ? (
-                        <div className="space-y-1.5">
-                          {riskFactors.map((rf) => {
-                            const meta = FACTOR_META[rf.factor]
-                            return (
-                              <div key={rf.factor} title={meta?.desc}>
-                                <div className="flex items-center justify-between mb-0.5">
-                                  <span className="text-[10px] text-slate-400">{meta?.label ?? rf.factor.replace(/_/g, ' ')}</span>
-                                  <span className="text-[10px] font-mono text-slate-500">+{rf.weight}</span>
-                                </div>
-                                <div className="w-full h-0.5 bg-slate-700 rounded-full overflow-hidden">
-                                  <div
-                                    className="h-full bg-indigo-500/60 rounded-full"
-                                    style={{ width: `${Math.round((rf.weight / RISK_MAX) * 100)}%` }}
-                                  />
-                                </div>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      ) : (
-                        <p className="text-[10px] text-slate-600">No significant risk factors detected</p>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Blast radius */}
-                  {impactComponents.length > 0 && (
-                    <div className="px-5 py-4 border-b border-white/5">
-                      <div className="flex items-center justify-between mb-3">
-                        <p className="text-[10px] uppercase tracking-widest text-slate-500 font-headline">Blast Radius</p>
-                        <span className="text-[10px] font-mono text-slate-500">
-                          {impactComponents.length} component{impactComponents.length !== 1 ? 's' : ''}
-                          {directComponents.length > 0 && propagatedComponents.length > 0 && (
-                            <> · {directComponents.length} direct, {propagatedComponents.length} propagated</>
-                          )}
-                        </span>
-                      </div>
-
-                      {directComponents.length > 0 && (
-                        <div className="mb-3">
-                          <p className="text-[10px] text-slate-600 font-mono uppercase tracking-wider mb-2">Direct matches</p>
-                          <div className="space-y-2">
-                            {directComponents.map((ic) => (
-                              <ComponentImpactRow key={ic.component_id} ic={ic} />
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {propagatedComponents.length > 0 && (
-                        <div>
-                          <p className="text-[10px] text-slate-600 font-mono uppercase tracking-wider mb-2">Propagated via dependency graph</p>
-                          <div className="space-y-2">
-                            {propagatedComponents.map((ic) => (
-                              <ComponentImpactRow key={ic.component_id} ic={ic} />
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Migration flags */}
-                  {(impact.requires_migration || impact.requires_data_change) && (
-                    <div className="px-5 py-3 border-b border-white/5 flex items-center gap-3 flex-wrap">
-                      {impact.requires_migration && (
-                        <span className="flex items-center gap-1.5 text-xs text-amber-300 font-mono">
-                          <span className="material-symbols-outlined text-amber-400" style={{ fontSize: '14px' }}>warning</span>
-                          Schema migration required
-                        </span>
-                      )}
-                      {impact.requires_data_change && (
-                        <span className="flex items-center gap-1.5 text-xs text-orange-300 font-mono">
-                          <span className="material-symbols-outlined text-orange-400" style={{ fontSize: '14px' }}>database</span>
-                          Data migration required
-                        </span>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Generate Plan CTA */}
-                  <div className="px-5 py-4 flex items-center justify-between">
-                    <div className="text-xs text-slate-500 font-mono">
-                      {change.risk_level === 'high' && (
-                        <span className="text-red-400">High risk — confirmation required</span>
-                      )}
-                    </div>
-                    <button
-                      onClick={async () => {
-                        const confirmed = change.risk_level !== 'high' ||
-                          window.confirm('This change carries high risk. Generate a plan anyway?')
-                        if (!confirmed) return
-                        try {
-                          const res = await fetch(`/api/change-requests/${change.id}/plan`, { method: 'POST' })
-                          if (res.ok) setChange(c => ({ ...c, status: 'planning' }))
-                        } catch {
-                          // network error — no optimistic update to revert since we only update on success
-                        }
-                      }}
-                      className="px-4 py-2 rounded-lg bg-indigo-500 hover:bg-indigo-400 text-white text-sm font-bold font-headline transition-colors"
-                    >
-                      Generate Plan
-                    </button>
-                  </div>
-                </div>
             ) : change.status === 'analyzed' && !impact ? (
               <div className="rounded-xl p-6 bg-[#131b2e] border border-white/5 text-center">
-                <p className="text-sm text-slate-500">Analysis complete but impact data unavailable.</p>
+                <span className="material-symbols-outlined text-slate-600 mb-3 block" style={{ fontSize: '28px' }}>analytics</span>
+                <p className="text-sm text-slate-400 mb-4">Analysis completed but no impact data was recorded.</p>
+                <button
+                  onClick={async () => {
+                    const res = await fetch(`/api/change-requests/${change.id}/analyze`, { method: 'POST' })
+                    if (res.ok) setChange(c => ({ ...c, status: 'analyzing' }))
+                  }}
+                  className="px-4 py-2 rounded-lg bg-indigo-500 hover:bg-indigo-400 text-white text-sm font-bold font-headline transition-colors"
+                >
+                  Re-analyse
+                </button>
+              </div>
+            ) : change.status === 'analyzed' && impact ? (
+              <div className="rounded-xl bg-[#131b2e] border border-white/5 overflow-hidden">
+                    {/* Header */}
+                    <div className="flex items-center justify-between px-5 py-4 border-b border-white/5">
+                      <p className="text-xs font-bold uppercase tracking-widest text-slate-400 font-headline">Impact Analysis</p>
+                      <div className="flex items-center gap-2">
+                        {impact.analysis_quality && (
+                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-500 uppercase tracking-wider">
+                            {impact.analysis_quality === 'high' ? 'keyword matched' : 'ai assisted'}
+                          </span>
+                        )}
+                        <button
+                          onClick={async () => {
+                            const res = await fetch(`/api/change-requests/${change.id}/analyze`, { method: 'POST' })
+                            if (res.ok) setChange(c => ({ ...c, status: 'analyzing' }))
+                          }}
+                          disabled={ANALYZING_STATUSES.includes(change.status)}
+                          className="text-xs text-indigo-400 hover:text-indigo-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        >
+                          Re-analyse
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Go / No-Go Signal */}
+                    <div className="px-5 py-5 border-b border-white/5">
+                      <div className="flex items-center gap-6 mb-3">
+                        <div>
+                          <p className="text-[10px] uppercase tracking-widest text-slate-600 font-headline mb-1">Risk</p>
+                          <p className={`text-sm font-extrabold font-mono ${
+                            change.risk_level === 'high' ? 'text-red-400' :
+                            change.risk_level === 'medium' ? 'text-amber-400' : 'text-green-400'
+                          }`}>{riskLabel}</p>
+                        </div>
+                        <div className="w-px h-8 bg-white/5" />
+                        <div>
+                          <p className="text-[10px] uppercase tracking-widest text-slate-600 font-headline mb-1">Confidence</p>
+                          <p className={`text-sm font-extrabold font-mono ${confTextColor}`}>{confidenceLabel}</p>
+                        </div>
+                        <div className="w-px h-8 bg-white/5" />
+                        <div>
+                          <p className="text-[10px] uppercase tracking-widest text-slate-600 font-headline mb-1">Recommendation</p>
+                          <p className={`text-sm font-extrabold font-mono ${recColor}`}>{recommendation}</p>
+                        </div>
+                      </div>
+                      <p className="text-[11px] text-slate-600 font-mono">{confidenceReasons.join(' · ')}</p>
+                    </div>
+
+                    {/* Key Drivers */}
+                    {driverDescriptions.length > 0 && (
+                      <div className="px-5 py-4 border-b border-white/5">
+                        <p className="text-[10px] uppercase tracking-widest text-slate-500 font-headline mb-3">Why This Matters</p>
+                        <ul className="space-y-1.5">
+                          {driverDescriptions.map((desc, i) => (
+                            <li key={i} className="flex items-start gap-2">
+                              <span className="text-slate-600 mt-0.5 flex-shrink-0">–</span>
+                              <span className="text-sm text-slate-300">{desc}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {/* Unknowns */}
+                    {unknownItems.length > 0 && (
+                      <div className="px-5 py-4 border-b border-white/5">
+                        <p className="text-[10px] uppercase tracking-widest text-slate-500 font-headline mb-3">Unknowns That Could Break Planning</p>
+                        <ul className="space-y-1.5">
+                          {unknownItems.map((u, i) => (
+                            <li key={i} className="flex items-start gap-2">
+                              <span className="text-amber-500/80 mt-0.5 flex-shrink-0 text-xs">⚠</span>
+                              <span className="text-sm text-slate-400">{u}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {/* Plan Gaps */}
+                    {planGaps.length > 0 && (
+                      <div className="px-5 py-4 border-b border-white/5">
+                        <p className="text-[10px] uppercase tracking-widest text-slate-500 font-headline mb-3">Potential Plan Gaps</p>
+                        <ul className="space-y-1.5">
+                          {planGaps.map((g, i) => (
+                            <li key={i} className="flex items-start gap-2">
+                              <span className="text-indigo-400/60 mt-0.5 flex-shrink-0 text-xs">◦</span>
+                              <span className="text-sm text-slate-400">{g}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {/* Scope Summary */}
+                    <div className="px-5 py-4 border-b border-white/5">
+                      <p className="text-[10px] uppercase tracking-widest text-slate-500 font-headline mb-3">Scope</p>
+                      <div className="flex items-center gap-4 flex-wrap text-[11px] font-mono text-slate-400">
+                        {impactComponents.length > 0 && (
+                          <span>
+                            <span className="text-on-surface font-bold">{impactComponents.length}</span> components
+                          </span>
+                        )}
+                        {directComponents.length > 0 && propagatedComponents.length > 0 && (
+                          <span className="text-slate-600">
+                            {directComponents.length} direct · {propagatedComponents.length} propagated
+                          </span>
+                        )}
+                        {(impact.blast_radius ?? 0) > 0 && (
+                          <span>
+                            <span className="text-on-surface font-bold">{impact.blast_radius}</span> files in blast radius
+                          </span>
+                        )}
+                        {criticalDomains.length > 0 && (
+                          <span>critical: <span className="text-slate-300">{criticalDomains.join(', ')}</span></span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Generate Plan CTA */}
+                    <div className="px-5 py-4 flex items-center justify-between">
+                      <p className="text-xs text-slate-600">
+                        {recommendation === 'REVIEW BEFORE PLANNING'
+                          ? 'High risk + low confidence — review carefully before generating a plan'
+                          : 'Approving generates a task plan. Execution happens separately.'}
+                      </p>
+                      <button
+                        onClick={async () => {
+                          const confirmed = change.risk_level !== 'high' ||
+                            window.confirm('This change carries high risk. Generate a plan anyway?')
+                          if (!confirmed) return
+                          const res = await fetch(`/api/change-requests/${change.id}/plan`, { method: 'POST' })
+                          if (res.ok) setChange(c => ({ ...c, status: 'planning' }))
+                        }}
+                        className="flex-shrink-0 px-4 py-2 rounded-lg bg-indigo-500 hover:bg-indigo-400 text-white text-sm font-bold font-headline transition-colors"
+                      >
+                        Generate Plan
+                      </button>
+                    </div>
               </div>
             ) : (['planned', 'failed', 'review', 'done'].includes(change.status)) && plan ? (
               <div className="rounded-xl bg-[#131b2e] border border-white/5 overflow-hidden">
@@ -524,7 +705,7 @@ export function ChangeDetailView({
 
                 {/* Tab bar */}
                 <div className="flex border-b border-white/5">
-                  {(['tasks', 'files', 'spec'] as const).map(tab => (
+                  {(['review', 'tasks', 'files', 'spec'] as const).map(tab => (
                     <button
                       key={tab}
                       onClick={() => setPlanTab(tab)}
@@ -538,6 +719,185 @@ export function ChangeDetailView({
                     </button>
                   ))}
                 </div>
+
+                {/* Review tab */}
+                {planTab === 'review' && (
+                  <div className="divide-y divide-white/5">
+
+                    {/* 1. Plan Verdict */}
+                    <div className="px-5 py-5">
+                      <div className="flex items-center gap-6 mb-3">
+                        <div>
+                          <p className="text-[10px] uppercase tracking-widest text-slate-600 font-headline mb-1">Risk</p>
+                          <p className={`text-sm font-extrabold font-mono ${
+                            change.risk_level === 'high' ? 'text-red-400' :
+                            change.risk_level === 'medium' ? 'text-amber-400' : 'text-green-400'
+                          }`}>{(change.risk_level ?? 'low').toUpperCase()}</p>
+                        </div>
+                        <div className="w-px h-8 bg-white/5" />
+                        <div>
+                          <p className="text-[10px] uppercase tracking-widest text-slate-600 font-headline mb-1">Confidence</p>
+                          <p className={`text-sm font-extrabold font-mono ${confTextColor}`}>{confidenceLabel}</p>
+                        </div>
+                        <div className="w-px h-8 bg-white/5" />
+                        <div>
+                          <p className="text-[10px] uppercase tracking-widest text-slate-600 font-headline mb-1">Verdict</p>
+                          <p className={`text-sm font-extrabold font-mono ${recColor}`}>{recommendation}</p>
+                        </div>
+                      </div>
+                      <div className="space-y-1 mt-3">
+                        {reviewVerdictNotes.map((note, i) => (
+                          <p key={i} className="text-[11px] text-slate-500 font-mono">– {note}</p>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* 2. Actual Impacted Files */}
+                    {(reviewAllFiles.length > 0 || reviewNewFileCount > 0) && (
+                      <div className="px-5 py-4">
+                        <p className="text-[10px] uppercase tracking-widest text-slate-500 font-headline mb-3">Impacted Files</p>
+                        <div className="space-y-1.5">
+                          {reviewAllFiles.map(file => (
+                            <div key={file} className="flex items-baseline gap-2">
+                              <span className="text-[10px] font-mono text-amber-500/70 flex-shrink-0">~</span>
+                              <span className="text-xs font-mono text-slate-300">{file}</span>
+                            </div>
+                          ))}
+                          {reviewNewFileCount > 0 && (
+                            <div className="flex items-baseline gap-2">
+                              <span className="text-[10px] font-mono text-green-500/70 flex-shrink-0">+</span>
+                              <span className="text-xs font-mono text-slate-500">{reviewNewFileCount} new file{reviewNewFileCount !== 1 ? 's' : ''} (from plan estimate)</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 3. File-Level Impact */}
+                    {reviewAllFiles.length > 0 && (
+                      <div className="px-5 py-4">
+                        <p className="text-[10px] uppercase tracking-widest text-slate-500 font-headline mb-3">File-Level Impact</p>
+                        <div className="space-y-3">
+                          {reviewAllFiles.map(file => {
+                            const ic = fileToImpact.get(file)
+                            const compType = ic?.system_components?.type
+                            const weight = ic?.impact_weight ?? 0
+                            const risk = fileRiskLevel(file, compType, weight)
+                            const note = fileRiskNote(file, compType, false)
+                            const riskColor = risk === 'HIGH' ? 'text-red-400' : risk === 'MEDIUM' ? 'text-amber-400' : 'text-green-500/70'
+                            const shortName = file.split('/').pop() ?? file
+                            return (
+                              <div key={file}>
+                                <div className="flex items-center gap-2 mb-0.5">
+                                  <span className="text-xs font-mono text-slate-300">{shortName}</span>
+                                  <span className={`text-[9px] font-bold uppercase tracking-wider font-mono ${riskColor}`}>{risk}</span>
+                                </div>
+                                <p className="text-[11px] text-slate-500 font-mono pl-0">{note}</p>
+                              </div>
+                            )
+                          })}
+                          {reviewNewFileCount > 0 && (
+                            <div>
+                              <div className="flex items-center gap-2 mb-0.5">
+                                <span className="text-xs font-mono text-green-400/70">+{reviewNewFileCount} new</span>
+                                <span className="text-[9px] font-bold uppercase tracking-wider font-mono text-green-500/70">LOW</span>
+                              </div>
+                              <p className="text-[11px] text-slate-500 font-mono">No existing dependencies — isolated new code</p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 4. Propagation */}
+                    {(directComponents.length > 0 || propagatedComponents.length > 0) && (
+                      <div className="px-5 py-4">
+                        <p className="text-[10px] uppercase tracking-widest text-slate-500 font-headline mb-3">Propagation</p>
+                        <div className="space-y-1 font-mono text-[11px]">
+                          {directComponents.slice(0, 3).map(ic => (
+                            <div key={ic.component_id} className="flex items-center gap-1.5">
+                              <span className="text-slate-300">{ic.system_components?.name ?? ic.component_id}</span>
+                              {propagatedComponents.filter(p => p.source_detail === ic.component_id).slice(0, 2).map(p => (
+                                <span key={p.component_id} className="flex items-center gap-1.5">
+                                  <span className="text-slate-700">→</span>
+                                  <span className="text-slate-500">{p.system_components?.name ?? p.component_id}</span>
+                                </span>
+                              ))}
+                            </div>
+                          ))}
+                          {propagatedComponents.filter(p => !directComponents.some(d => d.component_id === p.source_detail)).slice(0, 2).map(ic => (
+                            <div key={ic.component_id} className="flex items-center gap-1.5">
+                              <span className="text-slate-600 text-[10px]">via file graph</span>
+                              <span className="text-slate-700">→</span>
+                              <span className="text-slate-500">{ic.system_components?.name ?? ic.component_id}</span>
+                            </div>
+                          ))}
+                          {propagatedComponents.length === 0 && directComponents.length > 0 && (
+                            <p className="text-slate-600">No deep propagation — change stays within directly mapped components</p>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 5. Hidden Risks */}
+                    {hiddenRisks.length > 0 && (
+                      <div className="px-5 py-4">
+                        <p className="text-[10px] uppercase tracking-widest text-slate-500 font-headline mb-3">Hidden Risks</p>
+                        <ul className="space-y-2">
+                          {hiddenRisks.map((risk, i) => (
+                            <li key={i} className="flex items-start gap-2">
+                              <span className="text-amber-500/80 mt-0.5 flex-shrink-0 text-xs">⚠</span>
+                              <span className="text-[11px] text-slate-400 font-mono leading-relaxed">{risk}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {/* 6. Coverage Gaps */}
+                    {(coveredItems.length > 0 || missingItems.length > 0) && (
+                      <div className="px-5 py-4">
+                        <p className="text-[10px] uppercase tracking-widest text-slate-500 font-headline mb-3">Test Coverage</p>
+                        <div className="space-y-1.5">
+                          {coveredItems.map((item, i) => (
+                            <div key={i} className="flex items-start gap-2">
+                              <span className="text-green-500/80 flex-shrink-0 text-xs mt-0.5">✓</span>
+                              <span className="text-[11px] text-slate-400 font-mono">{item}</span>
+                            </div>
+                          ))}
+                          {missingItems.map((item, i) => (
+                            <div key={i} className="flex items-start gap-2">
+                              <span className="text-amber-500/80 flex-shrink-0 text-xs mt-0.5">⚠</span>
+                              <span className="text-[11px] text-slate-400 font-mono">Missing: {item}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 7. Plan Quality */}
+                    {(qualityStrengths.length > 0 || qualityGaps.length > 0) && (
+                      <div className="px-5 py-4">
+                        <p className="text-[10px] uppercase tracking-widest text-slate-500 font-headline mb-3">Plan Quality</p>
+                        <div className="space-y-1.5">
+                          {qualityStrengths.map((s, i) => (
+                            <div key={i} className="flex items-start gap-2">
+                              <span className="text-indigo-400/60 flex-shrink-0 text-xs mt-0.5">◦</span>
+                              <span className="text-[11px] text-slate-400 font-mono">{s}</span>
+                            </div>
+                          ))}
+                          {qualityGaps.map((g, i) => (
+                            <div key={i} className="flex items-start gap-2">
+                              <span className="text-slate-600 flex-shrink-0 text-xs mt-0.5">◦</span>
+                              <span className="text-[11px] text-slate-500 font-mono">{g}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                  </div>
+                )}
 
                 {/* Tasks tab */}
                 {planTab === 'tasks' && (
@@ -554,9 +914,9 @@ export function ChangeDetailView({
                             }`} />
                             <div className="flex-1 min-w-0">
                               <p className="text-sm text-slate-300">{task.description}</p>
-                              {task.system_components?.[0] && (
+                              {task.system_components?.name && (
                                 <span className="text-[10px] font-mono text-slate-600 mt-0.5 block">
-                                  {task.system_components[0].name}
+                                  {task.system_components.name}
                                 </span>
                               )}
                               {files.length > 0 && (

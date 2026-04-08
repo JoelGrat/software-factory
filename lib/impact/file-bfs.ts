@@ -7,15 +7,21 @@ const EDGE_DECAY: Record<string, number> = {
 }
 const MIN_WEIGHT = 0.1
 
+// Build REVERSE adjacency: to_file → [from_file, ...]
+// Semantics: edge (from, to) means "from imports to".
+// For blast-radius analysis we want: "if I change X, who might break?"
+// Answer = files that IMPORT X (directly or transitively) = callers of X.
+// BFS from seed=X follows reverse edges to reach its callers.
 export function runFileBFS(
   seeds: SeedFile[],
   edges: FileGraphEdge[],
   maxDepth = 3
 ): FileBFSResult {
+  // Reverse adjacency: changed-file → callers
   const adjacency = new Map<string, Array<{ target: string; type: string }>>()
   for (const edge of edges) {
-    if (!adjacency.has(edge.from_file_id)) adjacency.set(edge.from_file_id, [])
-    adjacency.get(edge.from_file_id)!.push({ target: edge.to_file_id, type: edge.edge_type })
+    if (!adjacency.has(edge.to_file_id)) adjacency.set(edge.to_file_id, [])
+    adjacency.get(edge.to_file_id)!.push({ target: edge.from_file_id, type: edge.edge_type })
   }
 
   const reachedFileIds = new Map<string, number>()

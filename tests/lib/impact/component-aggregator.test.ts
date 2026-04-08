@@ -7,15 +7,15 @@ function makeBfsResult(entries: Array<[string, number]>): FileBFSResult {
 }
 
 describe('aggregateComponents', () => {
-  it('gives seed components weight 1.0 regardless of file graph', () => {
+  it('gives seed components weight derived from confidence (confidence/100)', () => {
     const bfs = makeBfsResult([])
     const assignments: FileAssignment[] = []
     const seedComponents: MappedComponent[] = [{
       componentId: 'comp1', name: 'Auth', type: 'service', confidence: 90, matchReason: 'keyword: auth'
     }]
     const result = aggregateComponents(bfs, assignments, seedComponents)
-    expect(result.find(c => c.componentId === 'comp1')?.weight).toBe(1.0)
-    expect(result.find(c => c.componentId === 'comp1')?.source).toBe('seed')
+    expect(result.find(c => c.componentId === 'comp1')?.weight).toBeCloseTo(0.9)
+    expect(result.find(c => c.componentId === 'comp1')?.source).toBe('directly_mapped')
   })
 
   it('maps reached files to their assigned components', () => {
@@ -40,7 +40,7 @@ describe('aggregateComponents', () => {
     expect(comp?.weight).toBeCloseTo(0.7)
   })
 
-  it('seed weight (1.0) wins over file_graph weight for same component', () => {
+  it('seed confidence weight wins over lower file_graph weight', () => {
     const bfs = makeBfsResult([['f1', 0.5]])
     const assignments: FileAssignment[] = [{ file_id: 'f1', component_id: 'comp1' }]
     const seedComponents: MappedComponent[] = [{
@@ -48,11 +48,13 @@ describe('aggregateComponents', () => {
     }]
     const result = aggregateComponents(bfs, assignments, seedComponents)
     const comp = result.find(c => c.componentId === 'comp1')
-    expect(comp?.weight).toBe(1.0)
-    expect(comp?.source).toBe('seed')
+    // seed at 0.9 > file_graph at 0.5 → seed wins
+    expect(comp?.weight).toBeCloseTo(0.9)
+    expect(comp?.source).toBe('directly_mapped')
   })
 
-  it('seed source is preserved even when file_graph weight is also 1.0', () => {
+  it('file_graph boosts a seed when its weight is higher than seed confidence', () => {
+    // seed confidence 90 → weight 0.9; file_graph finds it at 1.0 → file_graph wins
     const bfs = makeBfsResult([['f1', 1.0]])
     const assignments: FileAssignment[] = [{ file_id: 'f1', component_id: 'comp1' }]
     const seedComponents: MappedComponent[] = [{
@@ -60,8 +62,8 @@ describe('aggregateComponents', () => {
     }]
     const result = aggregateComponents(bfs, assignments, seedComponents)
     const comp = result.find(c => c.componentId === 'comp1')
-    expect(comp?.weight).toBe(1.0)
-    expect(comp?.source).toBe('seed')
+    expect(comp?.weight).toBeCloseTo(1.0)
+    expect(comp?.source).toBe('via_file')
   })
 
   it('ignores files with no component assignment', () => {

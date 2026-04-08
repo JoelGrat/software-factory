@@ -1,6 +1,7 @@
 // lib/planning/phases.ts
 import type { AIProvider } from '@/lib/ai/provider'
 import type { ImpactedComponent, PlannerArchitecture, PlannerTask } from './types'
+import type { ImpactFeedback } from '@/lib/impact/types'
 import { buildArchitecturePrompt, buildComponentTasksPrompt, buildFallbackTasksPrompt, buildSpecPrompt } from './prompt-builders'
 
 // Component type priority for deterministic ordering (lower = runs first)
@@ -18,9 +19,10 @@ const TYPE_PRIORITY: Record<string, number> = {
 export async function runArchitecturePhase(
   change: { title: string; intent: string; type: string },
   components: ImpactedComponent[],
-  ai: AIProvider
+  ai: AIProvider,
+  feedback?: ImpactFeedback
 ): Promise<PlannerArchitecture> {
-  const prompt = buildArchitecturePrompt(change, components)
+  const prompt = buildArchitecturePrompt(change, components, feedback)
   const result = await ai.complete(prompt, {
     responseSchema: {
       type: 'object',

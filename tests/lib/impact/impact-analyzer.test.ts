@@ -83,6 +83,7 @@ function makeMockDb(opts: {
               },
             }),
           }),
+          delete: () => ({ eq: () => Promise.resolve({ error: null }) }),
         }
       }
       if (table === 'change_risk_factors') {
@@ -91,6 +92,7 @@ function makeMockDb(opts: {
             inserts.push({ table, data: data as Record<string, unknown> })
             return Promise.resolve({ error: null })
           },
+          delete: () => ({ eq: () => Promise.resolve({ error: null }) }),
         }
       }
       if (table === 'change_impact_components') {
@@ -105,6 +107,7 @@ function makeMockDb(opts: {
         select: () => ({ eq: () => ({ in: () => Promise.resolve({ data: [], error: null }), single: () => Promise.resolve({ data: null, error: null }) }) }),
         update: (data: Record<string, unknown>) => ({ eq: (col: string, val: string) => { updates.push({ table, data, eq: `${col}=${val}` }); return Promise.resolve({ error: null }) } }),
         insert: (data: unknown) => { inserts.push({ table, data: data as Record<string, unknown> }); return Promise.resolve({ error: null }) },
+        delete: () => ({ eq: () => Promise.resolve({ error: null }), is: () => Promise.resolve({ error: null }) }),
       }
     },
   } as unknown as SupabaseClient

@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { AIProvider } from '@/lib/ai/provider'
-import type { RiskFactors } from './types'
+import type { RiskFactors, ImpactFeedback } from './types'
 import { mapComponents } from './component-mapper'
 import { runFileBFS } from './file-bfs'
 import { aggregateComponents } from './component-aggregator'
@@ -20,11 +20,18 @@ const MAX_IMPACT_COMPONENTS = 20
 export async function runImpactAnalysis(
   changeId: string,
   db: SupabaseClient,
-  ai: AIProvider
-): Promise<void> {
+  ai: AIProvider,
+  draftPlan?: { new_file_paths: string[]; component_names: string[] }
+): Promise<ImpactFeedback> {
   await db.from('change_requests').update({ status: 'analyzing_mapping' }).eq('id', changeId)
 
   try {
+    // Clean up any previous impact analysis so re-runs don't produce duplicate records.
+    // change_risk_factors has a direct change_id FK (no cascade from change_impacts).
+    // change_impact_components cascades when change_impacts is deleted.
+    await db.from('change_risk_factors').delete().eq('change_id', changeId)
+    await db.from('change_impacts').delete().eq('change_id', changeId)
+
     // Load change
     const { data: change } = await db
       .from('change_requests')
@@ -35,7 +42,13 @@ export async function runImpactAnalysis(
     if (!change) throw new Error(`Change not found: ${changeId}`)
 
     // Phase 1: Component Mapping
-    const mapResult = await mapComponents(changeId, change, db, ai)
+    // — projected component names from draft plan become extra seeds at 0.5 weight
+    // — projected file paths trigger neighborhood lookup (edges, not just nodes)
+    const mapResult = await mapComponents(
+      changeId, change, db, ai,
+      draftPlan?.component_names ?? [],
+      draftPlan?.new_file_paths ?? []
+    )
 
     await db.from('change_requests').update({ status: 'analyzing_propagation' }).eq('id', changeId)
 
@@ -141,6 +154,52 @@ export async function runImpactAnalysis(
       confidence_breakdown: riskResult.confidenceBreakdown,
       analysis_quality: mapResult.aiUsed ? 'medium' : 'high',
     }).eq('id', changeId)
+
+    // Build and return feedback — derived from already-computed risk data, no extra AI call
+    const reasons: string[] = []
+    for (const [factor, weight] of Object.entries(riskResult.confidenceBreakdown).sort(([, a], [, b]) => b - a).slice(0, 3)) {
+      if (weight > 0) reasons.push(factor)
+    }
+    const projectedNames = draftPlan?.component_names ?? []
+    const existingNames = mapResult.components.map(c => c.name)
+    for (const name of projectedNames) {
+      if (!existingNames.includes(name)) reasons.push(`projected component not in analysis: ${name}`)
+    }
+
+    // Explicit new-code risk signals
+    const newFilePaths = draftPlan?.new_file_paths ?? []
+    const criticalDomains = ['auth', 'security', 'payment', 'credential', 'token', 'db', 'database', 'migration', 'session']
+    const newFileInCriticalDomain = newFilePaths.some(p =>
+      criticalDomains.some(d => p.toLowerCase().includes(d))
+    )
+    // Weighted edge count: strong neighborhood (direct dir) = 1.0, weak (subdir) = 0.5
+    const newEdgesCreated = mapResult.components
+      .filter(c => c.matchReason.startsWith('projected_file_neighborhood'))
+      .reduce((sum, c) => sum + (c.matchReason.includes(':strong:') ? 1.0 : 0.5), 0)
+
+    if (newFilePaths.length > 0) reasons.push(`introduces ${newFilePaths.length} new file(s)`)
+    if (newFileInCriticalDomain) reasons.push('new file(s) touch critical domain (auth/db/security)')
+
+    const feedback: ImpactFeedback = {
+      risk_level: riskResult.riskLevel,
+      reasons,
+      uncertainty: Math.round((unknownRatio * 0.6 + (mapResult.aiUsed ? 0.2 : 0) + (componentWeights.length === 0 ? 0.4 : 0)) * 10) / 10,
+      new_file_count: newFilePaths.length,
+      new_file_in_critical_domain: newFileInCriticalDomain,
+      new_edges_created: newEdgesCreated,
+    }
+
+    // Best-effort: log prediction for future calibration. Never throws.
+    void Promise.resolve(db.from('risk_predictions').insert({
+      change_id: changeId,
+      predicted_risk_level: feedback.risk_level,
+      predicted_uncertainty: feedback.uncertainty,
+      new_file_count: feedback.new_file_count,
+      new_file_in_critical_domain: feedback.new_file_in_critical_domain,
+      new_edges_created: feedback.new_edges_created,
+    })).catch(() => { /* non-fatal */ })
+
+    return feedback
 
   } catch (err) {
     await db.from('change_requests').update({ status: 'open' }).eq('id', changeId)

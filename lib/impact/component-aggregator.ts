@@ -7,12 +7,16 @@ export function aggregateComponents(
 ): ComponentWeight[] {
   const weights = new Map<string, ComponentWeight>()
 
-  // Seed components always win at weight 1.0
+  // Seed components: weight is data-driven from match confidence
+  //   keyword match → 0.5–0.9   (based on hit count)
+  //   ai_mapping    → 0.70
+  //   draft_plan_projection → 0.50
+  //   projected_file_neighborhood → 0.65
   for (const comp of seedComponents) {
     weights.set(comp.componentId, {
       componentId: comp.componentId,
-      weight: 1.0,
-      source: 'seed',
+      weight: Math.min(comp.confidence / 100, 1.0),
+      source: 'directly_mapped',
       sourceDetail: comp.matchReason,
     })
   }
@@ -25,11 +29,11 @@ export function aggregateComponents(
     const componentId = fileToComponent.get(fileId)
     if (!componentId) continue
     const existing = weights.get(componentId)
-    if (!existing || (existing.source !== 'seed' && fileWeight > existing.weight)) {
+    if (!existing || fileWeight > existing.weight) {
       weights.set(componentId, {
         componentId,
         weight: fileWeight,
-        source: 'file_graph',
+        source: 'via_file',
         sourceDetail: fileId,
       })
     }

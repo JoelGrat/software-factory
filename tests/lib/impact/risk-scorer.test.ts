@@ -17,7 +17,7 @@ function makeWeights(count: number, weight = 0.5): ComponentWeight[] {
   return Array.from({ length: count }, (_, i) => ({
     componentId: `c${i}`,
     weight,
-    source: 'file_graph' as const,
+    source: 'via_file' as const,
     sourceDetail: `f${i}`,
   }))
 }

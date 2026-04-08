@@ -1,13 +1,48 @@
 // lib/planning/prompt-builders.ts
 import type { ImpactedComponent, PlannerArchitecture, PlannerTask } from './types'
+import type { ImpactFeedback } from '@/lib/impact/types'
 
 export function buildArchitecturePrompt(
   change: { title: string; intent: string; type: string },
-  components: ImpactedComponent[]
+  components: ImpactedComponent[],
+  feedback?: ImpactFeedback
 ): string {
   const componentList = components
     .map(c => `- ${c.name} (type: ${c.type}, impact: ${Math.round(c.impactWeight * 100)}%)`)
     .join('\n')
+
+  let riskSection = ''
+  if (feedback && feedback.risk_level !== 'low') {
+    const factors = feedback.reasons.join(', ') || 'unspecified'
+    // Constraint budget: safety through isolation, not proliferation.
+    // Cap = 2 tasks per component + 2 for new files, floored at 6.
+    const maxTasks = Math.max(components.length * 2 + (feedback.new_file_count > 0 ? 2 : 0), 6)
+    const newFileNote = feedback.new_file_count > 0
+      ? `New files introduced: ${feedback.new_file_count}${feedback.new_file_in_critical_domain ? ' (critical domain — auth/db/security)' : ''}.${feedback.new_edges_created > 0 ? ` Inferred ${feedback.new_edges_created} additional component(s) from file neighborhood.` : ''}`
+      : ''
+
+    if (feedback.risk_level === 'high') {
+      riskSection = `
+MANDATORY CONSTRAINTS — risk level HIGH (uncertainty: ${feedback.uncertainty}):
+Factors: ${factors}
+${newFileNote}
+MUST isolate auth/db/service component changes — one component per task, no cross-component edits in a single step.
+MUST add a "verify current behavior of X" task BEFORE modifying any component flagged in the risk factors.
+MUST sequence: verify → isolate → implement → test per risky component.
+MUST include a rollback note in the approach.
+CONSTRAINT: total task count MUST NOT exceed ${maxTasks}. Safety comes from isolation, not from adding tasks. Remove tasks that don't do real work.
+`
+    } else {
+      riskSection = `
+Risk feedback — level MEDIUM (uncertainty: ${feedback.uncertainty}):
+Factors: ${factors}
+${newFileNote}
+Add a verification step for uncertain components before modifying them.
+Prefer isolated tasks where risk factors overlap.
+CONSTRAINT: keep total task count under ${maxTasks}.
+`
+    }
+  }
 
   return `You are planning the implementation of a software change.
 
@@ -17,7 +52,7 @@ Intent: ${change.intent}
 
 Impacted components (from impact analysis):
 ${componentList}
-
+${riskSection}
 Design the high-level approach for implementing this change.
 For each component, describe what needs to change and how.
 If this change requires creating brand-new files not yet in the codebase, list their paths in newFilePaths.

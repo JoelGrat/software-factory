@@ -1,5 +1,10 @@
 // lib/planning/types.ts
 
+export interface DraftPlan {
+  new_file_paths: string[]
+  component_names: string[]  // rough component mapping from title/intent
+}
+
 export interface ImpactedComponent {
   componentId: string
   name: string

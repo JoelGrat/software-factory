@@ -29,5 +29,14 @@ export async function POST(
     .eq('id', id)
 
   if (error) return NextResponse.json({ error: 'Update failed' }, { status: 500 })
+
+  // Best-effort: record outcome for risk calibration
+  void Promise.resolve(
+    db.from('risk_predictions')
+      .update({ outcome: 'approved', resolved_at: new Date().toISOString() })
+      .eq('change_id', id)
+      .is('outcome', null)
+  ).catch(() => { /* non-fatal */ })
+
   return NextResponse.json({ status: 'done' })
 }

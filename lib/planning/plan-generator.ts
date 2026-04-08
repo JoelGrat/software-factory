@@ -2,7 +2,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { AIProvider } from '@/lib/ai/provider'
 import type { ImpactedComponent, PlannerTask } from './types'
+import type { ImpactFeedback } from '@/lib/impact/types'
 import { runArchitecturePhase, runComponentTasksPhase, runFallbackTasksPhase, runOrderingPhase, runSpecPhase } from './phases'
+import { runDraftPlan } from './draft-planner'
 
 export async function runPlanGeneration(
   changeId: string,
@@ -15,7 +17,7 @@ export async function runPlanGeneration(
     // Load change
     const { data: change } = await db
       .from('change_requests')
-      .select('id, project_id, title, intent, type, priority')
+      .select('id, project_id, title, intent, type, priority, risk_level, confidence_score, confidence_breakdown')
       .eq('id', changeId)
       .single()
 
@@ -24,7 +26,7 @@ export async function runPlanGeneration(
     // Load impact → impacted components
     const { data: impact } = await db
       .from('change_impacts')
-      .select('id, change_id')
+      .select('id, change_id, primary_risk_factor, analysis_quality')
       .eq('change_id', changeId)
       .maybeSingle()
 
@@ -44,8 +46,54 @@ export async function runPlanGeneration(
       impactWeight: row.impact_weight,
     }))
 
-    // Phase 1: Architecture
-    const architecture = await runArchitecturePhase(change, components, ai)
+    // Draft plan: fast AI pass to project what files/components will be created/touched.
+    // Augment with deterministic keyword match so AI alone is never a single point of failure.
+    const draftPlan = await runDraftPlan(change, ai)
+
+    const changeWords = [
+      ...change.title.toLowerCase().split(/\s+/),
+      ...change.intent.toLowerCase().split(/\s+/),
+    ].filter(t => t.length > 2)
+    for (const comp of components) {
+      const compWords = comp.name.replace(/([A-Z])/g, ' $1').toLowerCase().trim().split(/\s+/)
+      if (compWords.some(w => changeWords.includes(w)) && !draftPlan.component_names.includes(comp.name)) {
+        draftPlan.component_names.push(comp.name)
+      }
+    }
+
+    // Derive feedback from already-stored impact data — no extra DB writes or AI calls
+    const reasons: string[] = []
+    const breakdown: Record<string, number> = (change as any).confidence_breakdown ?? {}
+    for (const [factor, weight] of Object.entries(breakdown).sort(([, a], [, b]) => (b as number) - (a as number)).slice(0, 3)) {
+      if ((weight as number) > 0) reasons.push(factor)
+    }
+    const primaryFactor = (impact as any)?.primary_risk_factor
+    if (primaryFactor && !reasons.includes(primaryFactor)) reasons.unshift(primaryFactor)
+
+    const existingNames = components.map(c => c.name)
+    for (const name of draftPlan.component_names) {
+      if (!existingNames.includes(name)) reasons.push(`projected component not in analysis: ${name}`)
+    }
+
+    const criticalDomains = ['auth', 'security', 'payment', 'credential', 'token', 'db', 'database', 'migration', 'session']
+    const newFilePaths = draftPlan.new_file_paths
+    const newFileInCriticalDomain = newFilePaths.some(p =>
+      criticalDomains.some(d => p.toLowerCase().includes(d))
+    )
+    if (newFilePaths.length > 0) reasons.push(`introduces ${newFilePaths.length} new file(s)`)
+    if (newFileInCriticalDomain) reasons.push('new file(s) touch critical domain (auth/db/security)')
+
+    const feedback: ImpactFeedback = {
+      risk_level: ((change as any).risk_level ?? 'low') as 'low' | 'medium' | 'high',
+      reasons: reasons.slice(0, 5),
+      uncertainty: (impact as any)?.analysis_quality === 'medium' ? 0.3 : 0.1,
+      new_file_count: newFilePaths.length,
+      new_file_in_critical_domain: newFileInCriticalDomain,
+      new_edges_created: 0,  // not available from stored data; populated by runImpactAnalysis
+    }
+
+    // Phase 1: Architecture (feedback adjusts task granularity + sequencing in prompt)
+    const architecture = await runArchitecturePhase(change, components, ai, feedback)
 
     // Create change_plans row
     const { data: plan, error: planError } = await db

@@ -1,5 +1,5 @@
 export type SeedReason = 'keyword_match' | 'component_match' | 'direct_mention'
-export type ImpactSource = 'seed' | 'file_graph'
+export type ImpactSource = 'directly_mapped' | 'via_file'
 
 export interface SeedFile {
   fileId: string
@@ -56,4 +56,13 @@ export interface RiskScoreResult {
   riskLevel: 'low' | 'medium' | 'high'
   primaryRiskFactor: string
   confidenceBreakdown: Record<string, number>
+}
+
+export interface ImpactFeedback {
+  risk_level: 'low' | 'medium' | 'high'
+  reasons: string[]
+  uncertainty: number           // 0.0 (certain) to 1.0 (very uncertain)
+  new_file_count: number        // files the draft plan intends to create
+  new_file_in_critical_domain: boolean  // any new file touches auth/db/security/payment
+  new_edges_created: number     // neighborhood components inferred from projected files
 }
