@@ -312,7 +312,10 @@ export async function runExecution(
         const sig = errorSignature(testResult.output)
         state.errorHistory.set(sig, (state.errorHistory.get(sig) ?? 0) + 1)
         if ((state.errorHistory.get(sig) ?? 0) >= limits.stagnationWindow) break
-        await writeSnapshot(db, changeId, state, 'error', false, testResult.testsPassed, testResult.testsFailed, testResult.output.slice(0, 8000))
+        const testErrorSummary = testResult.failures.length > 0
+          ? testResult.failures.map(f => `FAIL: ${f.testName}\n${f.error}`).join('\n\n---\n\n')
+          : testResult.output.slice(0, 8000)
+        await writeSnapshot(db, changeId, state, 'error', false, testResult.testsPassed, testResult.testsFailed, testErrorSummary.slice(0, 8000))
         continue
       }
 

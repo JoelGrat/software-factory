@@ -140,6 +140,15 @@ export default function ExecutionView({ change, project }: { change: Change; pro
         ],
       }
     }
+    if (m.startsWith('fail:') || m.includes('\nfail:') || m.includes('---\n\nfail:')) {
+      return {
+        title: 'Tests failed',
+        steps: [
+          'Some tests in the repository are failing — fix them before execution can proceed.',
+          'Review the failing test names and errors in the detail below.',
+        ],
+      }
+    }
     if (m.includes('error ts') || m.includes('error TS') || /\(\d+,\d+\): error/.test(m)) {
       return {
         title: 'TypeScript type check failed',
