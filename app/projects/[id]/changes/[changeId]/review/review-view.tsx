@@ -44,6 +44,7 @@ export default function ReviewView({
     const res = await fetch(`/api/change-requests/${change.id}`, { method: 'DELETE' })
     if (res.ok) {
       router.push(`/projects/${project?.id}`)
+      router.refresh()
     } else {
       const data = await res.json().catch(() => ({}))
       setError(data.error ?? 'Delete failed')

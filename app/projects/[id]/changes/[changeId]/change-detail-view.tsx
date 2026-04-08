@@ -179,6 +179,7 @@ export function ChangeDetailView({
       const res = await fetch(`/api/change-requests/${change.id}`, { method: 'DELETE' })
       if (res.ok) {
         router.push(`/projects/${project.id}`)
+        router.refresh()
       }
     } finally {
       setDeleting(false)
