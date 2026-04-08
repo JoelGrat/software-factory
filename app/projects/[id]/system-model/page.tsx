@@ -17,39 +17,63 @@ export default async function SystemModelPage({ params }: { params: Promise<{ id
 
   if (!project) redirect('/projects')
 
-  const { data: components } = await db
+  const { data: rawComponents } = await db
     .from('system_components')
     .select('id, name, type, status, is_anchored, scan_count, last_updated')
     .eq('project_id', id)
     .is('deleted_at', null)
     .order('name')
 
-  // Count primary file assignments per component
-  const { data: assignments } = await db
-    .from('component_assignment')
-    .select('component_id')
-    .in('component_id', (components ?? []).map(c => c.id))
-    .eq('is_primary', true)
+  const compIds = (rawComponents ?? []).map(c => c.id)
 
-  const fileCounts: Record<string, number> = {}
+  const [{ data: assignments }, { data: dependencies }] = compIds.length > 0
+    ? await Promise.all([
+        db.from('component_assignment')
+          .select('component_id, confidence, files!file_id(path)')
+          .in('component_id', compIds)
+          .eq('is_primary', true),
+        db.from('component_dependencies')
+          .select('from_id, to_id')
+          .in('from_id', compIds),
+      ])
+    : [{ data: [] }, { data: [] }]
+
+  // Per-component: confidence avg + top 3 file paths
+  const confAccum: Record<string, { total: number; n: number }> = {}
+  const filePaths: Record<string, string[]> = {}
+
   for (const a of (assignments ?? [])) {
-    fileCounts[a.component_id] = (fileCounts[a.component_id] ?? 0) + 1
+    if (!confAccum[a.component_id]) confAccum[a.component_id] = { total: 0, n: 0 }
+    confAccum[a.component_id].total += a.confidence
+    confAccum[a.component_id].n++
+
+    const path = (a.files as any)?.path as string | undefined
+    if (path) {
+      if (!filePaths[a.component_id]) filePaths[a.component_id] = []
+      if (filePaths[a.component_id].length < 3) filePaths[a.component_id].push(path)
+    }
   }
 
-  // Fetch outgoing dependencies for all components
-  const { data: dependencies } = await db
-    .from('component_dependencies')
-    .select('from_id, to_id')
-    .in('from_id', (components ?? []).map(c => c.id))
-    .is('deleted_at', null)
+  const components = (rawComponents ?? []).map(c => {
+    const conf = confAccum[c.id]
+    return {
+      id: c.id,
+      name: c.name,
+      type: c.type,
+      status: c.status,
+      is_anchored: c.is_anchored,
+      scan_count: c.scan_count,
+      last_updated: c.last_updated,
+      fileCount: confAccum[c.id]?.n ?? 0,
+      confidence: conf ? Math.round(conf.total / conf.n) : 50,
+      topFiles: filePaths[c.id] ?? [],
+    }
+  })
 
   return (
     <SystemModelBrowser
       project={project}
-      components={(components ?? []).map(c => ({
-        ...c,
-        fileCount: fileCounts[c.id] ?? 0,
-      }))}
+      components={components}
       dependencies={dependencies ?? []}
     />
   )

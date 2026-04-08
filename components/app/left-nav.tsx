@@ -3,7 +3,6 @@ import Link from 'next/link'
 import { usePathname, useParams } from 'next/navigation'
 
 const FOOTER_ITEMS = [
-  { href: '/settings', icon: 'settings',     label: 'Settings' },
   { href: 'https://docs.softwarefactory.dev', icon: 'menu_book', label: 'Docs' },
   { href: '/support',  icon: 'help_outline',  label: 'Support' },
 ]
@@ -21,7 +20,6 @@ export function LeftNav({ projectName, projectId: projectIdProp }: Props) {
   const projectNavItems = projectId ? [
     { href: `/projects/${projectId}`,              icon: 'dashboard',     label: 'Dashboard' },
     { href: `/projects/${projectId}/system-model`, icon: 'account_tree',  label: 'System Model' },
-    { href: `/projects/${projectId}/changes/new`,  icon: 'add_circle',    label: 'New Change' },
   ] : []
 
   return (
@@ -74,6 +72,19 @@ export function LeftNav({ projectName, projectId: projectIdProp }: Props) {
 
       {/* Footer */}
       <div className="p-3 border-t border-white/5 flex flex-col gap-0.5">
+        {projectId && (
+          <Link
+            href={`/projects/${projectId}/settings`}
+            className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-all ${
+              pathname === `/projects/${projectId}/settings`
+                ? 'bg-indigo-500/15 text-indigo-300'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-[#171f33]'
+            }`}
+          >
+            <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>settings</span>
+            <span>Settings</span>
+          </Link>
+        )}
         {FOOTER_ITEMS.map(item => (
           <Link
             key={item.href}

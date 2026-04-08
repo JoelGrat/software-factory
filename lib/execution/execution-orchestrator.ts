@@ -164,7 +164,10 @@ export async function runExecution(
     })
 
     const branch = (plan as { branch_name?: string }).branch_name ?? `sf/${changeId.slice(0, 8)}-exec`
-    env = await executor.prepareEnvironment(project, branch)
+    env = await executor.prepareEnvironment(
+      { id: project.id, repoUrl: (project as any).repo_url ?? '', repoToken: (project as any).repo_token ?? null },
+      branch
+    )
 
     const state: ExecutionState = {
       iteration: 0,
@@ -352,6 +355,20 @@ export async function runExecution(
     await db.from('change_requests').update({ status: 'review' }).eq('id', changeId)
 
   } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err)
+    await db.from('execution_snapshots').insert({
+      change_id: changeId,
+      iteration: 0,
+      files_modified: [],
+      tests_passed: 0,
+      tests_failed: 0,
+      planned_files: [],
+      propagated_files: [],
+      plan_divergence: false,
+      partial_success: false,
+      termination_reason: 'error',
+      error_summary: errorMessage,
+    })
     await db.from('change_requests').update({ status: 'failed' }).eq('id', changeId)
     throw err
   } finally {

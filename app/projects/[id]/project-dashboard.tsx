@@ -317,16 +317,11 @@ export function ProjectDashboard({
           <span className="text-slate-600">/</span>
           <span className="text-slate-200 font-medium truncate max-w-[240px]">{project.name}</span>
         </div>
-        <div className="flex items-center gap-3">
-          {isReady ? (
-            <Link href={`/projects/${project.id}/changes/new`} className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition-all active:scale-95">
-              <span className="material-symbols-outlined text-[15px]">add</span>New Change Request
-            </Link>
-          ) : (
-            <button disabled className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-slate-800 text-slate-500 cursor-not-allowed">
-              <span className="material-symbols-outlined text-[15px]">add</span>New Change Request
-            </button>
-          )}
+        <div className="flex items-center gap-1">
+          <Link href="/settings" className="p-2 text-slate-400 hover:text-slate-200 hover:bg-[#171f33] rounded-lg transition-all" title="Settings">
+            <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>settings</span>
+          </Link>
+          <div className="w-px h-5 bg-white/10 mx-1" />
           <ProfileAvatar />
         </div>
       </header>

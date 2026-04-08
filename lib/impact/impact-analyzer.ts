@@ -91,11 +91,10 @@ export async function runImpactAnalysis(
       .from('change_impacts')
       .insert({
         change_id: changeId,
-        project_id: change.project_id,
         risk_score: riskResult.score,
         blast_radius: riskFactors.blastRadius,
         primary_risk_factor: riskResult.primaryRiskFactor,
-        analysis_quality: mapResult.aiUsed ? 'ai_assisted' : 'heuristic',
+        analysis_quality: mapResult.aiUsed ? 'medium' : 'high',
         requires_migration: migrationResult.requiresMigration,
         requires_data_change: migrationResult.requiresDataChange,
       })
@@ -140,7 +139,7 @@ export async function runImpactAnalysis(
       risk_level: riskResult.riskLevel,
       confidence_score,
       confidence_breakdown: riskResult.confidenceBreakdown,
-      analysis_quality: mapResult.aiUsed ? 'ai_assisted' : 'heuristic',
+      analysis_quality: mapResult.aiUsed ? 'medium' : 'high',
     }).eq('id', changeId)
 
   } catch (err) {

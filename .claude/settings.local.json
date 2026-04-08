@@ -70,7 +70,9 @@
       "Bash(gh pr create --title 'feat: Change Intelligence — Plan 6 Execution Loop' --body ':*)",
       "Bash(winget list:*)",
       "Bash(where gh:*)",
-      "Read(//c/Users/joelg/AppData/Local/Programs/**)"
+      "Read(//c/Users/joelg/AppData/Local/Programs/**)",
+      "Bash(cmd.exe /c \"rd /s /q .worktrees\\\\plan6-execution\")",
+      "Bash(npm ls:*)"
     ]
   }
 }

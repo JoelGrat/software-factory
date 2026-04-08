@@ -33,6 +33,29 @@ Respond with JSON:
 }`
 }
 
+export function buildFallbackTasksPrompt(
+  change: { title: string; intent: string; type: string },
+  approach: string
+): string {
+  return `You are generating implementation tasks for a software change.
+
+Change: ${change.title}
+Type: ${change.type}
+Intent: ${change.intent}
+Approach: ${approach}
+
+No specific system components were identified. Generate 4–8 specific, actionable implementation tasks covering the full change.
+Each task should be completable in under an hour.
+Focus only on work needed for this change — not general improvements.
+
+Respond with JSON:
+{
+  "tasks": [
+    { "description": "Specific task description" }
+  ]
+}`
+}
+
 export function buildComponentTasksPrompt(
   change: { title: string; intent: string },
   component: ImpactedComponent,

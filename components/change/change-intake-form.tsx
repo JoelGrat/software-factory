@@ -21,11 +21,30 @@ export function ChangeIntakeForm({ projectId, initialTitle = '' }: Props) {
   const [tags, setTags] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [generatingIntent, setGeneratingIntent] = useState(false)
 
   function addTag() {
     const tag = tagInput.trim().toLowerCase()
     if (tag && !tags.includes(tag)) setTags(prev => [...prev, tag])
     setTagInput('')
+  }
+
+  async function generateIntent() {
+    if (!title.trim() || generatingIntent) return
+    setGeneratingIntent(true)
+    try {
+      const res = await fetch('/api/ai/generate-intent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, intent, type }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setIntent(data.intent)
+      }
+    } finally {
+      setGeneratingIntent(false)
+    }
   }
 
   function removeTag(tag: string) {
@@ -71,7 +90,27 @@ export function ChangeIntakeForm({ projectId, initialTitle = '' }: Props) {
       </div>
 
       <div>
-        <label className={labelClass}>Intent</label>
+        <div className="flex items-center justify-between mb-1.5">
+          <label className={labelClass + ' mb-0'}>Intent</label>
+          <button
+            type="button"
+            onClick={generateIntent}
+            disabled={!title.trim() || generatingIntent}
+            className="flex items-center gap-1 text-xs font-semibold text-indigo-400 hover:text-indigo-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            {generatingIntent ? (
+              <>
+                <span className="material-symbols-outlined animate-spin" style={{ fontSize: '14px' }}>progress_activity</span>
+                {intent.trim() ? 'Improving…' : 'Generating…'}
+              </>
+            ) : (
+              <>
+                <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>auto_awesome</span>
+                {intent.trim() ? 'Improve' : 'Generate'}
+              </>
+            )}
+          </button>
+        </div>
         <textarea
           value={intent}
           onChange={e => setIntent(e.target.value)}

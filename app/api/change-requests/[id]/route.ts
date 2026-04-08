@@ -73,6 +73,32 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   })
 }
 
+export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
+  const db = createClient()
+  const { data: { user } } = await db.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const { data: change } = await db
+    .from('change_requests')
+    .select('id, status, projects!inner(owner_id)')
+    .eq('id', id)
+    .eq('projects.owner_id', user.id)
+    .single()
+
+  if (!change) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+  const BLOCKED = ['executing', 'done']
+  if (BLOCKED.includes(change.status)) {
+    return NextResponse.json({ error: 'Cannot delete a change that is executing or done' }, { status: 409 })
+  }
+
+  const { error } = await db.from('change_requests').delete().eq('id', id)
+  if (error) return NextResponse.json({ error: 'Delete failed' }, { status: 500 })
+
+  return new NextResponse(null, { status: 204 })
+}
+
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const db = createClient()

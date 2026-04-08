@@ -2,7 +2,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { AIProvider } from '@/lib/ai/provider'
 import type { ImpactedComponent, PlannerTask } from './types'
-import { runArchitecturePhase, runComponentTasksPhase, runOrderingPhase, runSpecPhase } from './phases'
+import { runArchitecturePhase, runComponentTasksPhase, runFallbackTasksPhase, runOrderingPhase, runSpecPhase } from './phases'
 
 export async function runPlanGeneration(
   changeId: string,
@@ -44,8 +44,6 @@ export async function runPlanGeneration(
       impactWeight: row.impact_weight,
     }))
 
-    if (components.length === 0) throw new Error('No impacted components found — run impact analysis first')
-
     // Phase 1: Architecture
     const architecture = await runArchitecturePhase(change, components, ai)
 
@@ -63,16 +61,28 @@ export async function runPlanGeneration(
 
     if (planError || !plan) throw planError ?? new Error('Failed to create change_plans row')
 
-    // Phase 2: Per-component tasks
+    // Phase 2: Per-component tasks (or fallback if no components)
     const allTasks: PlannerTask[] = []
-    for (const component of components) {
-      const approach = architecture.componentApproaches[component.name] ?? 'Implement changes as needed'
-      const descriptions = await runComponentTasksPhase(change, component, approach, ai)
+    if (components.length > 0) {
+      for (const component of components) {
+        const approach = architecture.componentApproaches[component.name] ?? 'Implement changes as needed'
+        const descriptions = await runComponentTasksPhase(change, component, approach, ai)
+        for (const description of descriptions) {
+          allTasks.push({
+            description,
+            componentId: component.componentId,
+            componentName: component.name,
+            orderIndex: allTasks.length,
+          })
+        }
+      }
+    } else {
+      const descriptions = await runFallbackTasksPhase(change, architecture.approach, ai)
       for (const description of descriptions) {
         allTasks.push({
           description,
-          componentId: component.componentId,
-          componentName: component.name,
+          componentId: null as any,
+          componentName: 'General',
           orderIndex: allTasks.length,
         })
       }

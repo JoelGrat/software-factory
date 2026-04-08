@@ -77,18 +77,33 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (typeof body.repo_url === 'string') updates.repo_url = body.repo_url.trim() || null
   if (typeof body.repo_token === 'string') updates.repo_token = body.repo_token.trim() || null
   if (typeof body.name === 'string' && body.name.trim()) updates.name = body.name.trim()
+  if (body.project_settings !== undefined && typeof body.project_settings === 'object') {
+    updates.project_settings = body.project_settings
+  }
 
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: 'Nothing to update' }, { status: 400 })
   }
 
-  const { data, error } = await db
+  // Attempt full update; if project_settings column doesn't exist yet, retry without it
+  const { project_settings: _ps, ...coreUpdates } = updates as any
+  let { data, error } = await db
     .from('projects')
     .update(updates)
     .eq('id', id)
     .eq('owner_id', user.id)
     .select('id, name, repo_url, scan_status, lock_version')
     .single()
+
+  if (error?.message?.includes('project_settings') && Object.keys(coreUpdates).length > 0) {
+    ;({ data, error } = await db
+      .from('projects')
+      .update(coreUpdates)
+      .eq('id', id)
+      .eq('owner_id', user.id)
+      .select('id, name, repo_url, scan_status, lock_version')
+      .single())
+  }
 
   if (error || !data) return NextResponse.json({ error: 'Update failed' }, { status: 500 })
   return NextResponse.json(data)

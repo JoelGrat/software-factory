@@ -1,10 +1,24 @@
 // app/api/change-requests/[id]/execute/route.ts
 import { NextResponse } from 'next/server'
+import { exec as execCb } from 'node:child_process'
+import { promisify } from 'node:util'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getProvider } from '@/lib/ai/registry'
 import { runExecution } from '@/lib/execution/execution-orchestrator'
 import { DockerExecutor } from '@/lib/execution/executors/docker-executor'
+
+const exec = promisify(execCb)
+
+async function checkDocker(): Promise<{ ok: boolean; error?: string }> {
+  try {
+    await exec('docker info', { timeout: 5000 })
+    return { ok: true }
+  } catch (err) {
+    const msg = (err as { stderr?: string; message?: string }).stderr ?? (err as Error).message ?? 'Unknown error'
+    return { ok: false, error: msg.split('\n')[0]?.trim() ?? msg }
+  }
+}
 
 export async function POST(
   _req: Request,
@@ -17,15 +31,24 @@ export async function POST(
 
   const { data: change } = await db
     .from('change_requests')
-    .select('id, status, projects!inner(owner_id)')
+    .select('id, status, projects!inner(owner_id, repo_url)')
     .eq('id', id)
     .eq('projects.owner_id', user.id)
     .single()
 
   if (!change) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-  if (change.status !== 'planned') {
+
+  const project = change.projects as unknown as { owner_id: string; repo_url: string | null }
+  if (!project.repo_url) {
     return NextResponse.json(
-      { error: `Cannot execute from status '${change.status}'. Change must be 'planned'.` },
+      { error: 'No repository configured', detail: 'Set a repository URL in Project Settings before executing.' },
+      { status: 422 }
+    )
+  }
+
+  if (!['planned', 'failed'].includes(change.status)) {
+    return NextResponse.json(
+      { error: `Cannot execute from status '${change.status}'. Change must be 'planned' or 'failed'.` },
       { status: 409 }
     )
   }
@@ -41,6 +64,14 @@ export async function POST(
 
   if (!plan || plan.status !== 'approved') {
     return NextResponse.json({ error: 'No approved plan found' }, { status: 409 })
+  }
+
+  const docker = await checkDocker()
+  if (!docker.ok) {
+    return NextResponse.json(
+      { error: 'Docker is not running', detail: docker.error },
+      { status: 503 }
+    )
   }
 
   const adminDb = createAdminClient()

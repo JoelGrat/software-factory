@@ -1,0 +1,518 @@
+'use client'
+import { useState } from 'react'
+import { useRouter } from 'next/navigation'
+import Link from 'next/link'
+import { LeftNav } from '@/components/app/left-nav'
+import { ProfileAvatar } from '@/components/app/profile-avatar'
+
+// ── Types ────────────────────────────────────────────────────────────────────
+
+interface Project {
+  id: string; name: string; repo_url: string | null; repo_token: string | null
+  scan_status: string; created_at: string; project_settings: Record<string, any>
+}
+
+interface ModelHealth {
+  componentCount: number; fileCount: number; assignedFileCount: number
+  avgConfidence: number; lowConfCount: number
+}
+
+interface DangerStats {
+  componentCount: number; changeCount: number; executionCount: number
+}
+
+type RiskAction = 'auto' | 'approval' | 'manual'
+type ScanMode = 'incremental' | 'full'
+type TestDefault = 'scoped_first' | 'full_suite'
+type ExecMode = 'container' | 'ci' | 'hybrid'
+type OnFailure = 'notify' | 'create_change' | 'nothing'
+
+interface Settings {
+  execution: { maxIterations: number; maxCostUsd: number; timeoutMinutes: number; maxAffectedFiles: number }
+  riskPolicy: { low: RiskAction; medium: RiskAction; high: RiskAction }
+  scan: { mode: ScanMode; dependencyDepth: number; autoRescan: boolean }
+  testStrategy: { default: TestDefault; highRisk: 'full_suite' }
+  executionMode: ExecMode
+  onFailure: OnFailure
+  automation: { autoCreateOnError: boolean; suggestOnDrift: boolean }
+}
+
+const DEFAULTS: Settings = {
+  execution: { maxIterations: 10, maxCostUsd: 5, timeoutMinutes: 10, maxAffectedFiles: 20 },
+  riskPolicy: { low: 'auto', medium: 'approval', high: 'manual' },
+  scan: { mode: 'incremental', dependencyDepth: 3, autoRescan: false },
+  testStrategy: { default: 'scoped_first', highRisk: 'full_suite' },
+  executionMode: 'container',
+  onFailure: 'notify',
+  automation: { autoCreateOnError: false, suggestOnDrift: false },
+}
+
+function mergeSettings(raw: Record<string, any>): Settings {
+  return {
+    execution: { ...DEFAULTS.execution, ...(raw.execution ?? {}) },
+    riskPolicy: { ...DEFAULTS.riskPolicy, ...(raw.riskPolicy ?? {}) },
+    scan: { ...DEFAULTS.scan, ...(raw.scan ?? {}) },
+    testStrategy: { ...DEFAULTS.testStrategy, ...(raw.testStrategy ?? {}) },
+    executionMode: raw.executionMode ?? DEFAULTS.executionMode,
+    onFailure: raw.onFailure ?? DEFAULTS.onFailure,
+    automation: { ...DEFAULTS.automation, ...(raw.automation ?? {}) },
+  }
+}
+
+// ── Sub-components ────────────────────────────────────────────────────────────
+
+const sectionClass = "rounded-xl bg-[#131b2e] border border-white/5 p-6 space-y-5"
+const labelClass = "text-xs font-bold uppercase tracking-widest text-slate-400 font-headline"
+const inputClass = "rounded-lg px-3 py-2 text-sm outline-none transition-all bg-[#0f1929] border border-white/10 text-slate-200 focus:border-indigo-500 font-mono w-full"
+const numberInputClass = "rounded-lg px-3 py-2 text-sm outline-none transition-all bg-[#0f1929] border border-white/10 text-slate-200 focus:border-indigo-500 font-mono w-24 text-right"
+
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return <h2 className="text-sm font-bold text-slate-200 font-headline">{children}</h2>
+}
+
+function Row({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-6">
+      <div className="min-w-0">
+        <p className={labelClass}>{label}</p>
+        {hint && <p className="text-[11px] text-slate-600 mt-0.5">{hint}</p>}
+      </div>
+      <div className="flex-shrink-0">{children}</div>
+    </div>
+  )
+}
+
+function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!value)}
+      className={`relative w-10 h-5 rounded-full transition-colors ${value ? 'bg-indigo-500' : 'bg-slate-700'}`}
+    >
+      <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${value ? 'left-5.5' : 'left-0.5'}`}
+        style={{ left: value ? '1.375rem' : '0.125rem' }}
+      />
+    </button>
+  )
+}
+
+function SegmentedControl<T extends string>({
+  value, onChange, options,
+}: {
+  value: T; onChange: (v: T) => void
+  options: { value: T; label: string }[]
+}) {
+  return (
+    <div className="flex rounded-lg overflow-hidden border border-white/10">
+      {options.map((opt, i) => (
+        <button
+          key={opt.value}
+          type="button"
+          onClick={() => onChange(opt.value)}
+          className={`px-3 py-1.5 text-xs font-semibold transition-all ${
+            i > 0 ? 'border-l border-white/10' : ''
+          } ${value === opt.value
+            ? 'bg-indigo-500/20 text-indigo-300'
+            : 'bg-[#0f1929] text-slate-400 hover:text-slate-200 hover:bg-[#171f33]'
+          }`}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+const RISK_ACTION_LABELS: Record<RiskAction, string> = {
+  auto: 'Auto-execute',
+  approval: 'Require approval',
+  manual: 'Manual only',
+}
+
+function behaviorSummary(s: Settings): string[] {
+  const risk = `${RISK_ACTION_LABELS[s.riskPolicy.low].toLowerCase()} low-risk · approval for medium · manual for high`
+  const scan = `${s.scan.mode} scans · depth ${s.scan.dependencyDepth}${s.scan.autoRescan ? ' · auto-rescan on' : ''}`
+  const exec = `Max $${s.execution.maxCostUsd} budget · ${s.execution.maxIterations} iterations · ${s.execution.timeoutMinutes} min`
+  const test = s.testStrategy.default === 'scoped_first' ? 'Scoped tests first · full suite on high risk' : 'Full test suite always'
+  return [risk, scan, exec, test]
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
+
+export function ProjectSettingsView({
+  project: initial, modelHealth, dangerStats,
+}: {
+  project: Project; modelHealth: ModelHealth; dangerStats: DangerStats
+}) {
+  const router = useRouter()
+  const [project, setProject] = useState(initial)
+  const [name, setName] = useState(initial.name)
+  const [repoUrl, setRepoUrl] = useState(initial.repo_url ?? '')
+  const [repoToken, setRepoToken] = useState(initial.repo_token ?? '')
+  const [showToken, setShowToken] = useState(false)
+  const [settings, setSettings] = useState<Settings>(() => mergeSettings(initial.project_settings ?? {}))
+
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [saveSuccess, setSaveSuccess] = useState(false)
+
+  const [deleting, setDeleting] = useState(false)
+  const [deleteConfirm, setDeleteConfirm] = useState('')
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+
+  function patchSettings<K extends keyof Settings>(key: K, val: Settings[K]) {
+    setSettings(s => ({ ...s, [key]: val }))
+  }
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault()
+    setSaving(true)
+    setSaveError(null)
+    setSaveSuccess(false)
+    try {
+      const res = await fetch(`/api/projects/${project.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: name.trim(),
+          repo_url: repoUrl.trim() || null,
+          repo_token: repoToken.trim() || null,
+          project_settings: settings,
+        }),
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        setSaveError(data.error ?? 'Save failed')
+        return
+      }
+      const updated = await res.json()
+      setProject(p => ({ ...p, ...updated }))
+      setSaveSuccess(true)
+      router.refresh()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleDelete() {
+    if (deleteConfirm !== project.name) return
+    setDeleting(true)
+    setDeleteError(null)
+    try {
+      const res = await fetch(`/api/projects/${project.id}`, { method: 'DELETE' })
+      if (!res.ok) { setDeleteError('Delete failed. Try again.'); return }
+      router.push('/projects')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  const summary = behaviorSummary(settings)
+  const completeness = modelHealth.fileCount > 0
+    ? Math.round((modelHealth.assignedFileCount / modelHealth.fileCount) * 100)
+    : 0
+
+  return (
+    <div className="flex flex-col h-screen bg-[#0b1326] text-on-surface overflow-hidden">
+      <header className="w-full h-16 flex-shrink-0 flex items-center justify-between px-6 bg-[#0b1326] border-b border-white/5 z-50 font-headline antialiased tracking-tight">
+        <div className="flex items-center gap-2 text-sm">
+          <Link href="/projects" className="font-black text-indigo-400 tracking-tighter hover:text-indigo-300 transition-colors">FactoryOS</Link>
+          <span className="text-slate-600">/</span>
+          <Link href={`/projects/${project.id}`} className="text-slate-400 hover:text-slate-200 transition-colors font-medium truncate max-w-[180px]">{project.name}</Link>
+          <span className="text-slate-600">/</span>
+          <span className="text-slate-200 font-medium">Settings</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <Link href="/settings" className="p-2 text-slate-400 hover:text-slate-200 hover:bg-[#171f33] rounded-lg transition-all" title="Settings">
+            <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>settings</span>
+          </Link>
+          <div className="w-px h-5 bg-white/10 mx-1" />
+          <ProfileAvatar />
+        </div>
+      </header>
+
+      <div className="flex flex-1 overflow-hidden">
+        <LeftNav />
+        <main className="flex-1 overflow-y-auto bg-[#0b1326] p-10">
+          <div className="max-w-2xl mx-auto space-y-8">
+
+            <div>
+              <p className="text-xs uppercase tracking-widest font-bold text-indigo-400 font-headline mb-1">Project</p>
+              <h1 className="text-3xl font-extrabold font-headline tracking-tight text-on-surface">Settings</h1>
+            </div>
+
+            {/* System Behavior Summary */}
+            <div className="rounded-xl bg-indigo-500/5 border border-indigo-500/20 p-5">
+              <p className="text-xs font-bold uppercase tracking-widest text-indigo-400 font-headline mb-3">System Behavior</p>
+              <ul className="space-y-1.5">
+                {summary.map((line, i) => (
+                  <li key={i} className="flex items-start gap-2 text-sm text-slate-300">
+                    <span className="text-indigo-500 mt-0.5 flex-shrink-0">→</span>
+                    <span>{line}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <form onSubmit={handleSave} className="space-y-6">
+
+              {/* Execution Behavior */}
+              <div className={sectionClass}>
+                <SectionTitle>Execution Behavior</SectionTitle>
+                <Row label="Max iterations" hint="Maximum fix-attempt loops per change">
+                  <div className="flex items-center gap-2">
+                    <input type="number" min={1} max={50} value={settings.execution.maxIterations}
+                      onChange={e => patchSettings('execution', { ...settings.execution, maxIterations: Number(e.target.value) })}
+                      className={numberInputClass} />
+                    <span className="text-xs text-slate-500">iterations</span>
+                  </div>
+                </Row>
+                <Row label="Max cost" hint="AI spend limit per execution">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-500">$</span>
+                    <input type="number" min={0} max={100} step={0.5} value={settings.execution.maxCostUsd}
+                      onChange={e => patchSettings('execution', { ...settings.execution, maxCostUsd: Number(e.target.value) })}
+                      className={numberInputClass} />
+                  </div>
+                </Row>
+                <Row label="Timeout" hint="Wall-clock limit per execution">
+                  <div className="flex items-center gap-2">
+                    <input type="number" min={1} max={60} value={settings.execution.timeoutMinutes}
+                      onChange={e => patchSettings('execution', { ...settings.execution, timeoutMinutes: Number(e.target.value) })}
+                      className={numberInputClass} />
+                    <span className="text-xs text-slate-500">min</span>
+                  </div>
+                </Row>
+                <Row label="Max affected files" hint="Files touched before execution is halted">
+                  <div className="flex items-center gap-2">
+                    <input type="number" min={1} max={100} value={settings.execution.maxAffectedFiles}
+                      onChange={e => patchSettings('execution', { ...settings.execution, maxAffectedFiles: Number(e.target.value) })}
+                      className={numberInputClass} />
+                    <span className="text-xs text-slate-500">files</span>
+                  </div>
+                </Row>
+              </div>
+
+              {/* Risk Policy */}
+              <div className={sectionClass}>
+                <div>
+                  <SectionTitle>Risk Policy</SectionTitle>
+                  <p className="text-xs text-slate-500 mt-1">Controls how changes are handled based on their computed risk level.</p>
+                </div>
+                {(['low', 'medium', 'high'] as const).map(level => (
+                  <Row
+                    key={level}
+                    label={`${level.charAt(0).toUpperCase() + level.slice(1)} risk`}
+                  >
+                    <SegmentedControl<RiskAction>
+                      value={settings.riskPolicy[level]}
+                      onChange={v => patchSettings('riskPolicy', { ...settings.riskPolicy, [level]: v })}
+                      options={[
+                        { value: 'auto',     label: 'Auto-execute' },
+                        { value: 'approval', label: 'Require approval' },
+                        { value: 'manual',   label: 'Manual only' },
+                      ]}
+                    />
+                  </Row>
+                ))}
+              </div>
+
+              {/* Scan & Model */}
+              <div className={sectionClass}>
+                <SectionTitle>Scan &amp; Model</SectionTitle>
+                <Row label="Scan mode" hint="Incremental re-uses existing data; full re-scans everything">
+                  <SegmentedControl<ScanMode>
+                    value={settings.scan.mode}
+                    onChange={v => patchSettings('scan', { ...settings.scan, mode: v })}
+                    options={[
+                      { value: 'incremental', label: 'Incremental' },
+                      { value: 'full',        label: 'Full' },
+                    ]}
+                  />
+                </Row>
+                <Row label="Dependency depth" hint="BFS hops when resolving import chains">
+                  <div className="flex items-center gap-2">
+                    <input type="number" min={1} max={10} value={settings.scan.dependencyDepth}
+                      onChange={e => patchSettings('scan', { ...settings.scan, dependencyDepth: Number(e.target.value) })}
+                      className={numberInputClass} />
+                    <span className="text-xs text-slate-500">hops</span>
+                  </div>
+                </Row>
+                <Row label="Auto re-scan" hint="Re-scan automatically after each change is completed">
+                  <Toggle value={settings.scan.autoRescan}
+                    onChange={v => patchSettings('scan', { ...settings.scan, autoRescan: v })} />
+                </Row>
+              </div>
+
+              {/* Test Strategy */}
+              <div className={sectionClass}>
+                <SectionTitle>Test Strategy</SectionTitle>
+                <Row label="Default" hint="Test selection approach for normal executions">
+                  <SegmentedControl<TestDefault>
+                    value={settings.testStrategy.default}
+                    onChange={v => patchSettings('testStrategy', { ...settings.testStrategy, default: v })}
+                    options={[
+                      { value: 'scoped_first', label: 'Scoped first' },
+                      { value: 'full_suite',   label: 'Full suite' },
+                    ]}
+                  />
+                </Row>
+                <Row label="High risk" hint="High-risk changes always run the full suite">
+                  <span className="text-xs font-mono text-slate-500 bg-[#0f1929] border border-white/10 px-3 py-1.5 rounded-lg">Always full suite</span>
+                </Row>
+              </div>
+
+              {/* Execution Environment */}
+              <div className={sectionClass}>
+                <SectionTitle>Execution Environment</SectionTitle>
+                <Row label="Mode" hint="Where code changes are applied and tested">
+                  <SegmentedControl<ExecMode>
+                    value={settings.executionMode}
+                    onChange={v => patchSettings('executionMode', v)}
+                    options={[
+                      { value: 'container', label: 'Container' },
+                      { value: 'ci',        label: 'CI only' },
+                      { value: 'hybrid',    label: 'Hybrid' },
+                    ]}
+                  />
+                </Row>
+              </div>
+
+              {/* Notifications */}
+              <div className={sectionClass}>
+                <SectionTitle>Notifications</SectionTitle>
+                <Row label="On failure">
+                  <SegmentedControl<OnFailure>
+                    value={settings.onFailure}
+                    onChange={v => patchSettings('onFailure', v)}
+                    options={[
+                      { value: 'notify',         label: 'Notify' },
+                      { value: 'create_change',  label: 'Create change' },
+                      { value: 'nothing',        label: 'Silent' },
+                    ]}
+                  />
+                </Row>
+              </div>
+
+              {/* Automation */}
+              <div className={sectionClass}>
+                <SectionTitle>Automation</SectionTitle>
+                <Row label="Auto-create on production error" hint="Creates a change request when a production error is detected">
+                  <Toggle value={settings.automation.autoCreateOnError}
+                    onChange={v => patchSettings('automation', { ...settings.automation, autoCreateOnError: v })} />
+                </Row>
+                <Row label="Suggest refactor on drift" hint="Flags components when dependency patterns shift significantly">
+                  <Toggle value={settings.automation.suggestOnDrift}
+                    onChange={v => patchSettings('automation', { ...settings.automation, suggestOnDrift: v })} />
+                </Row>
+              </div>
+
+              {/* Model Health — read-only */}
+              {modelHealth.componentCount > 0 && (
+                <div className={sectionClass}>
+                  <SectionTitle>Model Health</SectionTitle>
+                  <div className="grid grid-cols-2 gap-3">
+                    {[
+                      { label: 'Components', value: modelHealth.componentCount },
+                      { label: 'Files scanned', value: modelHealth.fileCount },
+                      { label: 'Completeness', value: `${completeness}%` },
+                      { label: 'Avg confidence', value: `${modelHealth.avgConfidence}%` },
+                      { label: 'Low confidence', value: modelHealth.lowConfCount },
+                      { label: 'Unassigned files', value: Math.max(0, modelHealth.fileCount - modelHealth.assignedFileCount) },
+                    ].map(({ label, value }) => (
+                      <div key={label} className="rounded-lg bg-[#0f1929] border border-white/5 px-3 py-2.5">
+                        <p className="text-[10px] uppercase tracking-widest text-slate-500 font-headline">{label}</p>
+                        <p className="text-sm font-mono font-semibold text-slate-200 mt-0.5">{value}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* General */}
+              <div className={sectionClass}>
+                <SectionTitle>General</SectionTitle>
+                <div>
+                  <label className={`${labelClass} block mb-1.5`}>Project name</label>
+                  <input value={name} onChange={e => setName(e.target.value)} required className={inputClass} placeholder="My project" />
+                </div>
+                <div>
+                  <p className={labelClass}>Created</p>
+                  <p className="text-sm text-slate-500 font-mono mt-1">{new Date(project.created_at).toLocaleString('en-GB')}</p>
+                </div>
+              </div>
+
+              {/* Repository */}
+              <div className={sectionClass}>
+                <div>
+                  <SectionTitle>Repository</SectionTitle>
+                  <p className="text-xs text-slate-500 mt-1">GitHub repository used for scanning and change execution.</p>
+                </div>
+                <div>
+                  <label className={`${labelClass} block mb-1.5`}>Repository URL</label>
+                  <input value={repoUrl} onChange={e => setRepoUrl(e.target.value)} placeholder="https://github.com/org/repo" className={inputClass} />
+                </div>
+                <div>
+                  <label className={`${labelClass} block mb-1.5`}>Access token</label>
+                  <div className="relative">
+                    <input
+                      type={showToken ? 'text' : 'password'}
+                      value={repoToken}
+                      onChange={e => setRepoToken(e.target.value)}
+                      placeholder={project.repo_token ? '••••••••••••••••' : 'ghp_...'}
+                      className={`${inputClass} pr-10`}
+                    />
+                    <button type="button" onClick={() => setShowToken(v => !v)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors">
+                      <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>{showToken ? 'visibility_off' : 'visibility'}</span>
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-slate-600 mt-1.5">Needs <span className="font-mono text-slate-500">repo</span> scope. Leave blank to keep current token.</p>
+                </div>
+              </div>
+
+              {/* Save */}
+              <div className="flex items-center gap-3">
+                <button type="submit" disabled={saving}
+                  className="px-5 py-2 rounded-lg text-sm font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
+                  {saving ? 'Saving…' : 'Save changes'}
+                </button>
+                {saveSuccess && <span className="text-xs text-emerald-400 font-medium">Saved</span>}
+                {saveError && <span className="text-xs text-red-400">{saveError}</span>}
+              </div>
+            </form>
+
+            {/* Danger Zone */}
+            <section className="rounded-xl border border-red-500/20 p-6 space-y-4">
+              <h2 className="text-sm font-bold text-red-400 font-headline">Danger zone</h2>
+              <p className="text-sm text-slate-400">
+                Permanently delete <span className="font-semibold text-slate-200">{project.name}</span> and all its data. This cannot be undone.
+              </p>
+              <div className="flex items-center gap-4 text-xs font-mono text-slate-500">
+                <span>{dangerStats.componentCount} components</span>
+                <span className="text-slate-700">·</span>
+                <span>{dangerStats.changeCount} changes</span>
+                <span className="text-slate-700">·</span>
+                <span>{dangerStats.executionCount} executions</span>
+              </div>
+              <div className="space-y-2">
+                <label className={labelClass}>
+                  Type <span className="font-mono text-slate-300 normal-case tracking-normal">{project.name}</span> to confirm
+                </label>
+                <input value={deleteConfirm} onChange={e => setDeleteConfirm(e.target.value)}
+                  placeholder={project.name}
+                  className="rounded-lg px-3 py-2 text-sm outline-none transition-all bg-[#0f1929] border border-white/10 text-slate-200 placeholder:text-slate-600 focus:border-red-500 font-mono w-full" />
+              </div>
+              {deleteError && <p className="text-xs text-red-400">{deleteError}</p>}
+              <button onClick={handleDelete} disabled={deleteConfirm !== project.name || deleting}
+                className="px-5 py-2 rounded-lg text-sm font-semibold bg-red-600/20 text-red-300 border border-red-500/30 hover:bg-red-600/30 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                {deleting ? 'Deleting…' : 'Delete project'}
+              </button>
+            </section>
+
+          </div>
+        </main>
+      </div>
+    </div>
+  )
+}

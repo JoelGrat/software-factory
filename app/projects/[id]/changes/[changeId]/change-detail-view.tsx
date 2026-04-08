@@ -84,6 +84,27 @@ const ANALYSIS_STEPS = [
   { label: 'Generating implementation plan', statuses: ['planning'] },
 ]
 
+function ComponentImpactRow({ ic }: { ic: ImpactComponent }) {
+  const weight = Math.round(ic.impact_weight * 100)
+  const barColor = weight >= 70 ? 'bg-red-500/50' : weight >= 40 ? 'bg-amber-500/50' : 'bg-indigo-500/40'
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <div className="flex items-center gap-2 min-w-0">
+        <span className="text-[10px] font-mono px-1 py-0.5 rounded bg-indigo-400/10 text-indigo-300 uppercase flex-shrink-0">
+          {ic.system_components?.type ?? '?'}
+        </span>
+        <span className="text-sm text-slate-300 truncate">{ic.system_components?.name ?? ic.component_id}</span>
+      </div>
+      <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="w-24 h-1.5 bg-slate-700 rounded-full overflow-hidden">
+          <div className={`h-full rounded-full ${barColor}`} style={{ width: `${weight}%` }} />
+        </div>
+        <span className="text-[10px] font-mono text-slate-500 w-8 text-right">{weight}%</span>
+      </div>
+    </div>
+  )
+}
+
 function Badge({ label, colorClass }: { label: string; colorClass: string }) {
   return (
     <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded font-mono ${colorClass}`}>
@@ -118,7 +139,49 @@ export function ChangeDetailView({
   const [planTasks, setPlanTasks] = useState(initialPlanTasks)
   const [planTab, setPlanTab] = useState<'tasks' | 'spec'>('tasks')
   const [approving, setApproving] = useState(false)
+  const [generatingSpec, setGeneratingSpec] = useState(false)
+  const [deleteConfirm, setDeleteConfirm] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const isAnalyzing = ANALYZING_STATUSES.includes(change.status)
+  const canDelete = !['executing', 'done'].includes(change.status)
+
+  // Impact analysis derived display values
+  const RISK_MAX = 40
+  const impactScore = impact?.risk_score ?? 0
+  const confidence = change.confidence_score ?? 0
+  const aiUsed = impact?.analysis_quality === 'medium'
+  const unknownDepsFactor = riskFactors.find(f => f.factor === 'unknown_deps')
+  const lowConfFactor = riskFactors.find(f => f.factor === 'low_confidence')
+  const confidenceReasons: string[] = []
+  if (aiUsed) confidenceReasons.push('AI-assisted mapping (−10%)')
+  if (unknownDepsFactor) confidenceReasons.push(`${unknownDepsFactor.weight / 2} component(s) with unresolved dependencies`)
+  if (lowConfFactor) confidenceReasons.push('Low-confidence component matches detected')
+  if (confidenceReasons.length === 0) confidenceReasons.push('All components matched by keyword search')
+  const confBarColor = confidence >= 80 ? 'bg-green-500' : confidence >= 60 ? 'bg-amber-500' : 'bg-red-500'
+  const confTextColor = confidence >= 80 ? 'text-green-400' : confidence >= 60 ? 'text-amber-400' : 'text-red-400'
+  const FACTOR_META: Record<string, { label: string; desc: string }> = {
+    blast_radius: { label: 'Blast radius', desc: 'Significantly impacted components (weight > 30%)' },
+    unknown_deps: { label: 'Unknown dependencies', desc: 'Components with unresolved import chains' },
+    low_confidence: { label: 'Low-confidence matches', desc: 'Components with < 60% mapping confidence' },
+    auth_component: { label: 'Auth component touched', desc: 'Changes to authentication carry inherent risk' },
+    data_component: { label: 'Data layer involved', desc: 'Database or repository component affected' },
+    dynamic_imports: { label: 'Dynamic imports', desc: 'Lazy-loaded modules may cascade unpredictably' },
+  }
+  const directComponents = impactComponents.filter(ic => ic.source === 'seed')
+  const propagatedComponents = impactComponents.filter(ic => ic.source === 'file_graph')
+
+  async function handleDelete() {
+    setDeleting(true)
+    try {
+      const res = await fetch(`/api/change-requests/${change.id}`, { method: 'DELETE' })
+      if (res.ok) {
+        router.push(`/projects/${project.id}`)
+      }
+    } finally {
+      setDeleting(false)
+      setDeleteConfirm(false)
+    }
+  }
 
   useEffect(() => {
     if (!isAnalyzing) return
@@ -151,6 +214,9 @@ export function ChangeDetailView({
           <span className="text-slate-200 font-medium truncate max-w-[200px]">{change.title}</span>
         </div>
         <div className="flex items-center gap-1">
+          <Link href="/settings" className="p-2 text-slate-400 hover:text-slate-200 hover:bg-[#171f33] rounded-lg transition-all" title="Settings">
+            <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>settings</span>
+          </Link>
           <div className="w-px h-5 bg-white/10 mx-1" />
           <ProfileAvatar />
         </div>
@@ -177,6 +243,34 @@ export function ChangeDetailView({
                   Created {new Date(change.created_at).toLocaleDateString('en-GB')}
                 </p>
               </div>
+              {canDelete && (
+                deleteConfirm ? (
+                  <div className="flex items-center gap-3 pt-1">
+                    <span className="text-xs text-slate-400">Delete this change?</span>
+                    <button
+                      onClick={handleDelete}
+                      disabled={deleting}
+                      className="text-xs font-semibold text-red-400 hover:text-red-300 disabled:opacity-50 transition-colors"
+                    >
+                      {deleting ? 'Deleting…' : 'Yes, delete'}
+                    </button>
+                    <button
+                      onClick={() => setDeleteConfirm(false)}
+                      className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setDeleteConfirm(true)}
+                    className="p-1.5 text-slate-600 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-all mt-0.5"
+                    title="Delete change"
+                  >
+                    <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>delete</span>
+                  </button>
+                )
+              )}
             </div>
 
             {/* Intent */}
@@ -234,136 +328,164 @@ export function ChangeDetailView({
               </div>
             ) : change.status === 'analyzed' && impact ? (
               <div className="rounded-xl bg-[#131b2e] border border-white/5 overflow-hidden">
-                {/* Header row */}
-                <div className="flex items-center justify-between px-5 py-4 border-b border-white/5">
-                  <p className="text-xs font-bold uppercase tracking-widest text-slate-400 font-headline">Impact Analysis</p>
-                  <div className="flex items-center gap-2">
-                    {change.confidence_score !== null && (
-                      <span className="text-[10px] font-mono text-slate-500">{change.confidence_score}% confidence</span>
-                    )}
+                  {/* Header */}
+                  <div className="flex items-center justify-between px-5 py-4 border-b border-white/5">
+                    <p className="text-xs font-bold uppercase tracking-widest text-slate-400 font-headline">Impact Analysis</p>
                     {impact.analysis_quality && (
                       <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-700 text-slate-400 uppercase tracking-wider">
-                        {impact.analysis_quality.replace('_', ' ')}
+                        {impact.analysis_quality === 'high' ? 'keyword matched' : 'ai assisted'}
                       </span>
                     )}
                   </div>
-                </div>
 
-                {/* Risk score + blast radius */}
-                <div className="grid grid-cols-3 divide-x divide-white/5 border-b border-white/5">
-                  <div className="px-5 py-4">
-                    <p className="text-[10px] uppercase tracking-widest text-slate-500 font-headline mb-1">Risk Level</p>
-                    <p className={`text-lg font-extrabold font-headline capitalize ${
-                      change.risk_level === 'high' ? 'text-red-400' :
-                      change.risk_level === 'medium' ? 'text-amber-400' : 'text-green-400'
-                    }`}>{change.risk_level ?? '—'}</p>
-                  </div>
-                  <div className="px-5 py-4">
-                    <p className="text-[10px] uppercase tracking-widest text-slate-500 font-headline mb-1">Risk Score</p>
-                    <p className="text-lg font-extrabold font-headline text-on-surface font-mono">{impact.risk_score ?? '—'}</p>
-                  </div>
-                  <div className="px-5 py-4">
-                    <p className="text-[10px] uppercase tracking-widest text-slate-500 font-headline mb-1">Blast Radius</p>
-                    <p className="text-lg font-extrabold font-headline text-on-surface font-mono">
-                      {impact.blast_radius ?? '—'}
-                      <span className="text-xs font-normal text-slate-500 ml-1">components</span>
+                  {/* Confidence */}
+                  <div className="px-5 py-4 border-b border-white/5">
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-[10px] uppercase tracking-widest text-slate-500 font-headline">Analysis Confidence</p>
+                      <span className={`text-sm font-extrabold font-mono ${confTextColor}`}>{confidence}%</span>
+                    </div>
+                    <div className="w-full h-1.5 bg-slate-700 rounded-full overflow-hidden mb-2">
+                      <div className={`h-full rounded-full transition-all ${confBarColor}`} style={{ width: `${confidence}%` }} />
+                    </div>
+                    <p className="text-[11px] text-slate-500 leading-relaxed">
+                      {confidenceReasons.join(' · ')}
                     </p>
                   </div>
-                </div>
 
-                {/* Migration flags */}
-                {(impact.requires_migration || impact.requires_data_change) && (
-                  <div className="px-5 py-3 border-b border-white/5 flex items-center gap-3 flex-wrap">
-                    {impact.requires_migration && (
-                      <span className="flex items-center gap-1.5 text-xs text-amber-300 font-mono">
-                        <span className="material-symbols-outlined text-amber-400" style={{ fontSize: '14px' }}>warning</span>
-                        Schema migration required
-                      </span>
-                    )}
-                    {impact.requires_data_change && (
-                      <span className="flex items-center gap-1.5 text-xs text-orange-300 font-mono">
-                        <span className="material-symbols-outlined text-orange-400" style={{ fontSize: '14px' }}>database</span>
-                        Data migration required
-                      </span>
-                    )}
-                  </div>
-                )}
-
-                {/* Affected components */}
-                {impactComponents.length > 0 && (
-                  <div className="px-5 py-4 border-b border-white/5">
-                    <p className="text-[10px] uppercase tracking-widest text-slate-500 font-headline mb-3">Affected Components</p>
-                    <div className="space-y-2">
-                      {impactComponents.map((ic) => (
-                        <div key={ic.component_id} className="flex items-center justify-between">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className="text-[10px] font-mono px-1 py-0.5 rounded bg-indigo-400/10 text-indigo-300 uppercase flex-shrink-0">
-                              {ic.system_components?.type ?? '?'}
-                            </span>
-                            <span className="text-sm text-slate-300 font-mono truncate">
-                              {ic.system_components?.name ?? ic.component_id}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-2 flex-shrink-0">
-                            <div
-                              className="h-1.5 rounded-full bg-indigo-500/40"
-                              style={{ width: `${Math.round(ic.impact_weight * 60 + 12)}px` }}
-                            />
-                            <span className="text-[10px] font-mono text-slate-500 w-8 text-right">
-                              {Math.round(ic.impact_weight * 100)}%
-                            </span>
-                          </div>
+                  {/* Risk level + score */}
+                  <div className="grid grid-cols-2 divide-x divide-white/5 border-b border-white/5">
+                    <div className="px-5 py-4">
+                      <p className="text-[10px] uppercase tracking-widest text-slate-500 font-headline mb-1">Risk Level</p>
+                      <p className={`text-lg font-extrabold font-headline capitalize ${
+                        change.risk_level === 'high' ? 'text-red-400' :
+                        change.risk_level === 'medium' ? 'text-amber-400' : 'text-green-400'
+                      }`}>{change.risk_level ?? '—'}</p>
+                      <p className="text-[10px] text-slate-600 mt-1 font-mono">
+                        {change.risk_level === 'low' ? '< 10 pts' : change.risk_level === 'medium' ? '10–24 pts' : '≥ 25 pts'}
+                      </p>
+                    </div>
+                    <div className="px-5 py-4">
+                      <div className="flex items-baseline justify-between mb-2">
+                        <p className="text-[10px] uppercase tracking-widest text-slate-500 font-headline">Risk Score</p>
+                        <span className="text-lg font-extrabold font-mono text-on-surface">{impactScore}<span className="text-xs font-normal text-slate-600">/{RISK_MAX}</span></span>
+                      </div>
+                      <div className="w-full h-1.5 bg-slate-700 rounded-full overflow-hidden mb-3">
+                        <div
+                          className={`h-full rounded-full ${impactScore < 10 ? 'bg-green-500' : impactScore < 25 ? 'bg-amber-500' : 'bg-red-500'}`}
+                          style={{ width: `${Math.round((impactScore / RISK_MAX) * 100)}%` }}
+                        />
+                      </div>
+                      {riskFactors.length > 0 ? (
+                        <div className="space-y-1.5">
+                          {riskFactors.map((rf) => {
+                            const meta = FACTOR_META[rf.factor]
+                            return (
+                              <div key={rf.factor} title={meta?.desc}>
+                                <div className="flex items-center justify-between mb-0.5">
+                                  <span className="text-[10px] text-slate-400">{meta?.label ?? rf.factor.replace(/_/g, ' ')}</span>
+                                  <span className="text-[10px] font-mono text-slate-500">+{rf.weight}</span>
+                                </div>
+                                <div className="w-full h-0.5 bg-slate-700 rounded-full overflow-hidden">
+                                  <div
+                                    className="h-full bg-indigo-500/60 rounded-full"
+                                    style={{ width: `${Math.round((rf.weight / RISK_MAX) * 100)}%` }}
+                                  />
+                                </div>
+                              </div>
+                            )
+                          })}
                         </div>
-                      ))}
+                      ) : (
+                        <p className="text-[10px] text-slate-600">No significant risk factors detected</p>
+                      )}
                     </div>
                   </div>
-                )}
 
-                {/* Risk factors */}
-                {riskFactors.length > 0 && (
-                  <div className="px-5 py-4">
-                    <p className="text-[10px] uppercase tracking-widest text-slate-500 font-headline mb-3">Risk Factors</p>
-                    <div className="space-y-1.5">
-                      {riskFactors.map((rf) => (
-                        <div key={rf.factor} className="flex items-center justify-between">
-                          <span className="text-xs text-slate-400 font-mono capitalize">{rf.factor.replace(/_/g, ' ')}</span>
-                          <span className="text-xs font-mono text-slate-500">+{rf.weight}</span>
+                  {/* Blast radius */}
+                  {impactComponents.length > 0 && (
+                    <div className="px-5 py-4 border-b border-white/5">
+                      <div className="flex items-center justify-between mb-3">
+                        <p className="text-[10px] uppercase tracking-widest text-slate-500 font-headline">Blast Radius</p>
+                        <span className="text-[10px] font-mono text-slate-500">
+                          {impactComponents.length} component{impactComponents.length !== 1 ? 's' : ''}
+                          {directComponents.length > 0 && propagatedComponents.length > 0 && (
+                            <> · {directComponents.length} direct, {propagatedComponents.length} propagated</>
+                          )}
+                        </span>
+                      </div>
+
+                      {directComponents.length > 0 && (
+                        <div className="mb-3">
+                          <p className="text-[10px] text-slate-600 font-mono uppercase tracking-wider mb-2">Direct matches</p>
+                          <div className="space-y-2">
+                            {directComponents.map((ic) => (
+                              <ComponentImpactRow key={ic.component_id} ic={ic} />
+                            ))}
+                          </div>
                         </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                      )}
 
-                {/* Generate Plan CTA */}
-                <div className="px-5 py-4 border-t border-white/5 flex items-center justify-between">
-                  <div className="text-xs text-slate-500 font-mono">
-                    {change.risk_level === 'high' && (
-                      <span className="text-red-400">High risk — confirmation required</span>
-                    )}
+                      {propagatedComponents.length > 0 && (
+                        <div>
+                          <p className="text-[10px] text-slate-600 font-mono uppercase tracking-wider mb-2">Propagated via dependency graph</p>
+                          <div className="space-y-2">
+                            {propagatedComponents.map((ic) => (
+                              <ComponentImpactRow key={ic.component_id} ic={ic} />
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Migration flags */}
+                  {(impact.requires_migration || impact.requires_data_change) && (
+                    <div className="px-5 py-3 border-b border-white/5 flex items-center gap-3 flex-wrap">
+                      {impact.requires_migration && (
+                        <span className="flex items-center gap-1.5 text-xs text-amber-300 font-mono">
+                          <span className="material-symbols-outlined text-amber-400" style={{ fontSize: '14px' }}>warning</span>
+                          Schema migration required
+                        </span>
+                      )}
+                      {impact.requires_data_change && (
+                        <span className="flex items-center gap-1.5 text-xs text-orange-300 font-mono">
+                          <span className="material-symbols-outlined text-orange-400" style={{ fontSize: '14px' }}>database</span>
+                          Data migration required
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Generate Plan CTA */}
+                  <div className="px-5 py-4 flex items-center justify-between">
+                    <div className="text-xs text-slate-500 font-mono">
+                      {change.risk_level === 'high' && (
+                        <span className="text-red-400">High risk — confirmation required</span>
+                      )}
+                    </div>
+                    <button
+                      onClick={async () => {
+                        const confirmed = change.risk_level !== 'high' ||
+                          window.confirm('This change carries high risk. Generate a plan anyway?')
+                        if (!confirmed) return
+                        try {
+                          const res = await fetch(`/api/change-requests/${change.id}/plan`, { method: 'POST' })
+                          if (res.ok) setChange(c => ({ ...c, status: 'planning' }))
+                        } catch {
+                          // network error — no optimistic update to revert since we only update on success
+                        }
+                      }}
+                      className="px-4 py-2 rounded-lg bg-indigo-500 hover:bg-indigo-400 text-white text-sm font-bold font-headline transition-colors"
+                    >
+                      Generate Plan
+                    </button>
                   </div>
-                  <button
-                    onClick={async () => {
-                      const confirmed = change.risk_level !== 'high' ||
-                        window.confirm('This change carries high risk. Generate a plan anyway?')
-                      if (!confirmed) return
-                      try {
-                        const res = await fetch(`/api/change-requests/${change.id}/plan`, { method: 'POST' })
-                        if (res.ok) setChange(c => ({ ...c, status: 'planning' }))
-                      } catch {
-                        // network error — no optimistic update to revert since we only update on success
-                      }
-                    }}
-                    className="px-4 py-2 rounded-lg bg-indigo-500 hover:bg-indigo-400 text-white text-sm font-bold font-headline transition-colors"
-                  >
-                    Generate Plan
-                  </button>
                 </div>
-              </div>
             ) : change.status === 'analyzed' && !impact ? (
               <div className="rounded-xl p-6 bg-[#131b2e] border border-white/5 text-center">
                 <p className="text-sm text-slate-500">Analysis complete but impact data unavailable.</p>
               </div>
-            ) : change.status === 'planned' && plan ? (
+            ) : (change.status === 'planned' || change.status === 'failed') && plan ? (
               <div className="rounded-xl bg-[#131b2e] border border-white/5 overflow-hidden">
                 {/* Plan header */}
                 <div className="flex items-center justify-between px-5 py-4 border-b border-white/5">
@@ -435,8 +557,43 @@ export function ChangeDetailView({
                         {plan.spec_markdown}
                       </pre>
                     ) : (
-                      <p className="text-sm text-slate-500 text-center py-4">Spec not available.</p>
+                      <div className="text-center py-8">
+                        <p className="text-sm text-slate-500 mb-4">Spec was not generated.</p>
+                        <button
+                          disabled={generatingSpec}
+                          onClick={async () => {
+                            setGeneratingSpec(true)
+                            try {
+                              const res = await fetch(`/api/change-requests/${change.id}/spec`, { method: 'POST' })
+                              if (res.ok) {
+                                const data = await res.json()
+                                setPlan(p => p ? { ...p, spec_markdown: data.spec_markdown } : p)
+                              }
+                            } finally {
+                              setGeneratingSpec(false)
+                            }
+                          }}
+                          className="px-4 py-2 rounded-lg bg-indigo-500 hover:bg-indigo-400 disabled:opacity-50 text-white text-sm font-bold font-headline transition-colors"
+                        >
+                          {generatingSpec ? 'Generating…' : 'Generate Spec'}
+                        </button>
+                      </div>
                     )}
+                  </div>
+                )}
+
+                {/* Execute footer (approved) */}
+                {plan.status === 'approved' && (
+                  <div className="px-5 py-4 border-t border-white/5 flex items-center justify-between">
+                    <p className="text-xs text-slate-500">
+                      {change.status === 'failed' ? 'Previous execution failed — retry when ready' : 'Plan approved — ready to execute'}
+                    </p>
+                    <Link
+                      href={`/projects/${project.id}/changes/${change.id}/execution`}
+                      className="px-4 py-2 rounded-lg bg-green-500 hover:bg-green-400 text-white text-sm font-bold font-headline transition-colors"
+                    >
+                      Execute
+                    </Link>
                   </div>
                 )}
 

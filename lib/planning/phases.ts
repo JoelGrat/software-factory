@@ -1,7 +1,7 @@
 // lib/planning/phases.ts
 import type { AIProvider } from '@/lib/ai/provider'
 import type { ImpactedComponent, PlannerArchitecture, PlannerTask } from './types'
-import { buildArchitecturePrompt, buildComponentTasksPrompt, buildSpecPrompt } from './prompt-builders'
+import { buildArchitecturePrompt, buildComponentTasksPrompt, buildFallbackTasksPrompt, buildSpecPrompt } from './prompt-builders'
 
 // Component type priority for deterministic ordering (lower = runs first)
 const TYPE_PRIORITY: Record<string, number> = {
@@ -71,6 +71,30 @@ export async function runComponentTasksPhase(
   }
 }
 
+export async function runFallbackTasksPhase(
+  change: { title: string; intent: string; type: string },
+  approach: string,
+  ai: AIProvider
+): Promise<string[]> {
+  const prompt = buildFallbackTasksPrompt(change, approach)
+  try {
+    const result = await ai.complete(prompt, {
+      responseSchema: {
+        type: 'object',
+        properties: {
+          tasks: { type: 'array', items: { type: 'object', properties: { description: { type: 'string' } } } },
+        },
+        required: ['tasks'],
+      },
+      maxTokens: 2048,
+    })
+    const parsed = JSON.parse(result.content)
+    return (parsed.tasks ?? []).map((t: { description: string }) => t.description).filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
 export function runOrderingPhase(
   tasks: PlannerTask[],
   components: ImpactedComponent[]
@@ -95,7 +119,7 @@ export async function runSpecPhase(
 ): Promise<string> {
   const prompt = buildSpecPrompt(change, architecture, tasks)
   try {
-    const result = await ai.complete(prompt, { maxTokens: 8192 })
+    const result = await ai.complete(prompt, { maxTokens: 4096 })
     return result.content
   } catch {
     return ''

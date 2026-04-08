@@ -37,6 +37,8 @@ export class DockerExecutor implements CodeExecutor {
     const containerId = stdout.trim()
     const containerWorkDir = '/app'
 
+    await dockerExec(containerId, `apt-get update -qq && apt-get install -y git --no-install-recommends -qq`)
+
     const authedUrl = project.repoToken
       ? project.repoUrl.replace('https://', `https://oauth2:${project.repoToken}@`)
       : project.repoUrl
