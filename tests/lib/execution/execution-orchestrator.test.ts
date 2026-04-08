@@ -13,7 +13,7 @@ const TASKS = [
   { id: 't1', plan_id: 'plan-1', component_id: 'c1', description: 'Update getUser', order_index: 0, status: 'pending' },
 ]
 const CHANGE = { id: 'cr1', project_id: 'proj1', title: 'Fix auth', intent: 'fix it', type: 'bug', risk_level: 'low' }
-const PROJECT = { id: 'proj1', repo_url: 'https://github.com/test/repo', repo_token: null }
+const PROJECT = { id: 'proj1', repo_url: 'https://github.com/test/repo', repo_token: 'ghp_test_token' }
 const IMPACT_COMPONENTS = [
   { component_id: 'c1', impact_weight: 1.0, system_components: { name: 'AuthService', type: 'auth' } },
 ]
