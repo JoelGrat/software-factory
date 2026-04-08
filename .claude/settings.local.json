@@ -72,7 +72,8 @@
       "Bash(where gh:*)",
       "Read(//c/Users/joelg/AppData/Local/Programs/**)",
       "Bash(cmd.exe /c \"rd /s /q .worktrees\\\\plan6-execution\")",
-      "Bash(npm ls:*)"
+      "Bash(npm ls:*)",
+      "Bash(gh pr create --title 'feat: project settings inner sidebar with tab-style section switching' --body ':*)"
     ]
   }
 }

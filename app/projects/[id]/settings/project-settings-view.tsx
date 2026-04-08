@@ -269,25 +269,7 @@ export function ProjectSettingsView({
       <div className="flex flex-1 overflow-hidden">
         <LeftNav />
         <main className="flex-1 overflow-y-auto bg-[#0b1326]">
-          <div className="flex gap-8 p-10">
-          <nav className="w-44 flex-shrink-0 bg-[#131b2e] rounded-xl py-4 px-2 space-y-0.5 sticky top-0 self-start">
-            {SECTIONS.map(({ id, label }) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setActiveSection(id)}
-                className={`w-full text-left px-3 py-2 rounded-lg text-xs font-semibold font-headline tracking-wide transition-all ${
-                  activeSection === id
-                    ? 'bg-indigo-500/10 text-indigo-400 border-l-4 border-indigo-500'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-[#171f33] border-l-4 border-transparent'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </nav>
-          <div className="flex-1 min-w-0 max-w-2xl space-y-8">
-
+          <div className="max-w-4xl mx-auto p-10 space-y-8">
               <div>
                 <p className="text-xs uppercase tracking-widest font-bold text-indigo-400 font-headline mb-1">Project</p>
                 <h1 className="text-3xl font-extrabold font-headline tracking-tight text-on-surface">Settings</h1>
@@ -306,6 +288,24 @@ export function ProjectSettingsView({
                 </ul>
               </div>
 
+              <div className="flex gap-8 items-start">
+              <nav className="w-44 flex-shrink-0 bg-[#131b2e] rounded-xl py-4 px-2 space-y-0.5">
+                {SECTIONS.map(({ id, label }) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setActiveSection(id)}
+                    className={`w-full text-left px-3 py-2 rounded-lg text-xs font-semibold font-headline tracking-wide transition-all ${
+                      activeSection === id
+                        ? 'bg-indigo-500/10 text-indigo-400 border-l-4 border-indigo-500'
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-[#171f33] border-l-4 border-transparent'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </nav>
+              <div className="flex-1 min-w-0 space-y-6">
               <form onSubmit={handleSave} className="space-y-6">
 
                 {/* Execution Behavior */}
@@ -599,7 +599,8 @@ export function ProjectSettingsView({
                 </section>
               )}
 
-          </div>
+              </div>
+              </div>
           </div>
         </main>
       </div>
