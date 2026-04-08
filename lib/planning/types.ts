@@ -18,7 +18,7 @@ export interface PlannerArchitecture {
 
 export interface PlannerTask {
   description: string
-  componentId: string
+  componentId: string | null
   componentName: string
   orderIndex: number
   newFilePath?: string  // set when task creates a new file rather than modifying an existing one

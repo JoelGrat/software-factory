@@ -30,6 +30,7 @@ export async function runArchitecturePhase(
         testApproach: { type: 'string' },
         estimatedFiles: { type: 'number' },
         componentApproaches: { type: 'object' },
+        newFilePaths: { type: 'array', items: { type: 'string' } },
       },
       required: ['approach', 'branchName', 'testApproach', 'estimatedFiles', 'componentApproaches'],
     },
@@ -103,8 +104,8 @@ export function runOrderingPhase(
   const typeByComponentId = new Map(components.map(c => [c.componentId, c.type]))
 
   const sorted = [...tasks].sort((a, b) => {
-    const pa = TYPE_PRIORITY[typeByComponentId.get(a.componentId) ?? ''] ?? 99
-    const pb = TYPE_PRIORITY[typeByComponentId.get(b.componentId) ?? ''] ?? 99
+    const pa = TYPE_PRIORITY[typeByComponentId.get(a.componentId ?? '') ?? ''] ?? 99
+    const pb = TYPE_PRIORITY[typeByComponentId.get(b.componentId ?? '') ?? ''] ?? 99
     if (pa !== pb) return pa - pb
     return a.orderIndex - b.orderIndex
   })

@@ -81,11 +81,23 @@ export async function runPlanGeneration(
       for (const description of descriptions) {
         allTasks.push({
           description,
-          componentId: null as any,
+          componentId: null,
           componentName: 'General',
           orderIndex: allTasks.length,
         })
       }
+    }
+
+    // New-file tasks: one task per file the architecture flagged as needing creation
+    const uniqueNewFilePaths = [...new Set(architecture.newFilePaths)].filter(Boolean)
+    for (const filePath of uniqueNewFilePaths) {
+      allTasks.push({
+        description: `Create new file: ${filePath}`,
+        componentId: null,
+        componentName: 'New File',
+        orderIndex: allTasks.length,
+        newFilePath: filePath,
+      })
     }
 
     // Phase 3: Deterministic ordering
@@ -99,6 +111,7 @@ export async function runPlanGeneration(
         description: t.description,
         order_index: t.orderIndex,
         status: 'pending',
+        new_file_path: t.newFilePath ?? null,
       }))
       const { error: tasksError } = await db.from('change_plan_tasks').insert(taskRows)
       if (tasksError) throw tasksError
