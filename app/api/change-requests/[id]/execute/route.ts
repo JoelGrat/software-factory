@@ -82,6 +82,14 @@ export async function POST(
 
   const adminDb = createAdminClient()
 
+  const clientRequestId = _req.headers.get('X-Client-Request-Id')
+  if (clientRequestId) {
+    await adminDb
+      .from('change_requests')
+      .update({ client_request_id: clientRequestId })
+      .eq('id', id)
+  }
+
   // Clear previous execution history before re-running
   await adminDb.from('execution_snapshots').delete().eq('change_id', id)
   await adminDb.from('execution_trace').delete().eq('change_id', id)
