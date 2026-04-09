@@ -14,27 +14,34 @@ export async function recordEvent(
   projectId: string,
   event: DashboardEvent
 ): Promise<void> {
-  await db.from('event_history').insert({
+  const { error: insertError } = await db.from('event_history').insert({
     project_id: projectId,
     version: event.version,
     event_json: event,
   })
+  if (insertError) {
+    console.error('[event-history] insert failed', { projectId, version: event.version, error: insertError })
+    return
+  }
 
   // Prune: keep only the most recent MAX_HISTORY_PER_PROJECT events
   const { data: oldest } = await db
     .from('event_history')
-    .select('id')
+    .select('version')
     .eq('project_id', projectId)
     .order('version', { ascending: false })
     .range(MAX_HISTORY_PER_PROJECT, MAX_HISTORY_PER_PROJECT)
     .maybeSingle()
 
   if (oldest) {
-    await db
+    const { error: pruneError } = await db
       .from('event_history')
       .delete()
       .eq('project_id', projectId)
-      .lt('version', event.version - MAX_HISTORY_PER_PROJECT + 1)
+      .lt('version', oldest.version)
+    if (pruneError) {
+      console.error('[event-history] prune failed', { projectId, error: pruneError })
+    }
   }
 }
 

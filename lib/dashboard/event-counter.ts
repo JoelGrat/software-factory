@@ -11,5 +11,6 @@ export async function nextVersion(db: SupabaseClient, projectId: string): Promis
     p_project_id: projectId,
   })
   if (error) throw error
+  if (data == null) throw new Error('increment_project_event_version returned null')
   return data as number
 }
