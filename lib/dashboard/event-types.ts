@@ -1,5 +1,7 @@
 // lib/dashboard/event-types.ts
 
+import type { AnalysisStatus } from '@/lib/supabase/types'
+
 export type DashboardEventType =
   | 'queued'
   | 'started'
@@ -9,6 +11,9 @@ export type DashboardEventType =
   | 'resync_required'
 
 export type DashboardEventScope = 'analysis' | 'execution' | 'system'
+
+/** Analysis statuses that can appear on a completed snapshot (never pending or running) */
+export type TerminalAnalysisStatus = Exclude<AnalysisStatus, 'pending' | 'running'>
 
 export interface DashboardEvent {
   type: DashboardEventType
@@ -21,6 +26,7 @@ export interface DashboardEvent {
   version: number
   /** Present only on reconstructed lifecycle events — absent on real events */
   synthetic?: true
+  /** Use PayloadFor<T> to narrow payload type by event type in consumers */
   payload: Record<string, unknown>
 }
 
@@ -35,22 +41,28 @@ export interface CompletedPayload {
   snapshot?: AnalysisResultSnapshotData
 }
 
+/** Maps each event type to its expected payload shape */
+export type PayloadFor<T extends DashboardEventType> =
+  T extends 'progress' ? ProgressPayload :
+  T extends 'completed' ? CompletedPayload :
+  Record<string, unknown>
+
 export interface AnalysisResultSnapshotData {
   changeId: string
   version: number
   executionOutcome: 'success' | 'failure'
   snapshotStatus: 'pending_enrichment' | 'ok' | 'enrichment_failed'
   minimal: boolean
-  analysisStatus: 'completed' | 'failed' | 'stalled'
+  analysisStatus: TerminalAnalysisStatus
   stagesCompleted: string[]
   filesModified: string[]
   componentsAffected: string[]
-  jaccard_accuracy: number | null
-  miss_rate: number | null
+  jaccardAccuracy: number | null
+  missRate: number | null
   modelMiss: {
-    missed: Array<{ component_id: string; name: string }>
-    overestimated: Array<{ component_id: string; name: string }>
-    confidence_gap: { predicted: number; actual_severity: 'HIGH' | 'MEDIUM' | 'LOW' } | null
+    missed: Array<{ componentId: string; name: string }>
+    overestimated: Array<{ componentId: string; name: string }>
+    confidenceGap: { predicted: number; actualSeverity: 'HIGH' | 'MEDIUM' | 'LOW' } | null
   } | null
   failureCause: {
     error_type: string
@@ -58,6 +70,6 @@ export interface AnalysisResultSnapshotData {
     parse_confidence: number
     cascade: string[]
   } | null
-  duration_ms: number | null
-  completed_at: string
+  durationMs: number | null
+  completedAt: string
 }
