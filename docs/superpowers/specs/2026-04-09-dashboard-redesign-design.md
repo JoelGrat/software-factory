@@ -159,30 +159,43 @@ RETURNING *
 
 ### Completion write order (enforced)
 
-1. Write `analysis_result_snapshot` (see schema in Section 5)
-2. `UPDATE change_requests SET analysis_status = 'completed', analysis_version = analysis_version + 1`
-3. Emit `{ type: 'completed' }` event
+1. Write minimal snapshot stub to `analysis_result_snapshot` (`minimal: true`, `snapshot_status: 'pending_enrichment'`)
+2. If stub write fails → do not proceed; keep `analysis_status = 'running'`; enqueue retry
+3. `UPDATE change_requests SET analysis_status = 'completed', analysis_version = analysis_version + 1`
+4. Emit `{ type: 'completed' }` event (payload may include full snapshot as optimization)
+5. Enqueue background enrichment job to write full snapshot fields, set `snapshot_status = 'ok'`, `minimal = false`
 
-No other order is valid. Snapshot existence is the canonical completion signal.
+No other order is valid. Stub existence is the canonical completion signal. The UI renders from the stub immediately; enrichment populates details asynchronously.
 
-### Snapshot write failure — separated concerns
+### Snapshot write failure — stub-first approach
 
+The UI must always read from the DB after completion. Event payload is a speed optimization, not a source of truth. To guarantee this, the orchestrator writes in two steps:
+
+**Step 1 — Stub (always succeeds or blocks completion):**
 ```ts
-execution_outcome: 'success' | 'failure'   // what the analysis produced
-snapshot_status:   'ok' | 'failed'          // whether we persisted it
+// Written immediately on analysis completion, before emitting 'completed'
+{
+  changeId,
+  version,
+  execution_outcome: 'success' | 'failure',
+  snapshot_status: 'pending_enrichment',
+  minimal: true,
+  completed_at: now(),
+}
 ```
 
-If snapshot write fails, **Option B** applies (the only internally consistent choice):
+**Step 2 — Enrichment (retried in background):**
+Writes the full snapshot payload (`model_miss`, `jaccard_accuracy`, `miss_rate`, `failure_cause`, etc.) and sets `snapshot_status = 'ok'`.
 
-The `completed` event payload already carries the full `analysis_result_snapshot` structure. The client caches this payload in local state. The UI renders from the event payload until the snapshot persists successfully.
+If Step 1 fails: do not emit `completed`. Keep `analysis_status = 'running'`, enqueue retry. The change is not considered complete until the stub exists in the DB.
 
-- `snapshot_status = 'failed'` written to `change_requests`
-- Background retry enqueued (up to 3 attempts, exponential backoff)
-- On retry success: `snapshot_status = 'ok'`, no further client action needed
-- UI shows: `⚠ Result available but not yet persisted — retrying…`
-- On page refresh before retry succeeds: UI fetches from `/api/change-requests/[id]/result` which returns the in-DB partial state and shows the warning banner
+If Step 2 fails after Step 1 succeeds: stub is in DB, UI renders the minimal state with a banner:
+```
+⚠ Full analysis details are being computed — refresh in a moment
+```
+No event payload fallback. No `/result` endpoint returning partial state. The stub is the floor.
 
-The event payload is explicitly the temporary source of truth until snapshot persists. This is documented in the API contract — not an implementation detail. `execution_outcome` is never altered by a snapshot failure.
+**Result:** the UI always reads from one source — `analysis_result_snapshot`. The `minimal` flag tells the UI which fields are available. `execution_outcome` is never altered by enrichment failure.
 
 ### Model miss computation
 
@@ -263,9 +276,13 @@ The UI is snapshot-first. Events are the fast path. Polling + reconciliation is 
 - `degraded` → SSE failed, polling only
 - `error` → both failed; show static warning banner
 
-### `result_snapshot` mandatory on `completed`
+### `result_snapshot` in `completed` event
 
-The `completed` event payload must include the full `analysis_result_snapshot` structure. The client must not need a follow-up HTTP call to render the completion state. This is also the temporary source of truth if snapshot persistence fails (see Section 2).
+The `completed` event payload may include the full `analysis_result_snapshot` structure as an optimization — allowing the client to render the completed state immediately without a DB fetch. This is an optimization only, not a requirement.
+
+The UI treats the event payload as a hint: if present, render immediately. On next poll or reconciliation check, the DB snapshot takes over as canonical state. If payload is absent (e.g. the enrichment step is still running), the client fetches the stub from the DB and renders the minimal completion state.
+
+The client never renders from event payload beyond the current session. A page refresh always reads from `analysis_result_snapshot`.
 
 ---
 
@@ -728,7 +745,8 @@ UI rule: if `analysis_result_snapshot` exists → ignore `change_requests.status
   changeId: string
   version: number
   execution_outcome: 'success' | 'failure'
-  snapshot_status: 'ok' | 'failed'
+  snapshot_status: 'pending_enrichment' | 'ok' | 'enrichment_failed'
+  minimal: boolean          // true = stub only; false = fully enriched
   analysis_status: 'completed' | 'failed' | 'stalled'
   stages_completed: string[]
   files_modified: string[]       // excludes test fixtures + generated files
