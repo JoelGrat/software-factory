@@ -13,6 +13,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id: projectId } = await params
+  // NOTE: createClient() must be called in the synchronous request handler scope,
+  // not inside ReadableStream.start() — cookies() is only available synchronously.
   const db = createClient()
   const { data: { user } } = await db.auth.getUser()
   if (!user) return new Response('Unauthorized', { status: 401 })
@@ -26,93 +28,124 @@ export async function GET(
     .single()
   if (!project) return new Response('Not found', { status: 404 })
 
-  const sinceVersion = Number(new URL(req.url).searchParams.get('since') ?? '0')
+  const raw = new URL(req.url).searchParams.get('since')
+  const sinceVersion = raw !== null && /^\d+$/.test(raw) ? Number(raw) : 0
   const adminDb = createAdminClient()
 
   const stream = new ReadableStream({
     async start(controller) {
-      function send(event: DashboardEvent | { type: 'heartbeat' }) {
-        try {
-          controller.enqueue(`event: dashboard\ndata: ${JSON.stringify(event)}\n\n`)
-        } catch {
-          // client disconnected
+      let unsub: (() => void) | undefined
+      let heartbeat: ReturnType<typeof setInterval> | undefined
+
+      try {
+        const sentVersions = new Set<number>()
+
+        function send(event: DashboardEvent) {
+          // Skip synthetic events' version dedup (they use version: 0)
+          if (event.version > 0 && sentVersions.has(event.version)) return
+          if (event.version > 0) sentVersions.add(event.version)
+          try {
+            controller.enqueue(`event: dashboard\ndata: ${JSON.stringify(event)}\n\n`)
+          } catch {
+            // client disconnected
+          }
         }
-      }
 
-      // 1. Replay missed events if reconnecting
-      if (sinceVersion > 0) {
-        const missed = await getEventsSince(adminDb, projectId, sinceVersion)
-        if (missed === null) {
-          // Client is behind the buffer — send resync
-          send({
-            type: 'resync_required',
-            scope: 'system',
-            changeId: '',
-            projectId,
-            analysisVersion: 0,
-            version: 0,
-            payload: {},
-          } as DashboardEvent)
-        } else {
-          for (const e of missed) send(e)
-        }
-      }
+        // Buffer events that arrive during replay
+        let replayComplete = false
+        const pendingBuffer: DashboardEvent[] = []
 
-      // 2. Reconstruct synthetic lifecycle for any currently-running change
-      const { data: runningChanges } = await adminDb
-        .from('change_requests')
-        .select('id, analysis_version, analysis_status, last_stage_started_at, expected_stage_duration_ms')
-        .eq('project_id', projectId)
-        .eq('analysis_status', 'running')
+        // 1. Subscribe FIRST to avoid missing events during replay
+        unsub = subscribeToDashboard(projectId, (e) => {
+          if (!replayComplete) {
+            pendingBuffer.push(e)
+          } else {
+            send(e)
+          }
+        })
 
-      for (const change of runningChanges ?? []) {
-        // Check for stall
-        if (isStalled({
-          last_stage_started_at: change.last_stage_started_at ? new Date(change.last_stage_started_at) : null,
-          expected_stage_duration_ms: change.expected_stage_duration_ms,
-        })) {
-          await adminDb
-            .from('change_requests')
-            .update({ analysis_status: 'stalled' })
-            .eq('id', change.id)
-            .eq('analysis_status', 'running')
-          send({
-            type: 'stalled', scope: 'analysis',
-            changeId: change.id, projectId,
-            analysisVersion: change.analysis_version, version: 0,
-            synthetic: true, payload: {},
-          } as DashboardEvent)
-        } else {
-          // Emit synthetic queued → started sequence
-          for (const type of ['queued', 'started'] as const) {
+        // 2. Replay missed events if reconnecting
+        if (sinceVersion > 0) {
+          const missed = await getEventsSince(adminDb, projectId, sinceVersion)
+          if (missed === null) {
             send({
-              type, scope: 'analysis',
+              type: 'resync_required',
+              scope: 'system',
+              changeId: '',
+              projectId,
+              analysisVersion: 0,
+              version: 0,
+              payload: {},
+            })
+          } else {
+            for (const e of missed) send(e)
+          }
+        }
+
+        // 3. Reconstruct synthetic lifecycle for currently-running changes
+        const { data: runningChanges } = await adminDb
+          .from('change_requests')
+          .select('id, analysis_version, analysis_status, last_stage_started_at, expected_stage_duration_ms')
+          .eq('project_id', projectId)
+          .eq('analysis_status', 'running')
+
+        for (const change of runningChanges ?? []) {
+          if (isStalled({
+            last_stage_started_at: change.last_stage_started_at ? new Date(change.last_stage_started_at) : null,
+            expected_stage_duration_ms: change.expected_stage_duration_ms,
+          })) {
+            const { error: stallErr } = await adminDb
+              .from('change_requests')
+              .update({ analysis_status: 'stalled' })
+              .eq('id', change.id)
+              .eq('analysis_status', 'running')
+            if (stallErr) {
+              console.error('[dashboard-stream] stall update failed', { changeId: change.id, error: stallErr })
+            }
+            send({
+              type: 'stalled', scope: 'analysis',
               changeId: change.id, projectId,
               analysisVersion: change.analysis_version, version: 0,
               synthetic: true, payload: {},
-            } as DashboardEvent)
+            })
+          } else {
+            for (const type of ['queued', 'started'] as const) {
+              send({
+                type, scope: 'analysis',
+                changeId: change.id, projectId,
+                analysisVersion: change.analysis_version, version: 0,
+                synthetic: true, payload: {},
+              })
+            }
           }
         }
-      }
 
-      // 3. Subscribe to live events
-      const unsub = subscribeToDashboard(projectId, send)
+        // 4. Replay done — flush buffered events and go live
+        replayComplete = true
+        for (const e of pendingBuffer) send(e)
 
-      // 4. Heartbeat every 25s
-      const heartbeat = setInterval(() => {
-        try {
-          controller.enqueue(': heartbeat\n\n')
-        } catch {
+        // 5. Heartbeat every 25s
+        heartbeat = setInterval(() => {
+          try {
+            controller.enqueue(': heartbeat\n\n')
+          } catch {
+            clearInterval(heartbeat)
+          }
+        }, 25_000)
+
+        // 6. Cleanup on disconnect
+        req.signal.addEventListener('abort', () => {
           clearInterval(heartbeat)
-        }
-      }, 25_000)
+          unsub?.()
+          try { controller.close() } catch { /* already closed */ }
+        })
 
-      // 5. Cleanup on disconnect
-      req.signal.addEventListener('abort', () => {
-        clearInterval(heartbeat)
-        unsub()
-        try { controller.close() } catch { /* already closed */ }
-      })
+      } catch (err) {
+        // Unhandled error during setup — close stream
+        unsub?.()
+        if (heartbeat !== undefined) clearInterval(heartbeat)
+        try { controller.error(err) } catch { /* already errored or closed */ }
+      }
     },
   })
 
