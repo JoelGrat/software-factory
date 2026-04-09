@@ -1,6 +1,6 @@
 // tests/lib/dashboard/snapshot-writer.test.ts
 import { describe, it, expect, vi } from 'vitest'
-import { writeStub, enrichSnapshot } from '@/lib/dashboard/snapshot-writer'
+import { writeStub, enrichSnapshot, markEnrichmentFailed } from '@/lib/dashboard/snapshot-writer'
 import type { AnalysisResultSnapshotData } from '@/lib/dashboard/event-types'
 
 const mockInsert = vi.fn().mockReturnValue({ error: null })
@@ -44,5 +44,26 @@ describe('enrichSnapshot', () => {
     const updated = mockUpdate.mock.calls[0][0]
     expect(updated.snapshot_status).toBe('ok')
     expect(updated.minimal).toBe(false)
+    expect(eqMock).toHaveBeenCalledWith('change_id', 'c1')
+  })
+})
+
+describe('markEnrichmentFailed', () => {
+  it('updates snapshot_status to enrichment_failed', async () => {
+    const eqMock = vi.fn().mockReturnValue({ error: null })
+    mockUpdate.mockReturnValueOnce({ eq: eqMock })
+    await markEnrichmentFailed(mockDb, 'c1')
+    const updated = mockUpdate.mock.calls[mockUpdate.mock.calls.length - 1][0]
+    expect(updated.snapshot_status).toBe('enrichment_failed')
+    expect(eqMock).toHaveBeenCalledWith('change_id', 'c1')
+  })
+
+  it('logs error if update fails (does not throw)', async () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const eqMock = vi.fn().mockReturnValue({ error: new Error('db failure') })
+    mockUpdate.mockReturnValueOnce({ eq: eqMock })
+    await expect(markEnrichmentFailed(mockDb, 'c1')).resolves.toBeUndefined()
+    expect(consoleSpy).toHaveBeenCalled()
+    consoleSpy.mockRestore()
   })
 })

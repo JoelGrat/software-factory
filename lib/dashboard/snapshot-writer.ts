@@ -2,6 +2,18 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { AnalysisResultSnapshotData } from './event-types'
 
+/** The fields that can be written during enrichment — excludes identity and status fields */
+type EnrichmentPayload = Pick<AnalysisResultSnapshotData,
+  | 'stagesCompleted'
+  | 'filesModified'
+  | 'componentsAffected'
+  | 'jaccardAccuracy'
+  | 'missRate'
+  | 'modelMiss'
+  | 'failureCause'
+  | 'durationMs'
+>
+
 /**
  * Step 1 of stub-first completion: write a minimal snapshot row immediately.
  * This is the canonical completion signal. If this fails, do NOT proceed to
@@ -37,7 +49,7 @@ export async function writeStub(
 export async function enrichSnapshot(
   db: SupabaseClient,
   changeId: string,
-  data: Partial<AnalysisResultSnapshotData>
+  data: Partial<EnrichmentPayload>
 ): Promise<void> {
   const { error } = await db
     .from('analysis_result_snapshot')
@@ -65,8 +77,11 @@ export async function markEnrichmentFailed(
   db: SupabaseClient,
   changeId: string
 ): Promise<void> {
-  await db
+  const { error } = await db
     .from('analysis_result_snapshot')
     .update({ snapshot_status: 'enrichment_failed' })
     .eq('change_id', changeId)
+  if (error) {
+    console.error('[snapshot-writer] markEnrichmentFailed failed', { changeId, error })
+  }
 }
