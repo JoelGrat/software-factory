@@ -1,0 +1,771 @@
+# Dashboard Redesign — Design Spec
+
+**Date:** 2026-04-09
+**Status:** Approved
+
+---
+
+## Purpose
+
+Redesign the project dashboard from a static metrics page into a real-time decision surface. Every section answers a specific question. Together they tell the user: what is happening, what went wrong, what to do next, and whether the system is improving.
+
+The dashboard is the primary entry point for all change work. It must load fast, stay live, and never show stale state.
+
+---
+
+## Architecture overview
+
+**Read path:** all sections read from precomputed snapshots — zero joins at render time. Background jobs write to `risk_scores`, `action_items`, and `system_signal_snapshot` after each analysis completion and on a nightly recalc.
+
+**Live path:** a single SSE stream per project (`/api/projects/[id]/dashboard-stream`) delivers versioned `DashboardEvent`s. All sections subscribe to the same stream and filter by `scope`.
+
+**Write path:** Quick Start creates a change record, triggers the analysis orchestrator, which emits events through an in-memory EventEmitter event bus. On completion it writes `analysis_result_snapshot`, then updates `change_requests.status`.
+
+---
+
+## Section 1 — Event bus and analysis state machine
+
+### Event model
+
+One event model across the whole system — no forks:
+
+```ts
+type DashboardEvent = {
+  type: 'queued' | 'started' | 'progress' | 'completed' | 'stalled' | 'resync_required'
+  scope: 'analysis' | 'execution' | 'system'
+  changeId: string
+  version: number           // separate DB column, incremented atomically on each write
+  payload: Record<string, unknown>
+}
+```
+
+`version` is strictly monotonic. Never set to an absolute value — always incremented relative to current. Events with `version ≤ client's last-seen version` are dropped client-side.
+
+### Event bus
+
+In-memory `EventEmitter` (Node.js built-in), one instance per server process. Not Redis, not Supabase Realtime. Acceptable because:
+- All SSE connections are on the same process in this deployment
+- No persistence needed — `event_history` table handles replay
+
+Interface:
+
+```ts
+interface EventBus {
+  emit(projectId: string, event: DashboardEvent): void
+  subscribe(projectId: string, handler: (e: DashboardEvent) => void): () => void  // returns unsubscribe
+}
+```
+
+### Analysis state machine
+
+Two independent state machines on `change_requests`:
+
+**`analysis_status`:** `pending → running → completed | failed | stalled`
+**`change_status`:** independent lifecycle (draft, review, merged, etc.)
+
+Transitions are atomic: `UPDATE change_requests SET analysis_status = 'running' WHERE id = $1 AND analysis_status = 'pending' RETURNING *`. If zero rows returned, another process already claimed it — abort silently.
+
+### Synthetic event reconstruction
+
+On SSE connect, the server reconstructs the full synthetic lifecycle for any `running` change:
+
+1. Read `change_requests` for current `analysis_status` and `last_stage`
+2. Emit synthetic `queued` → `started` → `progress` events in order
+3. Client never receives a `progress` event without first seeing `started`
+
+This guarantees correct client state after reconnects.
+
+### Idempotency and terminal events
+
+`completed` and `failed` are terminal. Once emitted, they are never re-emitted for the same `changeId`. Enforced by checking `analysis_result_snapshot` existence before emitting.
+
+Version is written to a separate column, not embedded in the JSON payload, so it can be indexed and compared efficiently.
+
+### Watchdog
+
+Pure function — one implementation, called from three places:
+
+```ts
+function isStalled(change: ChangeRow, medianStageDuration: number | null): boolean {
+  const threshold = medianStageDuration != null
+    ? 2 * medianStageDuration
+    : 10 * 60 * 1000
+  return Date.now() - change.last_log_at > threshold
+}
+```
+
+Called from:
+- SSE connect (checks all `running` changes for the project)
+- Dashboard page load (server-side)
+- Background job (every 5 minutes)
+
+On stall detected: `UPDATE change_requests SET analysis_status = 'stalled'`, write to `event_history`, emit `{ type: 'stalled', scope: 'analysis' }`.
+
+---
+
+## Section 2 — Analysis orchestrator
+
+### Stage isolation
+
+Each stage runs in its own try/catch. A stage failure sets `stage_status = 'failed'` and records `failure_reason` without killing subsequent stages unless they depend on the failed one.
+
+### Progress events
+
+`pct` in progress events is derived from actual stage completion, not a fake timer:
+
+```ts
+const STAGE_WEIGHTS: Record<string, number> = {
+  context_load: 10,
+  impact_analysis: 25,
+  patch_generation: 35,
+  type_check: 15,
+  test_run: 15,
+}
+```
+
+`pct` = sum of weights of completed stages. Never emits the same `pct` twice. Never goes backwards.
+
+### Atomic DB transition on start
+
+```sql
+UPDATE change_requests
+SET analysis_status = 'running', analysis_version = analysis_version + 1, started_at = now()
+WHERE id = $1 AND analysis_status = 'pending'
+RETURNING *
+```
+
+`analysis_version` is a run counter on `change_requests` (not the same as event `version`). It resets to 0 when a new execution is initiated, so events from different runs are distinguishable. Event `version` on `DashboardEvent` is separately maintained and strictly monotonic — it never resets.
+
+### Completion write order (enforced)
+
+1. Write `analysis_result_snapshot` (see schema in Section 5)
+2. `UPDATE change_requests SET analysis_status = 'completed', analysis_version = analysis_version + 1`
+3. Emit `{ type: 'completed' }` event
+
+No other order is valid. Snapshot existence is the canonical completion signal.
+
+### Snapshot write failure — separated concerns
+
+```ts
+execution_outcome: 'success' | 'failure'   // what the analysis produced
+snapshot_status:   'ok' | 'failed'          // whether we persisted it
+```
+
+If snapshot write fails:
+- `execution_outcome` unchanged
+- `snapshot_status = 'failed'` written to `change_requests`
+- Background retry enqueued (up to 3 attempts, exponential backoff)
+- UI shows: `⚠ Result available but failed to persist — retrying…`
+
+A snapshot failure never marks an execution as failed. They are orthogonal.
+
+### Model miss computation
+
+```ts
+miss_rate = |missed| / |actual_affected|   // fraction of real impact the model failed to predict
+jaccard_accuracy = |predicted ∩ actual| / |predicted ∪ actual|
+```
+
+Both stored in `analysis_result_snapshot`. Both tracked per execution, aggregated in `system_signal_snapshot`.
+
+Weighted miss rate (for System Signals display): missed components weighted by `dependency_centrality` (downstream edge count), normalized.
+
+### Failure cause parsing — safety rule
+
+Structured cause is only shown in the UI when:
+- Component name matches `system_components.name` exactly or with ≥90% string similarity
+- AND error type maps unambiguously to a known class (`missing_dependency` / `type_error` / `test_failure` / `timeout`)
+
+`parse_confidence` is stored in `failure_cause`. If below threshold → UI renders `Cause: unclear — see execution log`.
+
+---
+
+## Section 3 — SSE stream and client hook
+
+### Endpoint: `/api/projects/[id]/dashboard-stream`
+
+- One connection per project (not per change)
+- Named SSE events: `event: dashboard\ndata: {...}\n\n`
+- Heartbeat every 25s
+- On connect: synthetic lifecycle reconstruction for any `running` change (see Section 1)
+- On reconnect: client sends `?since=<version>`
+
+### Replay rules
+
+| Condition | Behavior |
+|---|---|
+| `since_version ≥ oldest in event_history` | Replay missed events |
+| `since_version < oldest` (behind buffer) | Emit `{ type: 'resync_required' }`, no replay |
+
+Client on `resync_required`: drops SSE state, refetches full dashboard via HTTP, reconnects with latest version.
+
+`event_history`: 500 events per project ring buffer. Columns: `(project_id, version, event_json, created_at)`.
+
+### Backpressure
+
+If client read speed falls behind emit speed (buffer fills), the connection is closed server-side. Client reconnects normally. No silent data loss.
+
+### `useAnalysisStream` hook
+
+```ts
+function useAnalysisStream(projectId: string): {
+  events: DashboardEvent[]
+  connectionState: 'connecting' | 'connected' | 'polling' | 'error'
+}
+```
+
+- Primary: SSE
+- Fallback: polling `/api/projects/[id]/dashboard-poll` every 5s if SSE fails after 3 attempts
+- On `resync_required`: triggers full HTTP refetch, resets event buffer
+- Deduplicates by `version` — drops any event with version ≤ last seen
+
+### `result_snapshot` mandatory on `completed`
+
+The `completed` event payload must include the full `analysis_result_snapshot`. The client must not need a follow-up HTTP call to render the completion state.
+
+---
+
+## Section 4a — Active Changes
+
+### Card states
+
+```
+initializing  → Optimistic card, pre-POST
+queued        → "Queued…" — change created, orchestrator not yet claimed
+analyzing     → "Analyzing…" with stage label and progress bar
+executing     → "Executing changes…" with file list
+stalled       → "⚠ Stalled — no progress for {N} minutes"
+completed     → Outcome row (success/failure)
+```
+
+### Progress bar
+
+Driven by stage `pct` (0–100, derived from stage weights). Never fake. Never goes backwards.
+
+### Snapshot-driven rendering
+
+Once `analysis_result_snapshot` exists → ignore `change_requests` for state. Snapshot presence = completed. No dual-source flicker.
+
+### "Edit after start" affordance
+
+Available while `analysis_status` is `queued` or `analyzing` (before first patch applied). Opens Quick Start panel pre-filled. Saving cancels current execution, restarts with new inputs. Disabled once patching begins.
+
+---
+
+## Section 4b — Recent Outcomes
+
+### Purpose
+
+"Why should I trust the next analysis?" — trust signal, not a log.
+
+### Card anatomy
+
+**Failed:**
+```
+❌ FAILED  HIGH IMPACT                        Auth Service  ·  2h ago
+
+Primary cause: missing_dependency → AuthService (lib/auth/session.ts)
+Also affected: TokenRefresh (cascade)
+
+Missed (unexpected impact): AuthService, TokenRefresh
+Overestimated (false positives): PaymentFlow
+Confidence gap: Predicted 79% → Actual: HIGH impact
+
+Suggestion (primary):
+  Add dependency mapping: AuthService → app/api/auth
+  (Import or explicitly register this dependency)
+  Addresses 2 of 4 missed components (~50%)
+
+Also consider:
+  ▸ Add runtime import tracking for TokenRefresh
+
+✓ Learning applied — dependency edge added
+  (impact reduced from 4 → 1 affected components)
+
+Prediction accuracy: 79%  ·  Miss rate: 50% (missed 2 of 4 affected components)
+```
+
+**Successful:**
+```
+✓ Applied                                     Payment Flow  ·  5h ago
+Prediction accuracy: 86%  ·  Miss rate: 0% (all 3 components predicted correctly)
+Model prediction held — safe to proceed with similar changes
+```
+
+### Severity badge
+
+`HIGH IMPACT` / `MEDIUM` / `LOW` derived from: `confidence_error.actual_severity` if present, else component count (≥4 = HIGH, 2–3 = MEDIUM, ≤1 = LOW).
+
+### Model miss buckets
+
+- **Missed (unexpected impact):** components the model said were safe, actually affected
+- **Overestimated (false positives):** flagged as risky, untouched
+- **Confidence gap (prediction mismatch):** always shows delta — `Predicted {N}% → Actual: {HIGH/MEDIUM/LOW} impact`
+
+### Cause parsing — safety rule
+
+See Section 2. If `parse_confidence` below threshold → `Cause: unclear — see execution log`. Never show a wrong cause.
+
+Primary cause + cascade: `Primary cause: {error_type} → {component}` + `Also affected: {name} (cascade)`.
+
+### Suggestions
+
+One primary, one optional secondary (collapsed). Phrasing bridges system model to code:
+```
+Add dependency mapping: {Source} → {Target}
+(Import or explicitly register this dependency)
+Addresses {N} of {M} missed components (~{pct}%)
+```
+
+Risk reduction phrasing is tied to observed miss, not future certainty.
+
+### "Learning applied" states
+
+- Applied + subsequent success: `✓ Learning applied — dependency edge added (impact reduced from 4 → 1 affected components)`
+- Applied + not yet re-run: `⏳ Learning pending — will validate on next execution of AuthService`
+- Applied + subsequent failure: signal suppressed — don't mislead
+
+### Pattern banner
+
+Threshold: ≥2 failures sharing same `error_type` AND ≥40% of last 10 executions.
+
+```
+⚠ Recurring issue (HIGH IMPACT): missing_dependency
+  This pattern caused 3 failures in the last 7 days — AuthService, TokenRefresh
+
+  [ View in System Model → ]    [ Create Fix Change → ]
+```
+
+`[ Create Fix Change → ]` pre-fills Quick Start with the most common suggestion from affected cards.
+
+### Metrics
+
+Both tracked per execution:
+- `jaccard_accuracy = |predicted ∩ actual| / |predicted ∪ actual|`
+- `miss_rate = |missed| / |actual|` — what fraction of real impact the model failed to predict
+
+Rendered per card as: `Miss rate: 50% (missed 2 of 4 affected components)`.
+
+### Display
+
+Last 5 outcomes by default, "Show more" loads next 10. Most recent first. Components with <2 observations excluded from pattern detection.
+
+---
+
+## Section 4c — Risk Radar
+
+### Scoring formula
+
+```
+risk_score =
+  0.60 * normalized(miss_rate * recency_weight)
++ 0.10 * normalized(miss_frequency * recency_weight)
++ 0.15 * normalized(dependency_centrality)
++ 0.10 * normalized(change_frequency_30d)
++ 0.05 * (1 - normalized_confidence)
+```
+
+`recency_weight = e^(-days_since_last_miss / 7)` — a miss from yesterday scores ~7x higher than one 3 weeks ago.
+
+All inputs normalized to [0, 1] per component relative to project max. Confidence capped at 5% weight.
+
+**Minimum evidence gate:** components with fewer than 2 execution observations excluded entirely.
+
+**Severity bands:** `≥0.7` = HIGH (red), `0.4–0.69` = MEDIUM (amber), `<0.4` excluded from radar.
+
+**Severity cap:** max 2 HIGH items. If 3+ qualify, lowest-scoring HIGH downgraded to MEDIUM.
+
+### Risk card
+
+```
+⚠ lib/supabase/server                         HIGH RISK  ↑ worsening
+
+Why this ranks high:
+  · Missed in 3 of last 5 changes involving this component
+  · Low model confidence: 52%
+  · Shared by 4 components (high centrality)
+
+If it fails again:
+  API layer, Auth, Session — likely affected
+
+  [ Stabilize Component ]    [ View in System Model → ]
+```
+
+Trend indicator (`↑ worsening` / `→ stable` / `↓ improving`): current `risk_score` vs score 7 days ago. Worsening = score increased ≥10 points.
+
+`[ Stabilize Component ]` pre-fills Quick Start with intent: `"Improve model coverage and dependency mapping for {component_name}"`.
+
+### Display
+
+Top 5 by `risk_score`. If fewer than 3 exceed threshold: `"No high-risk components detected — model coverage looks healthy"`.
+
+### Computation
+
+Scores written to `risk_scores` table on analysis completion + nightly recalc. Dashboard reads from `risk_scores` — zero runtime aggregation.
+
+---
+
+## Section 4d — Next Best Actions
+
+### Ranking model
+
+Tiers set category. Within tier, priority score breaks ties:
+
+```
+priority = 0.5 * normalized(impact_components)
+         + 0.3 * normalized(failure_frequency)
+         + 0.2 * normalized(recency)    // e^(-hours_since / 24)
+```
+
+**Severity cap:** max 2 HIGH items. If everything is HIGH, nothing is.
+
+### Action tiers
+
+**Tier 1 — Failure-derived (always surfaces first):**
+- Pattern banner threshold crossed → "Fix recurring `missing_dependency` in AuthService"
+- HIGH RISK component (`risk_score ≥ 0.7`) with no active change → "Stabilize lib/supabase/server — missed in 3 of last 5 runs"
+- Active change stalled → "Review stalled execution: Payment Flow"
+
+**Tier 2 — Model quality:**
+- Component with `confidence < 40` and `miss_rate > 0` → "Fix AuthService boundary — miss rate ↑ 20% this week"
+- `miss_rate` project-wide trending up ≥10 points over 7 days → "Model accuracy declining in AuthService"
+
+**Tier 3 — Opportunity:**
+- Unanchored high-centrality components → "Anchor UserSession — referenced by 6 components"
+- Project idle ≥14 days → "No changes in 14 days — system model may be drifting"
+
+### Stall detection
+
+Stalled if: no `execution_logs` write for `>2× median stage duration` (project history). Fallback: 10 minutes if fewer than 3 completed executions. Same `isStalled()` function as Section 1 watchdog.
+
+### Deduplication and merge
+
+When a component qualifies from multiple sources, one card shown at highest tier with all signals listed:
+
+```
+1  ⚠ Stabilize lib/supabase/server         HIGH · Pattern + Risk Radar
+
+   Missed in 3 of last 5 runs (last failure 2h ago)
+   Confidence dropped 62% → 38% across last 3 changes
+   Affects 4 downstream components
+
+   Expected outcome:
+   → Reduces failure risk across API, Auth, Session flows
+   → Addresses 2 of 3 recent pattern failures
+
+   [ Stabilize Component ]    [ View in System Model → ]
+```
+
+### Healthy state (Tier 3 only)
+
+```
+System looks healthy — optimize next:
+
+○ Anchor UserSession boundary   · referenced by 6 components
+○ Review idle components        · 3 components unchanged for 30 days
+```
+
+### Behavior
+
+- Max 5 items shown
+- One primary CTA per item, secondary link always present but visually subordinate
+- Auto-dismiss when underlying signal resolves — no manual dismissal
+- Written to `action_items` table on analysis completion + nightly recalc
+
+---
+
+## Section 4e — Quick Start
+
+### Form
+
+Inline slide-in panel (never a new page). Always one screen.
+
+Fields:
+- **Intent** — single free-text field. Placeholder: `e.g. "Add dependency mapping between AuthService and API layer"`. If fewer than 15 characters or no component/action signal: nudge `"Add more detail for better analysis"` — not a block.
+- **Affected components** — multi-select from project system model. Fuzzy search, shows `confidence` score.
+- **Priority** — High / Medium / Low. Defaults from triggering signal.
+- **Risk level** — defaults from system signal. Always overridable.
+
+### Context-aware pre-fill
+
+CTAs throughout the dashboard (`[ Create Fix Change → ]`, `[ Stabilize Component ]`) open Quick Start with intent and components pre-filled from the triggering signal.
+
+### Risk override — explicit
+
+When user downgrades from system-derived risk level:
+```
+Risk: HIGH (from system) → LOW
+⚠ You are overriding the system risk assessment for this change
+```
+Persistent inline warning while overridden. Not a block.
+
+### Component/intent mismatch
+
+On blur from intent field: if intent text references a component name not in selected set:
+```
+Intent mentions "AuthService" but it's not selected
+[ Add AuthService ]    [ Ignore ]
+```
+One banner, not per-component. Ignorable.
+
+### Impact preview
+
+On first component selection (or pre-fill), cached impact estimate loads inline from `analysis_result_snapshot` component graph — no new analysis triggered:
+```
+Impact preview:
+· 5 components in scope (AuthService, API, Session + 2 more)
+· Touches 1 high-risk area
+```
+If no cached data: section omitted silently.
+
+### Conditional friction
+
+If `risk_level = HIGH` OR `impact_components ≥ 4`:
+```
+⚠ This change affects 5 components and includes high-risk areas (AuthService)
+
+[ Start anyway ]    [ Review first ]
+```
+Replaces normal action row. One extra click only when it matters.
+
+### Execution flow and optimistic insert
+
+Client generates `client_request_id` (UUID) before POST, sent as `X-Client-Request-Id` header, stored in `change_requests.client_request_id`. Active Changes card keyed by `client_request_id` until POST returns real `changeId`. SSE events arriving before POST response are buffered by `changeId` and applied once mapping is established.
+
+States:
+1. Card appears: `Initializing…`
+2. First log write: `Analyzing…`
+3. POST fails within 5s: card removed, toast shown
+
+### Edit after start
+
+Available while `analysis_status` is `queued` or `analyzing` (before first patch applied). Opens panel pre-filled. Saving cancels current execution, restarts. Disabled once patching begins.
+
+---
+
+## Section 4f — System Signals
+
+### Overall System State banner
+
+At top of section, always visible:
+
+```
+System status: Improving  ↑
+Accuracy up, miss rate falling, execution healthy
+```
+
+Or `Degrading` / `Mixed`. Derived from accuracy delta (7d) + miss rate delta (7d) + execution success rate. All three negative = Degrading. Mixed = Mixed. All positive/stable = Improving.
+
+### Four panels
+
+| Panel | Primary metric | Sub-signal |
+|---|---|---|
+| Model Accuracy (7d) | Jaccard avg | `Based on {N} runs · avg impact: {X} components` |
+| Weighted Miss Rate (7d) | `weighted_miss_rate` | Raw miss rate + miss type split |
+| Execution Health (7d) | Success / Failure / Stall rates | Avg execution time (with `⚠` if delta ≥ 30s) |
+| Coverage Quality | Avg confidence vs target ≥70% | Components below threshold, unanchored count |
+
+**Trend arrows:** only shown when `abs(delta) ≥ 5%`. Otherwise: `~ stable`.
+
+### Model Accuracy (expanded)
+
+Sparkline: 7-day window, one point per execution. Colored by accuracy band: green (>80%), amber (50–80%), red (<50%). Not by outcome — aligns with model quality. Hover: `{Component} · {pct}% · {time}`. If accuracy delta ≤ -10 over 7 days: panel turns amber, Tier 2 action surfaced in Next Best Actions.
+
+### Weighted Miss Rate (expanded)
+
+```
+Raw miss rate: 18%
+Weighted miss rate: 24%  (higher-centrality components weighted up)
+
+Top missed: lib/supabase/server (3/5 runs, centrality: 8) · AuthService (2/5)
+
+Miss type split:
+  Unexpected impact: 68%  ·  Overestimated: 22%  ·  Confidence gap: 10%
+```
+
+Same language as Section 4b model miss buckets — consistent mental model.
+
+### Execution Health (expanded)
+
+```
+Success rate: 78%  (7 of 9)
+Failure rate: 11%  (1 — type error)
+Stall rate:   11%  (1 — exceeded 2× avg duration)
+
+⚠ Avg execution time: 4m 12s  (↑ +38s vs prior week)
+```
+
+**Source:** `execution_logs` + `change_requests` — separate from analysis metrics.
+
+### Coverage Quality (expanded)
+
+```
+64% avg confidence (target ≥70%)
+
+Below threshold (<60%):
+  · lib/supabase/server   38%
+  · TokenRefresh          44%
+
+Unanchored high-centrality: 2 components
+```
+
+Target line (≥70%) makes the number actionable.
+
+### Computation sources
+
+- Analysis metrics (accuracy, miss rate, coverage): `analysis_result_snapshot`
+- Execution metrics (health, timing): `execution_logs` + `change_requests`
+- Aggregated into: `system_signal_snapshot` (one row per project)
+- Updated: on analysis completion + nightly recalc
+
+---
+
+## Section 5 — Dashboard-first flow (unified backend)
+
+### Canonical state rule
+
+| Phase | Source of truth |
+|---|---|
+| During analysis | `change_requests` (status, progress) |
+| After completion | `analysis_result_snapshot` |
+
+Completion write order enforced:
+1. Write `analysis_result_snapshot`
+2. `UPDATE change_requests SET analysis_status = 'completed'`
+3. Emit `{ type: 'completed' }` event
+
+UI rule: if `analysis_result_snapshot` exists → ignore `change_requests.status` for rendering.
+
+### Full lifecycle
+
+```
+1.  User clicks [ Start Execution → ] in Quick Start
+2.  Optimistic card: "Initializing…" (keyed by client_request_id)
+3.  POST /api/change-requests → creates change_requests row (status: pending)
+4.  POST /api/change-requests/[id]/execute → triggers orchestrator
+5.  Orchestrator: atomic UPDATE pending → running
+6.  Event bus emits: { type: 'started', version: 1 }
+7.  SSE delivers to client → card: "Analyzing…"
+8.  Stage progress events (version: 2, 3…)
+9.  Completion: write snapshot → update change_requests → emit completed(version: N)
+10. Active Changes card transitions to outcome row
+11. Recent Outcomes: new card prepended
+12. Risk Radar / Actions / Signals: async recompute via background job
+```
+
+### Section refresh on completion
+
+| Section | Mechanism |
+|---|---|
+| Active Changes | Event-driven: SSE `completed` event |
+| Recent Outcomes | Append: new snapshot prepended on `completed` |
+| Risk Radar | Async: background job writes `risk_scores` |
+| Next Best Actions | Async: same job writes `action_items` |
+| System Signals | Async: updates `system_signal_snapshot`, available on next load |
+
+### `analysis_result_snapshot` schema
+
+```ts
+{
+  changeId: string
+  version: number
+  execution_outcome: 'success' | 'failure'
+  snapshot_status: 'ok' | 'failed'
+  analysis_status: 'completed' | 'failed' | 'stalled'
+  stages_completed: string[]
+  files_modified: string[]       // excludes test fixtures + generated files
+  components_affected: string[]
+  jaccard_accuracy: number
+  miss_rate: number
+  model_miss: {
+    missed:        Array<{ component_id: string; name: string }>
+    overestimated: Array<{ component_id: string; name: string }>
+    confidence_gap: { predicted: number; actual_severity: 'HIGH' | 'MEDIUM' | 'LOW' } | null
+  }
+  failure_cause: {
+    error_type: string
+    component_id: string | null
+    parse_confidence: number
+    cascade: string[]
+  } | null
+  duration_ms: number
+  completed_at: string
+}
+```
+
+`missed_components` and `overestimated_components` as top-level arrays are removed — derived from `model_miss` where needed.
+
+### New DB tables
+
+Migration: `supabase/migrations/016_dashboard_signals.sql`
+
+```sql
+-- SSE event replay buffer
+event_history (
+  project_id uuid,
+  version     bigint,
+  event_json  jsonb,
+  created_at  timestamptz
+)
+-- 500-event ring buffer per project
+
+-- Risk Radar precomputed scores
+risk_scores (
+  component_id uuid,
+  project_id   uuid,
+  risk_score   numeric,
+  tier         text,   -- 'HIGH' | 'MEDIUM'
+  computed_at  timestamptz
+)
+
+-- Next Best Actions precomputed items
+action_items (
+  project_id     uuid,
+  tier           int,
+  priority_score numeric,
+  source         text,
+  payload_json   jsonb,
+  resolved_at    timestamptz
+)
+
+-- System Signals aggregate snapshot
+system_signal_snapshot (
+  project_id   uuid PRIMARY KEY,
+  payload_json jsonb,
+  computed_at  timestamptz
+)
+
+-- Extended: analysis_result_snapshot gains:
+--   execution_outcome, snapshot_status, model_miss (replaces flat arrays)
+```
+
+### SSE replay rules
+
+| Condition | Behavior |
+|---|---|
+| `since_version ≥ oldest in event_history` | Replay missed events |
+| `since_version < oldest` | Emit `{ type: 'resync_required' }`, no replay |
+
+Client on `resync_required`: drops SSE state, full HTTP refetch, reconnects with latest version.
+
+### Watchdog — pure function
+
+```ts
+function isStalled(change: ChangeRow, medianStageDuration: number | null): boolean {
+  const threshold = medianStageDuration != null
+    ? 2 * medianStageDuration
+    : 10 * 60 * 1000
+  return Date.now() - change.last_log_at > threshold
+}
+```
+
+Called identically from SSE connect, dashboard page load, and background job (every 5 minutes).
+
+---
+
+## What is not in this spec
+
+- Template gallery for Quick Start (future)
+- Per-user notification preferences (future)
+- Multi-project dashboard view (future)
+- Historical trend analysis beyond 30 days (future)
