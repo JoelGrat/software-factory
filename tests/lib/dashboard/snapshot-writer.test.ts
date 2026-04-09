@@ -1,7 +1,6 @@
 // tests/lib/dashboard/snapshot-writer.test.ts
 import { describe, it, expect, vi } from 'vitest'
 import { writeStub, enrichSnapshot, markEnrichmentFailed } from '@/lib/dashboard/snapshot-writer'
-import type { AnalysisResultSnapshotData } from '@/lib/dashboard/event-types'
 
 const mockInsert = vi.fn().mockReturnValue({ error: null })
 const mockUpdate = vi.fn().mockReturnValue({ eq: vi.fn().mockReturnValue({ error: null }) })
@@ -35,7 +34,7 @@ describe('enrichSnapshot', () => {
     const eqMock = vi.fn().mockReturnValue({ error: null })
     mockUpdate.mockReturnValueOnce({ eq: eqMock })
     // Note: use camelCase field names from AnalysisResultSnapshotData
-    const data: Partial<AnalysisResultSnapshotData> = {
+    const data = {
       jaccardAccuracy: 0.82,
       missRate: 0.18,
     }
