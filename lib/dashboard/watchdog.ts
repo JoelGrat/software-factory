@@ -1,9 +1,9 @@
-interface ChangeRow {
-  last_stage_started_at: Date | null
+export interface ChangeRow {
+  last_stage_started_at: Date | string | null
   expected_stage_duration_ms: number | null
 }
 
-const FALLBACK_THRESHOLD_MS = 10 * 60 * 1000  // 10 minutes
+export const FALLBACK_THRESHOLD_MS = 10 * 60 * 1000  // 10 minutes
 
 /**
  * Pure function — determines whether a running analysis is stalled.
@@ -22,5 +22,14 @@ export function isStalled(change: ChangeRow): boolean {
     ? 2 * change.expected_stage_duration_ms
     : FALLBACK_THRESHOLD_MS
 
-  return Date.now() - change.last_stage_started_at.getTime() > threshold
+  const startedAt = change.last_stage_started_at instanceof Date
+    ? change.last_stage_started_at
+    : new Date(change.last_stage_started_at)
+
+  const elapsed = Date.now() - startedAt.getTime()
+  if (isNaN(elapsed)) {
+    console.error('[watchdog] invalid last_stage_started_at:', change.last_stage_started_at)
+    return false
+  }
+  return elapsed > threshold
 }

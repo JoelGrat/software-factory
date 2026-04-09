@@ -1,10 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isStalled } from '@/lib/dashboard/watchdog'
-
-interface ChangeRow {
-  last_stage_started_at: Date | null
-  expected_stage_duration_ms: number | null
-}
+import { isStalled, type ChangeRow, FALLBACK_THRESHOLD_MS } from '@/lib/dashboard/watchdog'
 
 describe('isStalled', () => {
   it('returns false when stage started recently', () => {
@@ -27,13 +22,13 @@ describe('isStalled', () => {
 
   it('falls back to 10 min threshold when no expected duration', () => {
     const recentChange: ChangeRow = {
-      last_stage_started_at: new Date(Date.now() - 5 * 60_000), // 5 min ago
+      last_stage_started_at: new Date(Date.now() - (FALLBACK_THRESHOLD_MS / 2)),
       expected_stage_duration_ms: null,
     }
     expect(isStalled(recentChange)).toBe(false)
 
     const oldChange: ChangeRow = {
-      last_stage_started_at: new Date(Date.now() - 11 * 60_000), // 11 min ago
+      last_stage_started_at: new Date(Date.now() - (FALLBACK_THRESHOLD_MS + 60_000)),
       expected_stage_duration_ms: null,
     }
     expect(isStalled(oldChange)).toBe(true)
