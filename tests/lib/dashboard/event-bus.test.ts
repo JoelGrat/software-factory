@@ -1,7 +1,10 @@
 // tests/lib/dashboard/event-bus.test.ts
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 describe('event bus', () => {
+  beforeEach(() => {
+    vi.resetModules()
+  })
   it('delivers events to subscribers for the right project', async () => {
     // dynamic import so the singleton is fresh per test run
     const { emitDashboardEvent, subscribeToDashboard } = await import('@/lib/dashboard/event-bus')

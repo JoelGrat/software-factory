@@ -12,7 +12,15 @@ function projectKey(projectId: string): string {
 }
 
 export function emitDashboardEvent(projectId: string, event: DashboardEvent): void {
-  emitter.emit(projectKey(projectId), event)
+  if (!projectId) {
+    console.error('[event-bus] emitDashboardEvent called with empty projectId')
+    return
+  }
+  try {
+    emitter.emit(projectKey(projectId), event)
+  } catch (err) {
+    console.error('[event-bus] handler threw during emit for project', projectId, err)
+  }
 }
 
 export function subscribeToDashboard(
@@ -22,4 +30,9 @@ export function subscribeToDashboard(
   const key = projectKey(projectId)
   emitter.on(key, handler)
   return () => emitter.off(key, handler)
+}
+
+/** Returns listener count for a project channel. Useful for tests and health checks. */
+export function listenerCount(projectId: string): number {
+  return emitter.listenerCount(projectKey(projectId))
 }
