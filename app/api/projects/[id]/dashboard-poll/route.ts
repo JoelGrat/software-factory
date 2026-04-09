@@ -1,0 +1,46 @@
+// app/api/projects/[id]/dashboard-poll/route.ts
+import { NextResponse } from 'next/server'
+import { createClient } from '@/lib/supabase/server'
+
+export const dynamic = 'force-dynamic'
+
+export async function GET(
+  _req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id: projectId } = await params
+  const db = createClient()
+  const { data: { user } } = await db.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const { data: project } = await db
+    .from('projects')
+    .select('id')
+    .eq('id', projectId)
+    .eq('owner_id', user.id)
+    .single()
+  if (!project) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+  // Return current state for all active changes in the project
+  const { data: activeChanges } = await db
+    .from('change_requests')
+    .select('id, status, analysis_status, analysis_version, updated_at')
+    .eq('project_id', projectId)
+    .not('analysis_status', 'in', '("completed","failed","stalled")')
+    .order('updated_at', { ascending: false })
+
+  // Return latest snapshots for recently-completed changes (last 5)
+  const { data: snapshots } = await db
+    .from('analysis_result_snapshot')
+    .select('change_id, execution_outcome, snapshot_status, minimal, analysis_status, completed_at')
+    .in(
+      'change_id',
+      (activeChanges ?? []).map((c) => c.id)
+    )
+
+  return NextResponse.json({
+    activeChanges: activeChanges ?? [],
+    snapshots: snapshots ?? [],
+    polledAt: new Date().toISOString(),
+  })
+}
