@@ -18,6 +18,52 @@ import { selectTests } from './test-selector'
 import { hashInput, hashOutput, recordTrace } from './execution-tracer'
 import { buildSymbolPatchPrompt, buildFilePatchPrompt, buildNewFilePrompt } from './prompt-builders'
 import { makeLogger } from './execution-logger'
+import { emitDashboardEvent } from '@/lib/dashboard/event-bus'
+import { nextVersion } from '@/lib/dashboard/event-counter'
+import { recordEvent } from '@/lib/dashboard/event-history'
+import { writeStub, enrichSnapshot, markEnrichmentFailed } from '@/lib/dashboard/snapshot-writer'
+import type { DashboardEvent } from '@/lib/dashboard/event-types'
+
+async function emitAndRecord(
+  db: SupabaseClient,
+  projectId: string,
+  changeId: string,
+  analysisVersion: number,
+  type: DashboardEvent['type'],
+  scope: DashboardEvent['scope'],
+  payload: Record<string, unknown>
+): Promise<void> {
+  const version = await nextVersion(db, projectId)
+  const event: DashboardEvent = {
+    type, scope, changeId, projectId, analysisVersion, version, payload,
+  }
+  emitDashboardEvent(projectId, event)
+  // fire-and-forget — don't let history write failures block execution
+  recordEvent(db, projectId, event).catch(err =>
+    console.warn('[dashboard] event_history write failed:', err)
+  )
+}
+
+async function enrichSnapshotWithRetry(
+  db: SupabaseClient,
+  changeId: string,
+  data: Parameters<typeof enrichSnapshot>[2],
+  attempts = 3
+): Promise<void> {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      await enrichSnapshot(db, changeId, data)
+      return
+    } catch (err) {
+      if (i === attempts - 1) {
+        console.error('[dashboard] enrichment failed after retries:', err)
+        await markEnrichmentFailed(db, changeId).catch(() => {})
+      } else {
+        await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, i)))
+      }
+    }
+  }
+}
 
 function errorSignature(output: string): string {
   return createHash('sha256').update(output.slice(0, 500)).digest('hex').slice(0, 12)
@@ -95,6 +141,8 @@ export async function runExecution(
   await db.from('change_requests').update({ status: 'executing' }).eq('id', changeId)
 
   let env: ExecutionEnvironment | null = null
+  let projectId = ''
+  let currentAnalysisVersion = 0
 
   try {
     // Load change
@@ -104,6 +152,23 @@ export async function runExecution(
       .eq('id', changeId)
       .single()
     if (!change) throw new Error(`Change not found: ${changeId}`)
+
+    projectId = change.project_id
+
+    // Transition analysis_status to running
+    const { data: analysisRow } = await db
+      .from('change_requests')
+      .select('analysis_version')
+      .eq('id', changeId)
+      .single()
+    currentAnalysisVersion = (analysisRow?.analysis_version ?? 0) + 1
+
+    await db
+      .from('change_requests')
+      .update({ analysis_status: 'running', analysis_version: currentAnalysisVersion })
+      .eq('id', changeId)
+
+    await emitAndRecord(db, projectId, changeId, currentAnalysisVersion, 'started', 'analysis', {})
 
     // Load approved plan
     const { data: plan } = await db
@@ -221,6 +286,18 @@ export async function runExecution(
 
       state.iteration++
       await log('info', `── Iteration ${state.iteration} ──`)
+
+      // Emit progress event — pct is a rough estimate based on iteration
+      const pct = Math.min(Math.round((state.iteration / limits.maxIterations) * 80), 80)
+      await db.from('change_requests').update({
+        last_stage_started_at: new Date().toISOString(),
+        expected_stage_duration_ms: 120_000, // 2 min per iteration estimate
+      }).eq('id', changeId)
+      await emitAndRecord(db, projectId, changeId, currentAnalysisVersion, 'progress', 'analysis', {
+        stage: `iteration_${state.iteration}`,
+        pct,
+      })
+
       await executor.resetIteration(env, state.acceptedPatches)
       for (const nf of state.acceptedNewFiles) {
         await executor.createFile(env, nf.path, nf.content)
@@ -452,7 +529,46 @@ export async function runExecution(
     }
 
     await log(fullSuccess ? 'success' : 'error', fullSuccess ? 'Execution complete — ready for review' : 'Execution finished with errors')
-    await db.from('change_requests').update({ status: fullSuccess ? 'review' : 'failed' }).eq('id', changeId)
+
+    const executionOutcome: 'success' | 'failure' = fullSuccess ? 'success' : 'failure'
+    const completionVersion = await nextVersion(db, projectId)
+
+    // Step 1: Write stub (canonical completion signal)
+    try {
+      await writeStub(db, changeId, completionVersion, executionOutcome, 'completed')
+    } catch (stubErr) {
+      console.error('[dashboard] stub write failed — not marking as completed:', stubErr)
+      return // keep analysis_status = 'running', caller should retry
+    }
+
+    // Step 2: Mark change as completed
+    await db
+      .from('change_requests')
+      .update({
+        status: fullSuccess ? 'review' : 'failed',
+        analysis_status: 'completed',
+      })
+      .eq('id', changeId)
+
+    // Step 3: Emit completed event
+    const completedEvent: DashboardEvent = {
+      type: 'completed', scope: 'analysis',
+      changeId, projectId,
+      analysisVersion: currentAnalysisVersion,
+      version: completionVersion,
+      payload: { outcome: executionOutcome },
+    }
+    emitDashboardEvent(projectId, completedEvent)
+    recordEvent(db, projectId, completedEvent).catch(() => {})
+
+    // Step 4: Enrich snapshot in background
+    const filesModified = state.acceptedPatches.map(p => p.path)
+    enrichSnapshotWithRetry(db, changeId, {
+      stagesCompleted: [`iteration_${state.iteration}`],
+      filesModified,
+      componentsAffected: [],
+      durationMs: Date.now() - state.startedAt,
+    }).catch(() => {})
 
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err)
@@ -470,6 +586,12 @@ export async function runExecution(
       error_summary: errorMessage,
     })
     await db.from('change_requests').update({ status: 'failed' }).eq('id', changeId)
+    // Emit failed event if we have projectId (it may not be set if failure was before loading change)
+    if (projectId) {
+      await emitAndRecord(db, projectId, changeId, currentAnalysisVersion, 'completed', 'analysis', {
+        outcome: 'failure',
+      }).catch(() => {})
+    }
     throw err
   } finally {
     if (env) await executor.cleanup(env)
