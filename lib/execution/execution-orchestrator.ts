@@ -293,10 +293,10 @@ export async function runExecution(
         last_stage_started_at: new Date().toISOString(),
         expected_stage_duration_ms: 120_000, // 2 min per iteration estimate
       }).eq('id', changeId)
-      await emitAndRecord(db, projectId, changeId, currentAnalysisVersion, 'progress', 'analysis', {
+      emitAndRecord(db, projectId, changeId, currentAnalysisVersion, 'progress', 'analysis', {
         stage: `iteration_${state.iteration}`,
         pct,
-      })
+      }).catch(err => console.warn('[dashboard] progress event failed:', err))
 
       await executor.resetIteration(env, state.acceptedPatches)
       for (const nf of state.acceptedNewFiles) {
@@ -531,10 +531,13 @@ export async function runExecution(
     await log(fullSuccess ? 'success' : 'error', fullSuccess ? 'Execution complete — ready for review' : 'Execution finished with errors')
 
     const executionOutcome: 'success' | 'failure' = fullSuccess ? 'success' : 'failure'
-    const completionVersion = await nextVersion(db, projectId)
 
     // Step 1: Write stub (canonical completion signal)
+    let completionVersion: number
     try {
+      completionVersion = await nextVersion(db, projectId)
+      // analysis_status 'completed' means the orchestrator ran to its conclusion (even if execution_outcome is 'failure').
+      // 'failed' in analysis_status is reserved for exception-path termination (crash, stub write failure, etc.)
       await writeStub(db, changeId, completionVersion, executionOutcome, 'completed')
     } catch (stubErr) {
       console.error('[dashboard] stub write failed — not marking as completed:', stubErr)
@@ -566,7 +569,7 @@ export async function runExecution(
     enrichSnapshotWithRetry(db, changeId, {
       stagesCompleted: [`iteration_${state.iteration}`],
       filesModified,
-      componentsAffected: [],
+      componentsAffected: Object.keys(componentTypeMap),
       durationMs: Date.now() - state.startedAt,
     }).catch(() => {})
 
@@ -585,12 +588,24 @@ export async function runExecution(
       termination_reason: 'error',
       error_summary: errorMessage,
     })
-    await db.from('change_requests').update({ status: 'failed' }).eq('id', changeId)
+    await db.from('change_requests').update({ status: 'failed', analysis_status: 'failed' }).eq('id', changeId)
     // Emit failed event if we have projectId (it may not be set if failure was before loading change)
     if (projectId) {
-      await emitAndRecord(db, projectId, changeId, currentAnalysisVersion, 'completed', 'analysis', {
-        outcome: 'failure',
-      }).catch(() => {})
+      try {
+        const failVersion = await nextVersion(db, projectId)
+        await writeStub(db, changeId, failVersion, 'failure', 'failed')
+        const failEvent: DashboardEvent = {
+          type: 'completed', scope: 'analysis',
+          changeId, projectId,
+          analysisVersion: currentAnalysisVersion,
+          version: failVersion,
+          payload: { outcome: 'failure' },
+        }
+        emitDashboardEvent(projectId, failEvent)
+        recordEvent(db, projectId, failEvent).catch(() => {})
+      } catch {
+        // best-effort — don't mask the original error
+      }
     }
     throw err
   } finally {
