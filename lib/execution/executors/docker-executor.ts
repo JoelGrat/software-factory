@@ -65,8 +65,8 @@ export class DockerExecutor implements CodeExecutor {
 
     await log('docker', `git clone --depth 1 ${project.repoUrl} /app`)
     await dockerExec(containerId, `git clone --depth 1 ${authedUrl} ${containerWorkDir}`)
-    await log('docker', `git checkout -b ${branch}`)
-    await dockerExec(containerId, `cd ${containerWorkDir} && git checkout -b ${branch}`)
+    await log('docker', `git checkout ${branch}`)
+    await dockerExec(containerId, `cd ${containerWorkDir} && (git fetch --depth 1 origin ${branch} 2>/dev/null && git checkout ${branch}) || git checkout -b ${branch}`)
     await log('docker', `npm install`)
     await dockerExec(containerId, `cd ${containerWorkDir} && npm install --silent`)
     await log('docker', `docker cp → local`)
@@ -198,7 +198,7 @@ export class DockerExecutor implements CodeExecutor {
     }
     await env.log('docker', `git add -A && git commit && git push origin ${branch}`)
     await dockerExec(env.containerId, `cd ${env.containerWorkDir} && git add -A && git commit -m "${message.replace(/"/g, '\\"')}"`)
-    await dockerExec(env.containerId, `cd ${env.containerWorkDir} && git push origin ${branch}`)
+    await dockerExec(env.containerId, `cd ${env.containerWorkDir} && git push --force-with-lease origin ${branch}`)
     const { stdout } = await dockerExec(env.containerId, `cd ${env.containerWorkDir} && git rev-parse HEAD`)
     return { commitHash: stdout.trim(), branch }
   }

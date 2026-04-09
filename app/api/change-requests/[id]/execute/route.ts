@@ -85,6 +85,7 @@ export async function POST(
   // Clear previous execution history before re-running
   await adminDb.from('execution_snapshots').delete().eq('change_id', id)
   await adminDb.from('execution_trace').delete().eq('change_id', id)
+  await adminDb.from('execution_logs').delete().eq('change_id', id)
 
   // Reset plan task statuses to pending
   const { data: latestPlan } = await adminDb

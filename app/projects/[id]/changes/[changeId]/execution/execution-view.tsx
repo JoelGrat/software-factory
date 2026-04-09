@@ -465,8 +465,8 @@ export default function ExecutionView({ change, project }: { change: Change; pro
                       <div key={snap.id}>
                         <button
                           type="button"
-                          onClick={() => hasError && setExpandedIteration(isExpanded ? null : snap.id)}
-                          className={`w-full px-5 py-3 flex items-center justify-between text-left ${hasError ? 'hover:bg-white/[0.02] cursor-pointer' : ''}`}
+                          onClick={() => setExpandedIteration(isExpanded ? null : snap.id)}
+                          className="w-full px-5 py-3 flex items-center justify-between text-left hover:bg-white/[0.02] cursor-pointer"
                         >
                           <span className="text-sm text-slate-400 font-mono">Iteration {snap.iteration}</span>
                           <div className="flex items-center gap-4">
@@ -484,16 +484,32 @@ export default function ExecutionView({ change, project }: { change: Change; pro
                                 {snap.termination_reason}
                               </span>
                             )}
-                            {hasError && (
-                              <span className="text-slate-600 text-xs">{isExpanded ? '▲' : '▼'}</span>
-                            )}
+                            <span className="text-slate-600 text-xs">{isExpanded ? '▲' : '▼'}</span>
                           </div>
                         </button>
-                        {isExpanded && snap.error_summary && (
-                          <div className="px-5 pb-4">
-                            <pre className="text-[10px] text-red-400/80 bg-red-400/5 border border-red-400/10 rounded-lg p-3 overflow-x-auto whitespace-pre-wrap leading-relaxed max-h-80 overflow-y-auto">
-                              {snap.error_summary}
-                            </pre>
+                        {isExpanded && (
+                          <div className="px-5 pb-4 space-y-3">
+                            {snap.files_modified.length > 0 && (
+                              <div>
+                                <p className="text-[10px] uppercase tracking-widest text-slate-500 font-headline mb-2">Files modified</p>
+                                <ul className="space-y-1">
+                                  {snap.files_modified.map(f => (
+                                    <li key={f} className="text-[11px] font-mono text-slate-400 truncate">{f}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                            {snap.files_modified.length === 0 && !hasError && (
+                              <p className="text-[11px] font-mono text-slate-600">No files modified</p>
+                            )}
+                            {hasError && snap.error_summary && (
+                              <div>
+                                <p className="text-[10px] uppercase tracking-widest text-slate-500 font-headline mb-2">Error</p>
+                                <pre className="text-[10px] text-red-400/80 bg-red-400/5 border border-red-400/10 rounded-lg p-3 overflow-x-auto whitespace-pre-wrap leading-relaxed max-h-80 overflow-y-auto">
+                                  {snap.error_summary}
+                                </pre>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>

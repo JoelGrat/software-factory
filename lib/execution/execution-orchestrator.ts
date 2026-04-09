@@ -23,6 +23,12 @@ function errorSignature(output: string): string {
   return createHash('sha256').update(output.slice(0, 500)).digest('hex').slice(0, 12)
 }
 
+function parseAiJson(content: string): Record<string, unknown> {
+  // Strip markdown code fences that Claude often wraps JSON in
+  const stripped = content.replace(/^```(?:json)?\s*/m, '').replace(/\s*```$/m, '').trim()
+  return JSON.parse(stripped)
+}
+
 function chooseContextMode(ctx: SymbolContext, limits: ExecutionLimits): ContextMode {
   if (ctx.complexity > limits.symbolComplexityHighThreshold) return 'file'
   if (ctx.complexity < limits.symbolComplexityLowThreshold) return 'symbol'
@@ -195,6 +201,17 @@ export async function runExecution(
     )
     await log('success', `Environment ready · branch ${branch}`)
 
+    // Read package.json once so new-file prompts know what imports are available
+    let availablePackages: string[] = []
+    try {
+      const pkgRaw = await readFile(join(env.localWorkDir, 'package.json'), 'utf8')
+      const pkg = JSON.parse(pkgRaw)
+      availablePackages = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies })
+    } catch { /* best-effort */ }
+
+    // Per-file type-check errors from failed iterations — fed back into the prompt on retry
+    const newFileTypeErrors = new Map<string, string>()
+
     let pendingTasks = sortedTasks.filter(t => t.status === 'pending')
     let fullSuccess = false
 
@@ -225,12 +242,14 @@ export async function runExecution(
           if (task.new_file_path && state.aiCallCount < limits.maxAiCalls) {
             const prompt = buildNewFilePrompt(
               { description: task.description, intent: (change as { intent: string }).intent },
-              task.new_file_path
+              task.new_file_path,
+              newFileTypeErrors.get(task.new_file_path),
+              availablePackages
             )
             state.aiCallCount++
             const aiResult = await ai.complete(prompt, { maxTokens: 4096 })
             let parsed: { newFileContent?: string; confidence?: number } = {}
-            try { parsed = JSON.parse(aiResult.content) } catch { /* skip */ }
+            try { parsed = parseAiJson(aiResult.content) } catch { /* skip */ }
             const newContent = parsed.newFileContent ?? ''
             const confidence = parsed.confidence ?? 0
             if (newContent && confidence >= limits.confidenceThreshold) {
@@ -242,15 +261,15 @@ export async function runExecution(
                 await log('error', `Failed to create ${task.new_file_path}: ${result.error}`)
               }
             }
+            const created = iterationNewFiles.some(f => f.path === task.new_file_path)
+            if (!created) {
+              await log('error', `Done (new file not created — low confidence or AI error)`)
+              continue  // leave task pending so the next iteration retries it
+            }
           }
           processedTaskIds.push(task.id)
           await db.from('change_plan_tasks').update({ status: 'done' }).eq('id', task.id).eq('plan_id', plan.id)
-          if (task.new_file_path) {
-            const created = iterationNewFiles.some(f => f.path === task.new_file_path)
-            await log(created ? 'success' : 'error', created ? `Done` : `Done (new file not created — low confidence or AI error)`)
-          } else {
-            await log('success', `Done (no files to modify)`)
-          }
+          await log('success', `Done`)
           continue
         }
 
@@ -291,7 +310,7 @@ export async function runExecution(
           const aiResult = await ai.complete(prompt, { maxTokens: 4096 })
 
           let parsed: { newContent?: string; newFileContent?: string; confidence?: number; requiresPropagation?: boolean } = {}
-          try { parsed = JSON.parse(aiResult.content) } catch { continue }
+          try { parsed = parseAiJson(aiResult.content) } catch { continue }
 
           const newContent = parsed.newContent ?? parsed.newFileContent ?? ''
           if (!newContent) {
@@ -349,6 +368,14 @@ export async function runExecution(
       if (!typeCheck.passed) {
         const errCount = typeCheck.errors.length
         await log('error', `Type check failed · ${errCount} error${errCount !== 1 ? 's' : ''}`)
+        // Index type-check errors by new file path so the next prompt attempt can fix them.
+        // Only update errors for files we attempted this iteration; leave others intact so
+        // errors from earlier failed iterations persist across low-confidence retry loops.
+        for (const nf of iterationNewFiles) {
+          const relevant = typeCheck.output.split('\n').filter(l => l.includes(nf.path)).join('\n')
+          if (relevant) newFileTypeErrors.set(nf.path, relevant)
+          else newFileTypeErrors.delete(nf.path)
+        }
         const sig = errorSignature(typeCheck.output)
         state.errorHistory.set(sig, (state.errorHistory.get(sig) ?? 0) + 1)
         if ((state.errorHistory.get(sig) ?? 0) >= limits.stagnationWindow) break

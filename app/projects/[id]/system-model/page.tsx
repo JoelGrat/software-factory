@@ -10,7 +10,7 @@ export default async function SystemModelPage({ params }: { params: Promise<{ id
 
   const { data: project } = await db
     .from('projects')
-    .select('id, name, scan_status')
+    .select('id, name, scan_status, scan_error, scan_progress')
     .eq('id', id)
     .eq('owner_id', user.id)
     .single()
@@ -70,11 +70,23 @@ export default async function SystemModelPage({ params }: { params: Promise<{ id
     }
   })
 
+  const avgConfidence = components.length > 0
+    ? Math.round(components.reduce((s, c) => s + c.confidence, 0) / components.length)
+    : 0
+  const stats = {
+    componentCount: components.length,
+    edgeCount: (dependencies ?? []).length,
+    avgConfidence,
+    lowConfidenceCount: components.filter(c => c.confidence < 60).length,
+    unstableCount: components.filter(c => c.status === 'unstable').length,
+  }
+
   return (
     <SystemModelBrowser
-      project={project}
+      project={project as any}
       components={components}
       dependencies={dependencies ?? []}
+      stats={stats}
     />
   )
 }

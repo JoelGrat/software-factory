@@ -3,8 +3,16 @@ import { useState, useMemo } from 'react'
 import Link from 'next/link'
 import { LeftNav } from '@/components/app/left-nav'
 import { ProfileAvatar } from '@/components/app/profile-avatar'
+import type { ScanProgress, ScanMilestone } from '@/lib/scanner/scanner'
 
-interface Project { id: string; name: string; scan_status: string }
+interface Project {
+  id: string; name: string; scan_status: string
+  scan_error?: string | null; scan_progress?: ScanProgress | null
+}
+interface Stats {
+  componentCount: number; edgeCount: number; avgConfidence: number
+  lowConfidenceCount: number; unstableCount: number
+}
 interface Component {
   id: string; name: string; type: string; status: string
   is_anchored: boolean; scan_count: number; last_updated: string
@@ -90,15 +98,97 @@ function Tooltip({ text, children }: { text: string; children: React.ReactNode }
   )
 }
 
+function MilestoneRow({ milestone }: { milestone: ScanMilestone }) {
+  return (
+    <div className="flex items-start gap-3">
+      <div className="flex-shrink-0 w-4 mt-0.5">
+        {milestone.status === 'done' && <span className="material-symbols-outlined text-green-400" style={{ fontSize: '14px' }}>check_circle</span>}
+        {milestone.status === 'active' && (
+          <span className="relative flex h-3.5 w-3.5 items-center justify-center">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-50" />
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-400" />
+          </span>
+        )}
+        {milestone.status === 'pending' && <span className="inline-flex rounded-full h-2 w-2 bg-slate-700 mt-1" />}
+      </div>
+      <div>
+        <span className={`text-xs ${milestone.status === 'done' ? 'text-slate-300' : milestone.status === 'active' ? 'text-indigo-300 font-medium' : 'text-slate-600'}`}>
+          {milestone.label}
+        </span>
+        {milestone.detail && (
+          <span className={`ml-2 text-xs font-mono ${milestone.status === 'active' ? 'text-indigo-400/70' : 'text-slate-500'}`}>{milestone.detail}</span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function modelQuality(stats: Stats, progress: ScanProgress | null | undefined) {
+  if (!stats || stats.componentCount === 0) return null
+  const parserType = progress?.parserType
+    ?? (progress?.milestones?.some(m => m.detail?.includes('Heuristic')) ? 'heuristic' : 'typescript')
+  if (parserType === 'heuristic') return { label: 'LOW', color: 'text-red-400 bg-red-400/10' }
+  const unknownRatio = stats.componentCount > 0 ? stats.lowConfidenceCount / stats.componentCount : 0
+  if (unknownRatio > 0.3) return { label: 'MEDIUM', color: 'text-amber-400 bg-amber-400/10' }
+  return { label: 'HIGH', color: 'text-green-400 bg-green-400/10' }
+}
+
+function getDomains(components: Component[]) {
+  const map: Record<string, { count: number; confTotal: number }> = {}
+  for (const c of components) {
+    const parts = c.name.split('/')
+    const domain = parts.length >= 2 ? parts[parts.length - 1] : parts[0]
+    if (!domain || ['api', 'ui', 'app', 'components', 'lib', 'pages', 'index'].includes(domain)) continue
+    if (!map[domain]) map[domain] = { count: 0, confTotal: 0 }
+    map[domain].count++
+    map[domain].confTotal += c.confidence
+  }
+  return Object.entries(map)
+    .map(([name, d]) => ({ name, count: d.count, confidence: Math.round(d.confTotal / d.count) }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 6)
+}
+
+function getTechStack(components: Component[], progress: ScanProgress | null | undefined): string[] {
+  const stack: string[] = []
+  const pt = progress?.parserType ?? (progress?.milestones?.some(m => m.detail?.includes('TypeScript')) ? 'typescript' : null)
+  if (pt === 'typescript') { stack.push('TypeScript'); stack.push('Next.js') }
+  if (components.some(c => c.name.includes('supabase'))) stack.push('Supabase')
+  if (components.some(c => c.name.includes('prisma'))) stack.push('Prisma')
+  if (components.some(c => c.name.toLowerCase().includes('stripe'))) stack.push('Stripe')
+  if (components.some(c => c.name.toLowerCase().includes('redis'))) stack.push('Redis')
+  return stack
+}
+
 export function SystemModelBrowser({
-  project, components, dependencies,
+  project, components, dependencies, stats,
 }: {
-  project: Project; components: Component[]; dependencies: Dependency[]
+  project: Project; components: Component[]; dependencies: Dependency[]; stats: Stats
 }) {
   const [search, setSearch] = useState('')
   const [filterUnstable, setFilterUnstable] = useState(false)
   const [filterHotspot, setFilterHotspot] = useState(false)
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [rescanning, setRescanning] = useState(false)
+
+  const isScanning = project.scan_status === 'scanning'
+  const isReady = project.scan_status === 'ready'
+  const isFailed = project.scan_status === 'failed'
+  const progress = project.scan_progress ?? null
+  const milestones = progress?.milestones ?? []
+  const warnings = progress?.warnings ?? []
+  const quality = isReady ? modelQuality(stats, progress) : null
+  const domains = getDomains(components)
+  const techStack = getTechStack(components, progress)
+  const archCounts = components.reduce((acc, c) => { acc[c.type] = (acc[c.type] ?? 0) + 1; return acc }, {} as Record<string, number>)
+  const entryPoints = components.filter(c => c.is_anchored).slice(0, 4)
+
+  async function handleRescan() {
+    setRescanning(true)
+    await fetch(`/api/projects/${project.id}/scan`, { method: 'POST' })
+    setRescanning(false)
+    window.location.reload()
+  }
 
   // outgoing: from_id → [to_id]
   const outgoingMap = useMemo(() => {
@@ -192,6 +282,147 @@ export function SystemModelBrowser({
                 <p className="text-sm text-slate-400 mt-1">{components.length} components · {dependencies.length} dependency edges</p>
               </div>
             </div>
+
+            {/* Repository Scan */}
+            <div className={`rounded-xl border p-5 ${isFailed ? 'bg-red-950/20 border-red-500/20' : isScanning ? 'bg-[#131b2e] border-indigo-500/20' : 'bg-[#131b2e] border-white/5'}`}>
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2 flex-wrap">
+                  {isScanning && (
+                    <span className="relative flex h-2.5 w-2.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-indigo-400" />
+                    </span>
+                  )}
+                  <span className="text-sm font-semibold text-slate-200">Repository Scan</span>
+                  {isScanning && <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded font-mono text-indigo-400 bg-indigo-400/10">Scanning</span>}
+                  {isReady && <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded font-mono text-green-400 bg-green-400/10">Complete</span>}
+                  {isFailed && <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded font-mono text-red-400 bg-red-400/10">Failed</span>}
+                  {quality && (
+                    <>
+                      <span className="text-xs text-slate-500">Model quality:</span>
+                      <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded font-mono ${quality.color}`}>{quality.label}</span>
+                    </>
+                  )}
+                </div>
+                {!isScanning && (
+                  <button onClick={handleRescan} disabled={rescanning} className="text-xs text-slate-500 hover:text-slate-300 transition-colors disabled:opacity-50">
+                    {rescanning ? 'Starting…' : 'Rescan'}
+                  </button>
+                )}
+              </div>
+              {isFailed && <p className="text-sm text-red-400 mb-3">{project.scan_error ?? 'Unknown error'}</p>}
+              {milestones.length > 0 && (
+                <div className="space-y-2">
+                  {milestones.map(m => <MilestoneRow key={m.id} milestone={m} />)}
+                </div>
+              )}
+              {warnings.length > 0 && (
+                <div className="mt-3 space-y-1">
+                  {warnings.map((w, i) => (
+                    <div key={i} className="flex items-start gap-2 text-xs text-amber-400/80">
+                      <span className="material-symbols-outlined flex-shrink-0" style={{ fontSize: '13px', marginTop: '1px' }}>warning</span>{w}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* System Overview + Model Quality */}
+            {isReady && components.length > 0 && (
+              <div className="grid grid-cols-5 gap-4">
+                {/* System Overview — 3/5 */}
+                <div className="col-span-3 rounded-xl bg-[#131b2e] border border-white/5 p-5 space-y-4">
+                  <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest">System Overview</h2>
+                  {domains.length > 0 && (
+                    <div>
+                      <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-2">Detected domains</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {domains.map(d => (
+                          <span key={d.name} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-indigo-400/5 border border-indigo-400/15">
+                            <span className="text-xs text-indigo-300 font-medium capitalize">{d.name}</span>
+                            <span className="text-[10px] text-indigo-400/60 font-mono">{d.confidence}%</span>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <div>
+                    <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-2">Architecture</p>
+                    <div className="flex gap-2 flex-wrap">
+                      {Object.entries(archCounts).filter(([, n]) => n > 0).map(([type, n]) => (
+                        <span key={type} className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-mono font-bold border ${TYPE_COLORS[type] ?? 'text-slate-400 bg-slate-400/10 border-slate-400/20'}`}>
+                          {TYPE_LABELS[type] ?? type.toUpperCase()} <span className="opacity-60">×{n}</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  {entryPoints.length > 0 && (
+                    <div>
+                      <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-2">Entry points</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {entryPoints.map(c => (
+                          <span key={c.id} className="text-[10px] font-mono text-slate-400 bg-slate-400/5 border border-white/5 px-2 py-1 rounded">{c.name}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {techStack.length > 0 && (
+                    <div>
+                      <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-2">Tech stack</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {techStack.map(t => (
+                          <span key={t} className="text-xs text-slate-300 bg-slate-400/10 px-2 py-0.5 rounded">{t}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Model Quality — 2/5 */}
+                <div className="col-span-2 rounded-xl bg-[#131b2e] border border-white/5 p-5 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Model Quality</h2>
+                    {quality && <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded font-mono ${quality.color}`}>{quality.label}</span>}
+                  </div>
+                  <div className="space-y-3">
+                    <div>
+                      <span className="text-[10px] text-slate-500">Avg confidence</span>
+                      <div className="mt-1">
+                        <ConfidenceBar value={stats.avgConfidence} />
+                      </div>
+                    </div>
+                    <div className="space-y-1.5 text-xs">
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Components</span>
+                        <span className="font-mono text-slate-300">{stats.componentCount}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Dependencies</span>
+                        <span className="font-mono text-slate-300">{stats.edgeCount}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Unstable</span>
+                        <span className={`font-mono ${stats.unstableCount > 0 ? 'text-amber-400' : 'text-slate-300'}`}>{stats.unstableCount}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Low confidence</span>
+                        <span className={`font-mono ${stats.lowConfidenceCount > 0 ? 'text-red-400' : 'text-slate-300'}`}>{stats.lowConfidenceCount}</span>
+                      </div>
+                    </div>
+                  </div>
+                  {warnings.length > 0 && (
+                    <div className="space-y-1 pt-1 border-t border-white/5">
+                      {warnings.map((w, i) => (
+                        <div key={i} className="flex items-start gap-1.5 text-[10px] text-amber-400/70">
+                          <span className="material-symbols-outlined flex-shrink-0" style={{ fontSize: '11px', marginTop: '1px' }}>warning</span>
+                          <span>{w}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Filters */}
             <div className="flex items-center gap-3 flex-wrap">

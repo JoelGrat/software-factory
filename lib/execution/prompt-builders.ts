@@ -111,7 +111,8 @@ Return a JSON object:
 export function buildNewFilePrompt(
   task: PatchTask,
   filePath: string,
-  previousError?: string
+  previousError?: string,
+  availablePackages?: string[]
 ): string {
   return `You are a TypeScript code generation expert. Create a new file to implement the task below.
 
@@ -123,7 +124,7 @@ ${task.intent}
 
 ## New File Path
 ${filePath}
-${previousError ? `\n## Previous Attempt Failed\n${previousError}\nDo NOT repeat the same approach.\n` : ''}
+${availablePackages && availablePackages.length > 0 ? `\n## Available Packages\nOnly import from packages in this list. Do NOT import any package not listed here — it will cause a type error.\nIMPORTANT: Some packages on this list may lack TypeScript type declarations. Prefer packages that commonly ship their own types (e.g. react, zod, next). If you need a testing utility, prefer 'vitest' and '@vitest/coverage-v8' over @testing-library/* unless @testing-library/* appears in the list AND its corresponding @types package is also listed.\nList: ${availablePackages.join(', ')}\n` : ''}${previousError ? `\n## Previous Attempt Failed — Fix These Errors\n\`\`\`\n${previousError}\n\`\`\`\nDo NOT repeat the same imports or approach that caused these errors.\n` : ''}
 ## Output
 Return a JSON object:
 {

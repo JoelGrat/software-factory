@@ -86,7 +86,6 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
         avgConfidence: totalConfN > 0 ? Math.round(totalConfSum / totalConfN) : 0,
       }}
       initialComponents={components}
-      allDeps={deps ?? []}
     />
   )
 }
