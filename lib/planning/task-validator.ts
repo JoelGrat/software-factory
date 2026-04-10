@@ -85,7 +85,7 @@ export function validateTasks(
     }
     const coveragePct = totalWeight > 0 ? coveredWeight / totalWeight : 1
 
-    if (!coversTop3 && coveragePct < 0.8) {
+    if (!coversTop3 && coveragePct < 0.8 - Number.EPSILON) {
       errors.push(
         `Insufficient coverage: tasks cover ${Math.round(coveragePct * 100)}% of impact weight. ` +
         `Must cover top 3 components or ≥80% of total weight.`
@@ -109,7 +109,7 @@ export function validateTasks(
   const validIds = new Set(impactedComponents.map(c => c.componentId))
   let unknownRefs = 0
   for (const task of tasks) {
-    if (task.componentId && !validIds.has(task.componentId)) {
+    if (task.componentId && !validIds.has(task.componentId) && !plannedNewFilePaths.has(task.newFilePath ?? '')) {
       unknownRefs++
       if (unknownRefs === 1) {
         warnings.push(`Task references component not in impact analysis: "${task.componentId}" — verify this is intentional`)

@@ -87,4 +87,14 @@ describe('validateTasks', () => {
     expect(result.passed).toBe(false)
     expect(result.errors.some(e => /hallucinated/i.test(e))).toBe(true)
   })
+
+  it('does not flag unknown component ref when task creates a planned new file', () => {
+    const tasks: ValidatableTask[] = [
+      ...GOOD_TASKS,
+      { componentId: 'new-comp', componentName: 'NewThing', description: 'Scaffold new module new-thing.ts', orderIndex: 5, newFilePath: 'new-thing.ts' },
+    ]
+    const result = validateTasks(tasks, COMPONENTS, new Set(), new Set(['new-thing.ts']))
+    expect(result.warnings).toHaveLength(0)
+    expect(result.passed).toBe(true)
+  })
 })
