@@ -110,7 +110,7 @@ export function QuickStart({ projectId, components, onChangeCreated }: QuickStar
         body: JSON.stringify({
           project_id: projectId,
           title,
-          description: intent,
+          intent,
           type: 'feature',
           priority,
           risk_level: riskLevel,
