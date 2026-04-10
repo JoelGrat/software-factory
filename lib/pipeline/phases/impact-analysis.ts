@@ -35,7 +35,7 @@ export async function runImpactAnalysisPhase(
   if (typeof dp.confidence !== 'number') {
     throw new Error('Cannot start impact analysis: draft_plan.confidence is invalid — re-run draft plan phase')
   }
-  if ((dp as any).input_hash !== change.input_hash) {
+  if (dp.input_hash !== change.input_hash) {
     throw new Error('Cannot start impact analysis: draft_plan is stale (hash mismatch) — re-run draft plan phase')
   }
 
@@ -67,7 +67,7 @@ export async function runImpactAnalysisPhase(
     await db.from('change_requests').update({
       pipeline_status: 'impact_analyzed',
       phase_timings: {
-        ...(change as any).phase_timings,
+        ...(change.phase_timings as Record<string, unknown> ?? {}),
         impact_analysis: { started_at: startedAt, completed_at: completedAt, duration_ms: durationMs },
       },
     }).eq('id', changeId)
