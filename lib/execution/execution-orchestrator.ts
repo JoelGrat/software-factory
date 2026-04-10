@@ -23,6 +23,7 @@ import { nextVersion } from '@/lib/dashboard/event-counter'
 import { recordEvent } from '@/lib/dashboard/event-history'
 import { writeStub, enrichSnapshot, markEnrichmentFailed } from '@/lib/dashboard/snapshot-writer'
 import type { DashboardEvent } from '@/lib/dashboard/event-types'
+import { runDashboardJobs } from '@/lib/dashboard/jobs/runner'
 
 async function emitAndRecord(
   db: SupabaseClient,
@@ -46,6 +47,7 @@ async function emitAndRecord(
 
 async function enrichSnapshotWithRetry(
   db: SupabaseClient,
+  projectId: string,
   changeId: string,
   data: Parameters<typeof enrichSnapshot>[2],
   attempts = 3
@@ -53,6 +55,10 @@ async function enrichSnapshotWithRetry(
   for (let i = 0; i < attempts; i++) {
     try {
       await enrichSnapshot(db, changeId, data)
+      // Trigger background jobs after successful enrichment
+      runDashboardJobs(db, projectId).catch(err =>
+        console.warn('[dashboard-jobs] post-enrichment jobs failed:', err)
+      )
       return
     } catch (err) {
       if (i === attempts - 1) {
@@ -566,7 +572,7 @@ export async function runExecution(
 
     // Step 4: Enrich snapshot in background
     const filesModified = state.acceptedPatches.map(p => p.path)
-    enrichSnapshotWithRetry(db, changeId, {
+    enrichSnapshotWithRetry(db, projectId, changeId, {
       stagesCompleted: [`iteration_${state.iteration}`],
       filesModified,
       componentsAffected: Object.keys(componentTypeMap),
