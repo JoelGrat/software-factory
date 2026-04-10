@@ -14,7 +14,7 @@ import { SystemSignals } from './components/system-signals'
 
 interface Project {
   id: string; name: string; scan_status: string; scan_error: string | null
-  scan_progress: ScanProgress | null; repo_url: string | null; created_at: string
+  scan_progress: number | null; repo_url: string | null; created_at: string
 }
 interface Stats {
   fileCount: number; componentCount: number; edgeCount: number
