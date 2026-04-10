@@ -107,7 +107,7 @@ export async function runImpactAnalysis(
     for (const compWeight of componentWeights) {
       const seedComp = mapResult.components.find(c => c.componentId === compWeight.componentId)
       if (seedComp) {
-        traversalEvidence[seedComp.name] = {
+        traversalEvidence[seedComp.componentId] = {
           reached_via: [`direct: ${seedComp.matchReason}`],
           source: 'directly_mapped',
           depth: 0,
@@ -115,10 +115,11 @@ export async function runImpactAnalysis(
       } else {
         for (const [fileId] of bfsResult.reachedFileIds) {
           if (fileToComponentMap.get(fileId) === compWeight.componentId) {
+            const pathStr = buildPath(fileId)
             traversalEvidence[compWeight.componentId] = {
-              reached_via: [buildPath(fileId)],
+              reached_via: [pathStr],
               source: 'via_file',
-              depth: (buildPath(fileId).match(/→/g) ?? []).length,
+              depth: (pathStr.match(/→/g) ?? []).length,
             }
             break
           }
