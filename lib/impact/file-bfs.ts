@@ -8,7 +8,7 @@ export interface BFSConfig {
   min_weight_threshold?: number
 }
 
-const DEFAULT_BFS_CONFIG: Required<BFSConfig> = {
+export const DEFAULT_BFS_CONFIG: Required<BFSConfig> = {
   re_export: 0.8,
   static_import: 0.7,
   component_dependency: 0.6,
