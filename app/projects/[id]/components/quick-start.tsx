@@ -19,8 +19,6 @@ interface PreFillData {
   componentId?: string
 }
 
-const RISK_LEVELS = ['low', 'medium', 'high'] as const
-type RiskLevel = typeof RISK_LEVELS[number]
 
 export function QuickStart({ projectId, components, onChangeCreated }: QuickStartProps) {
   const router = useRouter()
@@ -30,7 +28,6 @@ export function QuickStart({ projectId, components, onChangeCreated }: QuickStar
   const [showComponents, setShowComponents] = useState(false)
   const [selectedComponents, setSelectedComponents] = useState<string[]>([])
   const [priority, setPriority] = useState<'low' | 'medium' | 'high'>('medium')
-  const [riskLevel, setRiskLevel] = useState<RiskLevel>('medium')
   const [submitting, setSubmitting] = useState(false)
   const [generatingIntent, setGeneratingIntent] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -58,7 +55,6 @@ export function QuickStart({ projectId, components, onChangeCreated }: QuickStar
     setSelectedComponents([])
     setShowComponents(false)
     setPriority('medium')
-    setRiskLevel('medium')
     setError(null)
     setIntentMismatch(null)
   }
@@ -91,7 +87,7 @@ export function QuickStart({ projectId, components, onChangeCreated }: QuickStar
   }
 
   const impactCount = selectedComponents.length
-  const isHighRisk = riskLevel === 'high' || impactCount >= 4
+  const isHighRisk = impactCount >= 4
 
   async function handleSubmit(startImmediately: boolean) {
     if (!title.trim() || !intent.trim()) return
@@ -113,7 +109,6 @@ export function QuickStart({ projectId, components, onChangeCreated }: QuickStar
           intent,
           type: 'feature',
           priority,
-          risk_level: riskLevel,
           component_ids: selectedComponents,
         }),
       })
@@ -266,32 +261,18 @@ export function QuickStart({ projectId, components, onChangeCreated }: QuickStar
           )}
         </div>
 
-        {/* Priority + Risk */}
-        <div className="grid grid-cols-2 gap-4 mb-4">
-          <div>
-            <label className="text-xs text-zinc-400 mb-1 block">Priority</label>
-            <select
-              value={priority}
-              onChange={e => setPriority(e.target.value as typeof priority)}
-              className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-sm text-zinc-200"
-            >
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-            </select>
-          </div>
-          <div>
-            <label className="text-xs text-zinc-400 mb-1 block">Risk Level</label>
-            <select
-              value={riskLevel}
-              onChange={e => setRiskLevel(e.target.value as RiskLevel)}
-              className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-sm text-zinc-200"
-            >
-              {RISK_LEVELS.map(r => (
-                <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>
-              ))}
-            </select>
-          </div>
+        {/* Priority */}
+        <div className="mb-4">
+          <label className="text-xs text-zinc-400 mb-1 block">Priority</label>
+          <select
+            value={priority}
+            onChange={e => setPriority(e.target.value as typeof priority)}
+            className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-sm text-zinc-200"
+          >
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+          </select>
         </div>
 
         {error && <p className="text-xs text-red-400 mb-4">{error}</p>}
@@ -300,8 +281,7 @@ export function QuickStart({ projectId, components, onChangeCreated }: QuickStar
         {isHighRisk ? (
           <div className="rounded-lg border border-amber-500/40 bg-amber-950/20 p-3 mb-4">
             <p className="text-xs text-amber-300 mb-3">
-              ⚠ This change affects {impactCount} components
-              {riskLevel === 'high' ? ' and is flagged as high risk' : ''}
+              ⚠ This change affects {impactCount} components — verify scope before executing
             </p>
             <div className="flex gap-2">
               <button
