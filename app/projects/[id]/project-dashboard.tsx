@@ -1,6 +1,7 @@
 'use client'
 import { useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { LeftNav } from '@/components/app/left-nav'
 import { ProfileAvatar } from '@/components/app/profile-avatar'
 import { ChangeIntakeForm } from '@/components/change/change-intake-form'
@@ -185,6 +186,7 @@ export function ProjectDashboard({
   signalSnapshot: any | null
 }) {
   const [showNewChange, setShowNewChange] = useState(false)
+  const router = useRouter()
 
   const { events } = useAnalysisStream(initial.id)
 
@@ -465,7 +467,13 @@ export function ProjectDashboard({
               </button>
             </div>
             <div className="flex-1 overflow-y-auto px-6 py-6">
-              <ChangeIntakeForm projectId={project.id} />
+              <ChangeIntakeForm
+                projectId={project.id}
+                onSuccess={() => {
+                  setShowNewChange(false)
+                  router.refresh()
+                }}
+              />
             </div>
           </div>
         </>

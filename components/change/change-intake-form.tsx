@@ -9,9 +9,10 @@ const PRIORITIES = ['low', 'medium', 'high'] as const
 interface Props {
   projectId: string
   initialTitle?: string
+  onSuccess?: () => void
 }
 
-export function ChangeIntakeForm({ projectId, initialTitle = '' }: Props) {
+export function ChangeIntakeForm({ projectId, initialTitle = '', onSuccess }: Props) {
   const router = useRouter()
   const [title, setTitle] = useState(initialTitle)
   const [intent, setIntent] = useState('')
@@ -66,8 +67,11 @@ export function ChangeIntakeForm({ projectId, initialTitle = '' }: Props) {
         setError(data.error ?? 'Failed to create change request')
         return
       }
-      const change = await res.json()
-      router.push(`/projects/${projectId}`)
+      if (onSuccess) {
+        onSuccess()
+      } else {
+        router.push(`/projects/${projectId}`)
+      }
     } finally {
       setLoading(false)
     }
