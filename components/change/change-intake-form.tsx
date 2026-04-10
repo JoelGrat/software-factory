@@ -67,7 +67,7 @@ export function ChangeIntakeForm({ projectId, initialTitle = '' }: Props) {
         return
       }
       const change = await res.json()
-      router.push(`/projects/${projectId}/changes/${change.id}`)
+      router.push(`/projects/${projectId}`)
     } finally {
       setLoading(false)
     }
