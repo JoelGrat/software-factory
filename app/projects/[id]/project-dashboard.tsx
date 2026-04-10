@@ -4,7 +4,6 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { LeftNav } from '@/components/app/left-nav'
 import { ProfileAvatar } from '@/components/app/profile-avatar'
-import { ChangeIntakeForm } from '@/components/change/change-intake-form'
 import { useAnalysisStream } from '@/hooks/use-analysis-stream'
 import { ActiveChanges } from './components/active-changes'
 import { RecentOutcomes } from './components/recent-outcomes'
@@ -185,8 +184,11 @@ export function ProjectDashboard({
   initialActionItems: Array<{ id: string; tier: number; source: string; priorityScore: number; payload: any }>
   signalSnapshot: any | null
 }) {
-  const [showNewChange, setShowNewChange] = useState(false)
   const router = useRouter()
+
+  function openQuickStart() {
+    window.dispatchEvent(new CustomEvent('open-quick-start', { detail: {} }))
+  }
 
   const { events } = useAnalysisStream(initial.id)
 
@@ -238,7 +240,7 @@ export function ProjectDashboard({
                   updated_at: c.updated_at,
                 }))}
                 events={events}
-                onCreateChange={() => setShowNewChange(true)}
+                onCreateChange={openQuickStart}
               />
               <RecentOutcomes
                 snapshots={initialSnapshots as any}
@@ -263,8 +265,8 @@ export function ProjectDashboard({
             <QuickStart
               projectId={project.id}
               components={initialComponents.map(c => ({ id: c.id, name: c.name, confidence: c.confidence }))}
-              onChangeCreated={(_changeId, _clientRequestId) => {
-                // SSE will deliver the event; no explicit action needed
+              onChangeCreated={() => {
+                router.refresh()
               }}
             />
 
@@ -388,7 +390,7 @@ export function ProjectDashboard({
                   <div className="flex items-center gap-3">
                     <span className="text-xs text-slate-500 font-mono">{changes.length} total</span>
                     <button
-                      onClick={() => setShowNewChange(true)}
+                      onClick={() => openQuickStart()}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-500 hover:bg-indigo-400 text-white transition-colors"
                     >
                       <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>add</span>
@@ -405,7 +407,7 @@ export function ProjectDashboard({
                       {['Fix login session expiry bug', 'Add user roles and permissions', 'Refactor API authentication layer'].map(ex => (
                         <button
                           key={ex}
-                          onClick={() => setShowNewChange(true)}
+                          onClick={() => openQuickStart()}
                           className="flex items-center gap-2 text-xs text-slate-400 hover:text-indigo-300 transition-colors"
                         >
                           <span className="material-symbols-outlined text-slate-600" style={{ fontSize: '14px' }}>arrow_forward</span>
@@ -414,7 +416,7 @@ export function ProjectDashboard({
                       ))}
                     </div>
                     <button
-                      onClick={() => setShowNewChange(true)}
+                      onClick={() => openQuickStart()}
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600/20 text-indigo-300 hover:bg-indigo-600/30 transition-colors border border-indigo-500/20"
                     >
                       <span className="material-symbols-outlined" style={{ fontSize: '13px' }}>add</span>
@@ -446,38 +448,6 @@ export function ProjectDashboard({
         </main>
       </div>
 
-      {/* New Change drawer */}
-      {showNewChange && (
-        <>
-          <div
-            className="fixed inset-0 bg-black/50 z-40"
-            onClick={() => setShowNewChange(false)}
-          />
-          <div className="fixed right-0 top-0 h-full w-[520px] bg-[#0f1929] border-l border-white/10 z-50 flex flex-col shadow-2xl">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 flex-shrink-0">
-              <div>
-                <p className="text-xs uppercase tracking-widest font-bold text-indigo-400 font-headline mb-0.5">New Change</p>
-                <p className="text-sm font-semibold text-slate-200">{project.name}</p>
-              </div>
-              <button
-                onClick={() => setShowNewChange(false)}
-                className="p-1.5 text-slate-500 hover:text-slate-200 hover:bg-white/5 rounded-lg transition-all"
-              >
-                <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>close</span>
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto px-6 py-6">
-              <ChangeIntakeForm
-                projectId={project.id}
-                onSuccess={() => {
-                  setShowNewChange(false)
-                  router.refresh()
-                }}
-              />
-            </div>
-          </div>
-        </>
-      )}
     </div>
   )
 }
