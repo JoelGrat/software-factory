@@ -1,7 +1,7 @@
 // lib/planning/plan-generator.ts
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { AIProvider } from '@/lib/ai/provider'
-import type { ImpactedComponent, PlannerTask } from './types'
+import type { ImpactedComponent, PlannerTask, DraftPlan } from './types'
 import type { ImpactFeedback } from '@/lib/impact/types'
 import { runArchitecturePhase, runComponentTasksPhase, runFallbackTasksPhase, runOrderingPhase, runSpecPhase } from './phases'
 
@@ -46,12 +46,7 @@ export async function runPlanGeneration(
     }))
 
     // Read stored draft plan — do NOT re-run AI here
-    const draftPlanData = (change as any).draft_plan as {
-      new_file_paths: string[]
-      component_names: string[]
-      assumptions: string[]
-      confidence: number
-    } | null
+    const draftPlanData = (change as any).draft_plan as DraftPlan | null
 
     const draftPlan = {
       new_file_paths: draftPlanData?.new_file_paths ?? [],
