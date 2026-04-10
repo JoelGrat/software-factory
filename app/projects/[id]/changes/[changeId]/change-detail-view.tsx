@@ -670,7 +670,7 @@ export function ChangeDetailView({
                       </button>
                     </div>
               </div>
-            ) : (['planned', 'failed', 'review', 'done'].includes(change.status)) && plan ? (
+            ) : (['awaiting_approval', 'planned', 'failed', 'review', 'done'].includes(change.status)) && plan ? (
               <div className="rounded-xl bg-[#131b2e] border border-white/5 overflow-hidden">
                 {/* Plan header */}
                 {(() => {
@@ -1032,27 +1032,45 @@ export function ChangeDetailView({
                     >
                       Regenerate
                     </button>
-                    <button
-                      disabled={approving}
-                      onClick={async () => {
-                        setApproving(true)
-                        try {
-                          const res = await fetch(`/api/change-requests/${change.id}/plan`, {
-                            method: 'PATCH',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ action: 'approve' }),
-                          })
-                          if (res.ok) {
-                            setPlan(p => p ? { ...p, status: 'approved' } : p)
+                    {change.status === 'awaiting_approval' ? (
+                      <button
+                        disabled={approving}
+                        onClick={async () => {
+                          setApproving(true)
+                          try {
+                            await fetch(`/api/change-requests/${change.id}/approve-execution`, { method: 'POST' })
+                            router.refresh()
+                          } finally {
+                            setApproving(false)
                           }
-                        } finally {
-                          setApproving(false)
-                        }
-                      }}
-                      className="px-4 py-2 rounded-lg bg-green-500 hover:bg-green-400 disabled:opacity-50 text-white text-sm font-bold font-headline transition-colors"
-                    >
-                      {approving ? 'Approving…' : 'Approve Plan'}
-                    </button>
+                        }}
+                        className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm font-bold font-headline transition-colors"
+                      >
+                        {approving ? 'Starting…' : 'Approve & Execute'}
+                      </button>
+                    ) : (
+                      <button
+                        disabled={approving}
+                        onClick={async () => {
+                          setApproving(true)
+                          try {
+                            const res = await fetch(`/api/change-requests/${change.id}/plan`, {
+                              method: 'PATCH',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ action: 'approve' }),
+                            })
+                            if (res.ok) {
+                              setPlan(p => p ? { ...p, status: 'approved' } : p)
+                            }
+                          } finally {
+                            setApproving(false)
+                          }
+                        }}
+                        className="px-4 py-2 rounded-lg bg-green-500 hover:bg-green-400 disabled:opacity-50 text-white text-sm font-bold font-headline transition-colors"
+                      >
+                        {approving ? 'Approving…' : 'Approve Plan'}
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
