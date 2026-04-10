@@ -65,4 +65,12 @@ describe('runDraftPlan', () => {
     await runDraftPlan(CHANGE, ai)
     expect(ai.callCount).toBe(1)
   })
+
+  it('defaults new_file_paths and component_names to empty arrays when AI omits them', async () => {
+    const ai = new MockAIProvider()
+    ai.setDefaultResponse(JSON.stringify({ assumptions: [], confidence: 0.5 }))
+    const result = await runDraftPlan(CHANGE, ai)
+    expect(result.new_file_paths).toEqual([])
+    expect(result.component_names).toEqual([])
+  })
 })
