@@ -177,6 +177,34 @@ export async function runPlanGeneration(
     // Mark complete
     await db.from('change_requests').update({ status: 'planned' }).eq('id', changeId)
 
+    // Apply execution policy based on project settings + change risk level
+    const { data: projectRow } = await db
+      .from('projects')
+      .select('project_settings')
+      .eq('id', (change as any).project_id)
+      .single()
+
+    const riskPolicy = (projectRow?.project_settings as any)?.riskPolicy ?? { low: 'auto', medium: 'approval', high: 'manual' }
+    const riskLevel: string = (change as any).risk_level ?? 'low'
+    const policy: 'auto' | 'approval' | 'manual' = riskPolicy[riskLevel] ?? 'manual'
+
+    if (policy === 'auto') {
+      // Auto-approve plan and fire execution immediately
+      await db.from('change_plans')
+        .update({ status: 'approved', approved_at: new Date().toISOString() })
+        .eq('id', plan.id)
+
+      const { DockerExecutor } = await import('@/lib/execution/executors/docker-executor')
+      const { runExecution } = await import('@/lib/execution/execution-orchestrator')
+      runExecution(changeId, db, ai, new DockerExecutor()).catch(err =>
+        console.error(`[plan-generator] auto-execution failed for change ${changeId}:`, err)
+      )
+    } else if (policy === 'approval') {
+      // Pause for user approval — plan stays draft, change status signals the UI
+      await db.from('change_requests').update({ status: 'awaiting_approval' }).eq('id', changeId)
+    }
+    // 'manual' → leave as 'planned', user must navigate to change detail page
+
   } catch (err) {
     await db.from('change_requests').update({ status: 'analyzed' }).eq('id', changeId)
     throw err

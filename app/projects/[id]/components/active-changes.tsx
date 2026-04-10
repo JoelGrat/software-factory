@@ -3,6 +3,10 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import type { DashboardEvent } from '@/lib/dashboard/event-types'
 
+async function approveExecution(changeId: string): Promise<void> {
+  await fetch(`/api/change-requests/${changeId}/approve-execution`, { method: 'POST' })
+}
+
 interface ChangeCard {
   id: string
   title: string
@@ -31,6 +35,11 @@ function getCardState(
   change: ChangeCard,
   events: DashboardEvent[]
 ): { label: string; pct: number | null; stage: string | null; outcome: string | null } {
+  // awaiting_approval is driven by DB status, not events
+  if (change.status === 'awaiting_approval') {
+    return { label: 'Plan ready — approval required', pct: null, stage: null, outcome: null }
+  }
+
   const changeEvents = events
     .filter(e => e.changeId === change.id)
     .sort((a, b) => a.version - b.version)
@@ -95,6 +104,7 @@ export function ActiveChanges({ projectId, initialChanges, events, onCreateChang
           const state = getCardState(change, events)
           const isCompleted = state.outcome != null
           const isStalled = state.label.startsWith('⚠')
+          const isAwaitingApproval = change.status === 'awaiting_approval'
           const canEdit = ['queued', 'started', 'progress'].some(t =>
             events.some(e => e.changeId === change.id && e.type === t)
           ) && !isCompleted
@@ -107,7 +117,9 @@ export function ActiveChanges({ projectId, initialChanges, events, onCreateChang
                 router.push(`/projects/${projectId}/changes/${change.id}`)
               }}
               className={`rounded-lg border p-3 text-sm cursor-pointer transition-all ${
-                isStalled
+                isAwaitingApproval
+                  ? 'border-blue-500/40 bg-blue-950/20 hover:border-blue-400/60 hover:bg-blue-950/30'
+                  : isStalled
                   ? 'border-amber-500/40 bg-amber-950/20 hover:border-amber-400/60 hover:bg-amber-950/30'
                   : isCompleted && state.outcome === 'success'
                   ? 'border-green-500/30 bg-green-950/10 hover:border-green-400/50 hover:bg-green-950/20'
@@ -133,7 +145,8 @@ export function ActiveChanges({ projectId, initialChanges, events, onCreateChang
                     </button>
                   )}
                   <span className={`text-xs font-medium ${
-                    isStalled ? 'text-amber-400'
+                    isAwaitingApproval ? 'text-blue-400'
+                    : isStalled ? 'text-amber-400'
                     : isCompleted && state.outcome === 'success' ? 'text-green-400'
                     : isCompleted ? 'text-red-400'
                     : 'text-zinc-500'
@@ -142,6 +155,25 @@ export function ActiveChanges({ projectId, initialChanges, events, onCreateChang
                   </span>
                 </div>
               </div>
+
+              {isAwaitingApproval && (
+                <div className="mt-3 flex gap-2">
+                  <button
+                    data-action
+                    onClick={() => approveExecution(change.id).then(() => router.refresh())}
+                    className="flex-1 bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium px-3 py-1.5 rounded transition-colors"
+                  >
+                    Approve &amp; Execute
+                  </button>
+                  <button
+                    data-action
+                    onClick={() => router.push(`/projects/${projectId}/changes/${change.id}`)}
+                    className="text-xs text-zinc-400 hover:text-zinc-200 px-3 py-1.5 rounded border border-zinc-700 hover:border-zinc-500 transition-colors"
+                  >
+                    Review Plan
+                  </button>
+                </div>
+              )}
 
               {state.pct != null && !isCompleted && (
                 <div className="mt-2 h-1 rounded-full bg-zinc-700 overflow-hidden">
