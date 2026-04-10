@@ -105,7 +105,7 @@ describe('runFileBFS', () => {
       { from_file_id: 'f2', to_file_id: 'f3', edge_type: 'static' },
       { from_file_id: 'f1', to_file_id: 'f2', edge_type: 'static' },
     ]
-    const result = runFileBFS(seeds, edges, 1)
+    const result = runFileBFS(seeds, edges, { depth_limit: 1 })
     expect(result.reachedFileIds.has('f2')).toBe(true)
     expect(result.reachedFileIds.has('f1')).toBe(false)
   })

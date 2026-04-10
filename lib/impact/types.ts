@@ -20,6 +20,7 @@ export interface FileAssignment {
 export interface FileBFSResult {
   reachedFileIds: Map<string, number>
   dynamicImportCounts: Record<string, number>
+  predecessors: Map<string, string>  // fileId → predecessor fileId (or 'seed')
 }
 
 export interface MappedComponent {
