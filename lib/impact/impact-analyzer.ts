@@ -3,6 +3,7 @@ import type { AIProvider } from '@/lib/ai/provider'
 import type { RiskFactors, ImpactFeedback } from './types'
 import { mapComponents } from './component-mapper'
 import { runFileBFS } from './file-bfs'
+import type { BFSConfig } from './file-bfs'
 import { aggregateComponents } from './component-aggregator'
 import { computeRiskScore } from './risk-scorer'
 import { detectMigrationWithAIFallback } from './migration-detector'
@@ -21,7 +22,7 @@ export async function runImpactAnalysis(
   changeId: string,
   db: SupabaseClient,
   ai: AIProvider,
-  draftPlan?: { new_file_paths: string[]; component_names: string[] }
+  draftPlan?: { new_file_paths: string[]; component_names: string[]; assumptions?: string[] }
 ): Promise<ImpactFeedback> {
   await db.from('change_requests').update({ status: 'analyzing_mapping' }).eq('id', changeId)
 
@@ -41,13 +42,23 @@ export async function runImpactAnalysis(
 
     if (!change) throw new Error(`Change not found: ${changeId}`)
 
+    // Load project BFS config from project_settings.impact_decay
+    const { data: projectRow } = await db
+      .from('projects')
+      .select('project_settings')
+      .eq('id', change.project_id)
+      .single()
+
+    const bfsConfig: BFSConfig = (projectRow?.project_settings as any)?.impact_decay ?? {}
+
     // Phase 1: Component Mapping
     // — projected component names from draft plan become extra seeds at 0.5 weight
     // — projected file paths trigger neighborhood lookup (edges, not just nodes)
     const mapResult = await mapComponents(
       changeId, change, db, ai,
       draftPlan?.component_names ?? [],
-      draftPlan?.new_file_paths ?? []
+      draftPlan?.new_file_paths ?? [],
+      draftPlan?.assumptions ?? []
     )
 
     await db.from('change_requests').update({ status: 'analyzing_propagation' }).eq('id', changeId)
@@ -69,10 +80,51 @@ export async function runImpactAnalysis(
 
     // Phase 2b: File BFS
     const seeds = mapResult.seedFileIds.map(fileId => ({ fileId, reason: 'component_match' as const }))
-    const bfsResult = runFileBFS(seeds, edges ?? [])
+    const bfsResult = runFileBFS(seeds, edges ?? [], bfsConfig)
 
     // Phase 2c: Aggregate to components
     const componentWeights = aggregateComponents(bfsResult, assignments ?? [], mapResult.components)
+
+    // Build traversal evidence: for each impacted component, trace path back to seed
+    function buildPath(fileId: string): string {
+      const path: string[] = [fileId]
+      let current = fileId
+      let hops = 0
+      while (hops < 10) {
+        const pred = bfsResult.predecessors.get(current)
+        if (!pred || pred === 'seed') break
+        path.unshift(pred)
+        current = pred
+        hops++
+      }
+      return path.join(' → ')
+    }
+
+    const traversalEvidence: Record<string, { reached_via: string[]; source: string; depth: number }> = {}
+    const fileToComponentMap = new Map<string, string>()
+    for (const a of assignments ?? []) fileToComponentMap.set(a.file_id, a.component_id)
+
+    for (const compWeight of componentWeights) {
+      const seedComp = mapResult.components.find(c => c.componentId === compWeight.componentId)
+      if (seedComp) {
+        traversalEvidence[seedComp.name] = {
+          reached_via: [`direct: ${seedComp.matchReason}`],
+          source: 'directly_mapped',
+          depth: 0,
+        }
+      } else {
+        for (const [fileId] of bfsResult.reachedFileIds) {
+          if (fileToComponentMap.get(fileId) === compWeight.componentId) {
+            traversalEvidence[compWeight.componentId] = {
+              reached_via: [buildPath(fileId)],
+              source: 'via_file',
+              depth: (buildPath(fileId).match(/→/g) ?? []).length,
+            }
+            break
+          }
+        }
+      }
+    }
 
     // Fetch component details for risk scoring
     const componentIds = componentWeights.map(c => c.componentId)
@@ -110,6 +162,7 @@ export async function runImpactAnalysis(
         analysis_quality: mapResult.aiUsed ? 'medium' : 'high',
         requires_migration: migrationResult.requiresMigration,
         requires_data_change: migrationResult.requiresDataChange,
+        traversal_evidence: traversalEvidence,
       })
       .select('id')
       .single()
