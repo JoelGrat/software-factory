@@ -11,6 +11,7 @@ export async function POST(req: Request) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()
+  const clientRequestId = req.headers.get('X-Client-Request-Id')
   const validation = validateCreateChangeRequest(body)
   if (!validation.valid) return NextResponse.json({ error: validation.error }, { status: 400 })
 
@@ -40,6 +41,7 @@ export async function POST(req: Request) {
       status: 'open',
       triggered_by: 'user',
       created_by: user.id,
+      client_request_id: clientRequestId ?? undefined,
     })
     .select('id, project_id, title, intent, type, priority, status, tags, created_at')
     .single()
