@@ -92,7 +92,7 @@ export async function runPlanGenerationPhase(
 
     const validationTasks: ValidatableTask[] = (rawTasks ?? []).map((t: any) => ({
       componentId: t.component_id,
-      componentName: t.component_id ?? 'Unknown',
+      componentName: 'Unknown',
       newFilePath: t.new_file_path,
       description: t.description,
       orderIndex: t.order_index,
@@ -103,7 +103,7 @@ export async function runPlanGenerationPhase(
     validationLog.push({ attempt: 1, passed: result1.passed, errors: result1.errors, warnings: result1.warnings, timestamp: new Date().toISOString() })
 
     let qualityScore = computeQualityScore(result1.passed, 1, result1.warnings.length, validationComponents, validationTasks)
-    const riskCap = RISK_QUALITY_CAPS[(change as any).risk_level ?? 'low'] ?? 1.0
+    const riskCap = RISK_QUALITY_CAPS[(change.risk_level as string) ?? 'low'] ?? 1.0
     qualityScore = Math.min(qualityScore, riskCap)
 
     await db.from('change_plans').update({
