@@ -51,6 +51,10 @@ async function applyExecutionPolicy(
   if (policy === 'auto' && plan && (plan.plan_quality_score ?? 1) < 0.5) {
     policy = 'approval'  // low-quality plan overrides auto
   }
+  if (policy === 'auto' && !plan) {
+    console.error(`[orchestrator] No change_plans row for ${changeId}; falling back to approval`)
+    policy = 'approval'
+  }
 
   if (policy === 'auto') {
     await db.from('change_plans')
