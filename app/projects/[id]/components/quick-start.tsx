@@ -2,46 +2,30 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 
-interface Component {
-  id: string
-  name: string
-  confidence: number
-}
-
 interface QuickStartProps {
   projectId: string
-  components: Component[]
   onChangeCreated: (changeId: string, clientRequestId: string) => void
 }
 
 interface PreFillData {
   intent?: string
-  componentId?: string
 }
 
-
-export function QuickStart({ projectId, components, onChangeCreated }: QuickStartProps) {
+export function QuickStart({ projectId, onChangeCreated }: QuickStartProps) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [title, setTitle] = useState('')
   const [intent, setIntent] = useState('')
-  const [showComponents, setShowComponents] = useState(false)
-  const [selectedComponents, setSelectedComponents] = useState<string[]>([])
   const [priority, setPriority] = useState<'low' | 'medium' | 'high'>('medium')
   const [submitting, setSubmitting] = useState(false)
   const [generatingIntent, setGeneratingIntent] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [intentMismatch, setIntentMismatch] = useState<string | null>(null)
   const intentRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     function handler(e: Event) {
       const detail = (e as CustomEvent<PreFillData>).detail
       if (detail.intent) setIntent(detail.intent)
-      if (detail.componentId) {
-        setSelectedComponents([detail.componentId])
-        setShowComponents(true)
-      }
       setOpen(true)
     }
     window.addEventListener('open-quick-start', handler)
@@ -52,11 +36,8 @@ export function QuickStart({ projectId, components, onChangeCreated }: QuickStar
     setOpen(false)
     setTitle('')
     setIntent('')
-    setSelectedComponents([])
-    setShowComponents(false)
     setPriority('medium')
     setError(null)
-    setIntentMismatch(null)
   }
 
   async function generateIntent() {
@@ -77,17 +58,6 @@ export function QuickStart({ projectId, components, onChangeCreated }: QuickStar
     }
   }
 
-  function handleIntentBlur() {
-    if (!intent) return
-    const lowerIntent = intent.toLowerCase()
-    const mismatch = components.find(
-      c => lowerIntent.includes(c.name.toLowerCase()) && !selectedComponents.includes(c.id)
-    )
-    setIntentMismatch(mismatch ? mismatch.name : null)
-  }
-
-  const impactCount = selectedComponents.length
-  const isHighRisk = impactCount >= 4
 
   async function handleSubmit(startImmediately: boolean) {
     if (!title.trim() || !intent.trim()) return
@@ -109,7 +79,6 @@ export function QuickStart({ projectId, components, onChangeCreated }: QuickStar
           intent,
           type: 'feature',
           priority,
-          component_ids: selectedComponents,
         }),
       })
 
@@ -197,68 +166,10 @@ export function QuickStart({ projectId, components, onChangeCreated }: QuickStar
             ref={intentRef}
             value={intent}
             onChange={e => setIntent(e.target.value)}
-            onBlur={handleIntentBlur}
             placeholder="Describe what needs to change and why. Be specific — this drives the impact analysis."
             rows={4}
             className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-blue-500 resize-none"
           />
-        </div>
-
-        {/* Mismatch warning */}
-        {intentMismatch && (
-          <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-950/20 p-3 text-xs text-amber-300">
-            Intent mentions &quot;{intentMismatch}&quot; but it&apos;s not selected.{' '}
-            <button
-              className="underline"
-              onClick={() => {
-                const c = components.find(c => c.name === intentMismatch)
-                if (c) {
-                  setSelectedComponents(prev => [...prev, c.id])
-                  setShowComponents(true)
-                }
-                setIntentMismatch(null)
-              }}
-            >
-              Add {intentMismatch}
-            </button>
-            {' '}·{' '}
-            <button className="underline" onClick={() => setIntentMismatch(null)}>Ignore</button>
-          </div>
-        )}
-
-        {/* Affected Components (optional, collapsed by default) */}
-        <div className="mb-4">
-          <button
-            type="button"
-            onClick={() => setShowComponents(v => !v)}
-            className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-zinc-200 transition-colors mb-2"
-          >
-            <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>
-              {showComponents ? 'expand_less' : 'expand_more'}
-            </span>
-            Affected Components {selectedComponents.length > 0 && `(${selectedComponents.length} selected)`}
-            <span className="text-zinc-600 ml-1">— optional</span>
-          </button>
-          {showComponents && (
-            <div className="space-y-1 max-h-40 overflow-y-auto bg-zinc-800 border border-zinc-700 rounded-lg p-2">
-              {components.map(c => (
-                <label key={c.id} className="flex items-center gap-2 cursor-pointer hover:bg-zinc-700 px-2 py-1 rounded">
-                  <input
-                    type="checkbox"
-                    checked={selectedComponents.includes(c.id)}
-                    onChange={e => {
-                      setSelectedComponents(prev =>
-                        e.target.checked ? [...prev, c.id] : prev.filter(id => id !== c.id)
-                      )
-                    }}
-                    className="accent-blue-500"
-                  />
-                  <span className="text-sm text-zinc-200">{c.name}</span>
-                  <span className="text-xs text-zinc-500">{c.confidence}%</span>
-                </label>
-              ))}
-            </div>
-          )}
         </div>
 
         {/* Priority */}
@@ -277,47 +188,22 @@ export function QuickStart({ projectId, components, onChangeCreated }: QuickStar
 
         {error && <p className="text-xs text-red-400 mb-4">{error}</p>}
 
-        {/* Actions */}
-        {isHighRisk ? (
-          <div className="rounded-lg border border-amber-500/40 bg-amber-950/20 p-3 mb-4">
-            <p className="text-xs text-amber-300 mb-3">
-              ⚠ This change affects {impactCount} components — verify scope before executing
-            </p>
-            <div className="flex gap-2">
-              <button
-                onClick={() => handleSubmit(true)}
-                disabled={submitting || !title.trim() || !intent.trim()}
-                className="flex-1 bg-amber-700 hover:bg-amber-600 text-white text-sm px-3 py-2 rounded disabled:opacity-50"
-              >
-                {submitting ? 'Starting…' : 'Start anyway'}
-              </button>
-              <button
-                onClick={() => handleSubmit(false)}
-                disabled={submitting || !title.trim() || !intent.trim()}
-                className="flex-1 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 text-sm px-3 py-2 rounded disabled:opacity-50"
-              >
-                Review first
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="flex gap-2">
-            <button
-              onClick={() => handleSubmit(true)}
-              disabled={submitting || !title.trim() || !intent.trim()}
-              className="flex-1 bg-blue-600 hover:bg-blue-500 text-white text-sm px-3 py-2 rounded disabled:opacity-50"
-            >
-              {submitting ? 'Starting…' : 'Start Execution →'}
-            </button>
-            <button
-              onClick={() => handleSubmit(false)}
-              disabled={submitting || !title.trim() || !intent.trim()}
-              className="flex-1 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 text-sm px-3 py-2 rounded disabled:opacity-50"
-            >
-              Review first
-            </button>
-          </div>
-        )}
+        <div className="flex gap-2">
+          <button
+            onClick={() => handleSubmit(true)}
+            disabled={submitting || !title.trim() || !intent.trim()}
+            className="flex-1 bg-blue-600 hover:bg-blue-500 text-white text-sm px-3 py-2 rounded disabled:opacity-50"
+          >
+            {submitting ? 'Submitting…' : 'Submit Change'}
+          </button>
+          <button
+            onClick={() => handleSubmit(false)}
+            disabled={submitting || !title.trim() || !intent.trim()}
+            className="flex-1 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 text-sm px-3 py-2 rounded disabled:opacity-50"
+          >
+            Save draft
+          </button>
+        </div>
       </div>
     </div>
   )

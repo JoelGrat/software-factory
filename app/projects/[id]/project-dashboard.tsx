@@ -265,7 +265,6 @@ export function ProjectDashboard({
             {/* Quick Start panel (floating) */}
             <QuickStart
               projectId={project.id}
-              components={initialComponents.map(c => ({ id: c.id, name: c.name, confidence: c.confidence }))}
               onChangeCreated={() => {
                 router.refresh()
               }}
