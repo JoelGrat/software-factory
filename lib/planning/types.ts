@@ -2,7 +2,9 @@
 
 export interface DraftPlan {
   new_file_paths: string[]
-  component_names: string[]  // rough component mapping from title/intent
+  component_names: string[]
+  assumptions: string[]       // AI-inferred assumptions about the change context
+  confidence: number          // 0.0–1.0, clamped; defaults to 0.5 if AI omits it
 }
 
 export interface ImpactedComponent {
