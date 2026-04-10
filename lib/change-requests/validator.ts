@@ -6,9 +6,9 @@ const CHANGE_TYPES: ChangeType[] = ['bug', 'feature', 'refactor', 'hotfix']
 const CHANGE_PRIORITIES: ChangePriority[] = ['low', 'medium', 'high']
 
 const ACTION_VERBS = ['add', 'update', 'remove', 'fix', 'implement', 'create', 'refactor', 'migrate', 'replace', 'delete', 'handle', 'resolve', 'improve', 'enable', 'disable', 'configure', 'integrate']
-const VAGUE_PHRASES = ['update stuff', 'misc', 'general improvements', 'refactor code', 'various fixes', 'fix bugs', 'cleanup', 'changes', 'updates']
+const VAGUE_PHRASES = ['update stuff', 'misc', 'general improvements', 'refactor code', 'various fixes', 'fix bugs']
 const TECHNICAL_NOUNS = ['endpoint', 'page', 'form', 'hook', 'service', 'table', 'schema', 'component', 'module', 'route', 'api', 'button', 'modal']
-const FILLER_WORDS = ['system', 'feature', 'thing', 'part', 'stuff']
+const FILLER_WORDS = ['system', 'thing', 'part', 'stuff']
 const AI_SCORE_THRESHOLD = 0.65
 
 function countActionVerbs(text: string): number {
