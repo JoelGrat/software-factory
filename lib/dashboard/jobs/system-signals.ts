@@ -13,6 +13,11 @@ export function computeOverallStatus(deltas: {
   return 'Mixed'
 }
 
+/**
+ * Centrality-weighted miss rate: weights each missed component by its dependency centrality.
+ * Exposed for callers that have per-component centrality data. The stored system signal
+ * snapshot uses a simpler arithmetic mean; call this when building component-level views.
+ */
 export function computeWeightedMissRate(
   missed: Array<{ component_id: string; centrality: number }>,
   actual: Array<{ component_id: string; centrality: number }>
@@ -128,7 +133,7 @@ export async function computeAndStoreSystemSignals(
       runCount: recentAccuracies.length,
     },
     missRate: {
-      avg7d: avgMissRate7d,
+      avg7d: avgMissRate7d,  // simple mean across snapshots; use computeWeightedMissRate for centrality-weighted rates when per-component data is available
       delta: missRateDelta,
       trendArrow: formatTrendArrow(-missRateDelta),
     },
