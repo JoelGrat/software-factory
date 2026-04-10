@@ -177,6 +177,18 @@ export async function runFullScan(projectId: string, db: SupabaseClient): Promis
     const componentIdMap = new Map<string, string>()
     for (const c of (upsertedComponents ?? [])) componentIdMap.set(c.name, c.id)
 
+    // 9b. Soft-delete components that existed before but weren't found in this scan
+    const newComponentNames = new Set(components.map(c => c.name))
+    const staleIds = [...existingMap.entries()]
+      .filter(([name]) => !newComponentNames.has(name))
+      .map(([, { id }]) => id)
+    if (staleIds.length > 0) {
+      await db
+        .from('system_components')
+        .update({ deleted_at: now })
+        .in('id', staleIds)
+    }
+
     // 10. Write component_assignment (delete-then-insert to work around partial unique index)
     const allFileIds = [...fileIdMap.values()]
     if (allFileIds.length > 0) {

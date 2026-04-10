@@ -33,7 +33,19 @@ export class GithubFileFetcher {
   async getFileTree(): Promise<string[]> {
     // Direct archive download — does NOT count against GitHub API rate limits
     const url = `https://github.com/${this.owner}/${this.repo}/archive/HEAD.zip`
-    const res = await fetch(url, { headers: this.headers })
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 120_000) // 2 min timeout
+    let res: Response
+    try {
+      res = await fetch(url, { headers: this.headers, signal: controller.signal })
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        throw new Error('Timed out downloading repository archive — the repo may be too large or GitHub is slow. Try again.')
+      }
+      throw err
+    } finally {
+      clearTimeout(timeout)
+    }
 
     if (res.status === 404) {
       throw new Error('Repository not found or not accessible. Check the URL and token.')

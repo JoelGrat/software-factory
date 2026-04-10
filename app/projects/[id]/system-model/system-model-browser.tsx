@@ -1,5 +1,5 @@
 'use client'
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import Link from 'next/link'
 import { LeftNav } from '@/components/app/left-nav'
 import { ProfileAvatar } from '@/components/app/profile-avatar'
@@ -170,11 +170,32 @@ export function SystemModelBrowser({
   const [filterHotspot, setFilterHotspot] = useState(false)
   const [expanded, setExpanded] = useState<string | null>(null)
   const [rescanning, setRescanning] = useState(false)
+  const [liveStatus, setLiveStatus] = useState<string>(project.scan_status)
+  const [liveProgress, setLiveProgress] = useState<ScanProgress | null>(project.scan_progress ?? null)
 
-  const isScanning = project.scan_status === 'scanning'
-  const isReady = project.scan_status === 'ready'
-  const isFailed = project.scan_status === 'failed'
-  const progress = project.scan_progress ?? null
+  // Poll for live scan progress when scanning
+  useEffect(() => {
+    if (liveStatus !== 'scanning') return
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/projects/${project.id}/scan`)
+        if (!res.ok) return
+        const data = await res.json()
+        setLiveStatus(data.scan_status)
+        if (data.scan_progress) setLiveProgress(data.scan_progress)
+        if (data.scan_status === 'ready' || data.scan_status === 'failed') {
+          window.location.reload()
+        }
+      } catch { /* ignore transient errors */ }
+    }
+    const id = setInterval(poll, 2000)
+    return () => clearInterval(id)
+  }, [liveStatus, project.id])
+
+  const isScanning = liveStatus === 'scanning'
+  const isReady = liveStatus === 'ready'
+  const isFailed = liveStatus === 'failed'
+  const progress = liveProgress
   const milestones = progress?.milestones ?? []
   const warnings = progress?.warnings ?? []
   const quality = isReady ? modelQuality(stats, progress) : null
