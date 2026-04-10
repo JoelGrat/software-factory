@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getProvider } from '@/lib/ai/registry'
 import { runImpactAnalysis } from '@/lib/impact/impact-analyzer'
+import { runPlanGeneration } from '@/lib/planning/plan-generator'
 import { validateCreateChangeRequest } from '@/lib/change-requests/validator'
 
 export async function POST(req: Request) {
@@ -50,12 +51,14 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Failed to create change request' }, { status: 500 })
   }
 
-  // Auto-trigger impact analysis fire-and-forget
+  // Auto-trigger full pipeline: impact analysis → plan generation (→ execution per policy)
   const adminDb = createAdminClient()
   const ai = getProvider()
-  runImpactAnalysis(change.id, adminDb, ai).catch(err =>
-    console.error(`[impact-analyzer] change ${change.id} failed:`, err)
-  )
+  runImpactAnalysis(change.id, adminDb, ai)
+    .then(() => runPlanGeneration(change.id, adminDb, ai))
+    .catch(err =>
+      console.error(`[pipeline] change ${change.id} failed:`, err)
+    )
 
   return NextResponse.json(change, { status: 201 })
 }
