@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getProvider } from '@/lib/ai/registry'
-import { runImpactAnalysis } from '@/lib/impact/impact-analyzer'
+import { runImpactAnalysisPhase } from '@/lib/pipeline/phases/impact-analysis'
 
 export async function POST(
   _req: Request,
@@ -29,11 +29,15 @@ export async function POST(
     return NextResponse.json({ error: 'Analysis already in progress' }, { status: 409 })
   }
 
-  // Fire-and-forget
+  // Reset to draft_planned so the phase precondition check passes
   const adminDb = createAdminClient()
+  await adminDb.from('change_requests')
+    .update({ pipeline_status: 'draft_planned' })
+    .eq('id', id)
+
   const ai = getProvider()
-  runImpactAnalysis(id, adminDb, ai).catch(err =>
-    console.error(`[impact-analyzer] change ${id} failed:`, err)
+  runImpactAnalysisPhase(id, adminDb, ai).catch(err =>
+    console.error(`[impact-analysis-phase] change ${id} failed:`, err)
   )
 
   return NextResponse.json({ status: 'analyzing' }, { status: 202 })

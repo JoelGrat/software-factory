@@ -2,9 +2,8 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getProvider } from '@/lib/ai/registry'
-import { runImpactAnalysis } from '@/lib/impact/impact-analyzer'
-import { runPlanGeneration } from '@/lib/planning/plan-generator'
-import { validateCreateChangeRequest } from '@/lib/change-requests/validator'
+import { runPipeline } from '@/lib/pipeline/orchestrator'
+import { validateCreateChangeRequest, runContentValidation } from '@/lib/change-requests/validator'
 
 export async function POST(req: Request) {
   const db = createClient()
@@ -30,6 +29,18 @@ export async function POST(req: Request) {
 
   if (!project) return NextResponse.json({ error: 'Project not found' }, { status: 404 })
 
+  // Stage 2 AI validation (suspicion-gated — runContentValidation skips AI internally if flags < 2)
+  const ai = getProvider()
+  const contentCheck = await runContentValidation(
+    validation.data.title,
+    validation.data.intent,
+    validation.data.type,
+    ai
+  )
+  if (!contentCheck.valid) {
+    return NextResponse.json(contentCheck, { status: 400 })
+  }
+
   const { data: change, error } = await db
     .from('change_requests')
     .insert({
@@ -51,14 +62,17 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Failed to create change request' }, { status: 500 })
   }
 
-  // Auto-trigger full pipeline: impact analysis → plan generation (→ execution per policy)
+  // Set pipeline_status before firing async pipeline
   const adminDb = createAdminClient()
-  const ai = getProvider()
-  runImpactAnalysis(change.id, adminDb, ai)
-    .then(() => runPlanGeneration(change.id, adminDb, ai))
-    .catch(err =>
-      console.error(`[pipeline] change ${change.id} failed:`, err)
-    )
+  await adminDb.from('change_requests')
+    .update({ pipeline_status: 'validated' })
+    .eq('id', change.id)
+
+  // Fire-and-forget full pipeline (adminDb2 to avoid reuse after possible timeout)
+  const adminDb2 = createAdminClient()
+  runPipeline(change.id, adminDb2, ai).catch(err =>
+    console.error(`[pipeline] change ${change.id} failed:`, err)
+  )
 
   return NextResponse.json(change, { status: 201 })
 }
