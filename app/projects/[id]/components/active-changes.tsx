@@ -1,5 +1,6 @@
 'use client'
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import type { DashboardEvent } from '@/lib/dashboard/event-types'
 
 interface ChangeCard {
@@ -12,6 +13,7 @@ interface ChangeCard {
 }
 
 interface ActiveChangesProps {
+  projectId: string
   initialChanges: ChangeCard[]
   events: DashboardEvent[]
   onCreateChange: () => void
@@ -60,7 +62,8 @@ function getCardState(
   }
 }
 
-export function ActiveChanges({ initialChanges, events, onCreateChange }: ActiveChangesProps) {
+export function ActiveChanges({ projectId, initialChanges, events, onCreateChange }: ActiveChangesProps) {
+  const router = useRouter()
   const [optimisticCards] = useState<ChangeCard[]>([])
 
   const allChanges = [...optimisticCards, ...initialChanges]
@@ -70,10 +73,7 @@ export function ActiveChanges({ initialChanges, events, onCreateChange }: Active
       <section>
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wide">Active Changes</h2>
-          <button
-            onClick={onCreateChange}
-            className="text-xs text-blue-400 hover:text-blue-300"
-          >
+          <button onClick={onCreateChange} className="text-xs text-blue-400 hover:text-blue-300">
             + New Change
           </button>
         </div>
@@ -102,26 +102,41 @@ export function ActiveChanges({ initialChanges, events, onCreateChange }: Active
           return (
             <div
               key={change.id}
-              className={`rounded-lg border p-3 text-sm ${
-                isStalled ? 'border-amber-500/40 bg-amber-950/20'
-                : isCompleted && state.outcome === 'success' ? 'border-green-500/30 bg-green-950/10'
-                : isCompleted ? 'border-red-500/30 bg-red-950/10'
-                : 'border-zinc-700 bg-zinc-900'
+              onClick={(e) => {
+                if ((e.target as HTMLElement).closest('[data-action]')) return
+                router.push(`/projects/${projectId}/changes/${change.id}`)
+              }}
+              className={`rounded-lg border p-3 text-sm cursor-pointer transition-all ${
+                isStalled
+                  ? 'border-amber-500/40 bg-amber-950/20 hover:border-amber-400/60 hover:bg-amber-950/30'
+                  : isCompleted && state.outcome === 'success'
+                  ? 'border-green-500/30 bg-green-950/10 hover:border-green-400/50 hover:bg-green-950/20'
+                  : isCompleted
+                  ? 'border-red-500/30 bg-red-950/10 hover:border-red-400/50 hover:bg-red-950/20'
+                  : 'border-zinc-700 bg-zinc-900 hover:border-zinc-500 hover:bg-zinc-800'
               }`}
             >
-              <div className="flex items-center justify-between">
-                <span className="font-medium text-zinc-200">{change.title}</span>
-                <div className="flex items-center gap-2">
+              <div className="flex items-center justify-between gap-3">
+                <span className="font-medium text-zinc-100 truncate">{change.title}</span>
+                <div className="flex items-center gap-2 flex-shrink-0">
                   {canEdit && (
-                    <button className="text-xs text-zinc-400 hover:text-zinc-200">
+                    <button
+                      data-action
+                      onClick={() => {
+                        window.dispatchEvent(new CustomEvent('open-quick-start', {
+                          detail: { intent: change.title },
+                        }))
+                      }}
+                      className="text-xs text-zinc-400 hover:text-zinc-200 px-2 py-0.5 rounded border border-zinc-700 hover:border-zinc-500 transition-colors"
+                    >
                       Edit
                     </button>
                   )}
-                  <span className={`text-xs ${
+                  <span className={`text-xs font-medium ${
                     isStalled ? 'text-amber-400'
                     : isCompleted && state.outcome === 'success' ? 'text-green-400'
                     : isCompleted ? 'text-red-400'
-                    : 'text-zinc-400'
+                    : 'text-zinc-500'
                   }`}>
                     {state.label}
                   </span>

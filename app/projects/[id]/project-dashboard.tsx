@@ -231,6 +231,7 @@ export function ProjectDashboard({
             {/* Active Changes + Recent Outcomes */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <ActiveChanges
+                projectId={project.id}
                 initialChanges={initialActiveChanges.map(c => ({
                   id: c.id,
                   title: c.title,
