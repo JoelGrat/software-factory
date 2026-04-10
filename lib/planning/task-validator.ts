@@ -109,7 +109,7 @@ export function validateTasks(
   const validIds = new Set(impactedComponents.map(c => c.componentId))
   let unknownRefs = 0
   for (const task of tasks) {
-    if (task.componentId && !validIds.has(task.componentId) && !plannedNewFilePaths.has(task.newFilePath ?? '')) {
+    if (task.componentId && !validIds.has(task.componentId)) {
       unknownRefs++
       if (unknownRefs === 1) {
         warnings.push(`Task references component not in impact analysis: "${task.componentId}" — verify this is intentional`)
