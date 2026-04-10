@@ -58,6 +58,45 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
         .limit(10)
     : { data: [] }
 
+  // Fetch precomputed dashboard data
+  const [
+    { data: riskScoresRaw },
+    { data: actionItemsRaw },
+    { data: signalSnapshot },
+  ] = await Promise.all([
+    db.from('risk_scores')
+      .select('component_id, risk_score, tier, system_components(name)')
+      .eq('project_id', id)
+      .order('risk_score', { ascending: false })
+      .limit(5),
+    db.from('action_items')
+      .select('id, tier, priority_score, source, payload_json')
+      .eq('project_id', id)
+      .is('resolved_at', null)
+      .order('priority_score', { ascending: false })
+      .limit(5),
+    db.from('system_signal_snapshot')
+      .select('payload_json, computed_at')
+      .eq('project_id', id)
+      .maybeSingle(),
+  ])
+
+  const riskScores = (riskScoresRaw ?? []).map(r => ({
+    componentId: r.component_id,
+    componentName: (r.system_components as any)?.name ?? r.component_id,
+    riskScore: r.risk_score,
+    tier: r.tier as 'HIGH' | 'MEDIUM',
+    incomingDeps: 0,
+  }))
+
+  const actionItems = (actionItemsRaw ?? []).map(r => ({
+    id: r.id,
+    tier: r.tier,
+    source: r.source,
+    priorityScore: r.priority_score,
+    payload: r.payload_json as any,
+  }))
+
   // Per-component file counts and confidence
   const fileCountMap: Record<string, number> = {}
   const confAccum: Record<string, { total: number; n: number }> = {}
@@ -107,6 +146,9 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
       initialComponents={components}
       initialSnapshots={recentSnapshots ?? []}
       initialActiveChanges={activeChangesRaw ?? []}
+      initialRiskScores={riskScores}
+      initialActionItems={actionItems}
+      signalSnapshot={signalSnapshot?.payload_json as any ?? null}
     />
   )
 }

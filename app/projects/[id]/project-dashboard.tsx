@@ -7,6 +7,10 @@ import { ChangeIntakeForm } from '@/components/change/change-intake-form'
 import { useAnalysisStream } from '@/hooks/use-analysis-stream'
 import { ActiveChanges } from './components/active-changes'
 import { RecentOutcomes } from './components/recent-outcomes'
+import { RiskRadar } from './components/risk-radar'
+import { NextBestActions } from './components/next-best-actions'
+import { QuickStart } from './components/quick-start'
+import { SystemSignals } from './components/system-signals'
 
 interface Project {
   id: string; name: string; scan_status: string; scan_error: string | null
@@ -170,11 +174,15 @@ function getHotspots(components: ComponentItem[]) {
 export function ProjectDashboard({
   project: initial, initialChanges, initialStats, initialComponents,
   initialSnapshots, initialActiveChanges,
+  initialRiskScores, initialActionItems, signalSnapshot,
 }: {
   project: Project; initialChanges: Change[]; initialStats: Stats
   initialComponents: ComponentItem[]
   initialSnapshots: any[]
   initialActiveChanges: Array<{ id: string; title: string; status: string; analysis_status: string; risk_level: string | null; updated_at: string }>
+  initialRiskScores: Array<{ componentId: string; componentName: string; riskScore: number; tier: 'HIGH' | 'MEDIUM'; incomingDeps: number }>
+  initialActionItems: Array<{ id: string; tier: number; source: string; priorityScore: number; payload: any }>
+  signalSnapshot: any | null
 }) {
   const [showNewChange, setShowNewChange] = useState(false)
 
@@ -235,6 +243,28 @@ export function ProjectDashboard({
                 changeNames={changeNames}
               />
             </div>
+
+            {/* Risk Radar + Next Best Actions */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <RiskRadar riskScores={initialRiskScores} projectId={project.id} />
+              <NextBestActions actionItems={initialActionItems} />
+            </div>
+
+            {/* System Signals (full width) */}
+            <SystemSignals
+              snapshot={signalSnapshot}
+              avgConfidence={initialStats.avgConfidence}
+              componentCount={initialStats.componentCount}
+            />
+
+            {/* Quick Start panel (floating) */}
+            <QuickStart
+              projectId={project.id}
+              components={initialComponents.map(c => ({ id: c.id, name: c.name, confidence: c.confidence }))}
+              onChangeCreated={(_changeId, _clientRequestId) => {
+                // SSE will deliver the event; no explicit action needed
+              }}
+            />
 
             {/* Hotspots + Next Steps */}
             {isReady && hasData && (
