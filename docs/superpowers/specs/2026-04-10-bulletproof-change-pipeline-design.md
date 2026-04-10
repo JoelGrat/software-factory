@@ -43,6 +43,14 @@ Each phase in `lib/pipeline/phases/` follows this contract:
 - **Is idempotent** — safe to re-run; re-running produces the same result, never duplicates rows
 - **Records timings** — `started_at` before first operation, `completed_at` after last write
 - **Fails independently** — sets `failed_phase` and `pipeline_status` on error, leaves previous valid state intact
+- **Transitions status atomically** — every `pipeline_status` update uses a guarded UPDATE:
+  ```sql
+  UPDATE change_requests
+  SET pipeline_status = '<next_state>'
+  WHERE id = $1 AND pipeline_status = '<expected_current_state>'
+  ```
+  If `rows_affected === 0` → abort phase immediately. Prevents concurrent execution and double-run corruption.
+- **Tags writes with `pipeline_run_id`** — every DB row written by a phase includes the current `pipeline_run_id`. Reads always use the latest `pipeline_run_id`. Prevents partial reads between delete and insert, and enables clean re-runs without corrupting prior state.
 
 ### Orchestrator (`lib/pipeline/orchestrator.ts`)
 
@@ -79,6 +87,7 @@ Existing `lib/impact/` and `lib/planning/` modules are **not moved** — they be
 | `pipeline_status` | `text` | **New column alongside existing `status`** — tracks pipeline phase granularly (see states below). Existing `status` column retained for UI/external consumers; `pipeline_status` is the internal pipeline truth. |
 | `failed_phase` | `text` | Set when a phase fails — enables re-run from that point |
 | `phase_timings` | `jsonb` | Per-phase `{ started_at, completed_at, duration_ms }` |
+| `pipeline_run_id` | `uuid` | Generated fresh each time the pipeline starts (or re-starts). All phase outputs written with this ID. Latest run_id is the authoritative state. |
 
 ### `pipeline_status` valid states
 
@@ -298,10 +307,15 @@ If hash differs:
 ### Preconditions
 
 - `pipeline_status === 'draft_planned'`
-- `draft_plan` exists with valid fields
+- `draft_plan` exists with valid fields:
+  - `component_names` is a non-empty array of strings
+  - `new_file_paths` is an array (may be empty)
+  - `confidence` is a number in `[0,1]`
 - `draft_plan.input_hash === change_requests.input_hash`
 
-Hash mismatch → fail fast: `"Draft plan is stale — re-run draft plan phase first."`
+Hash mismatch → fail fast: `"Draft plan is stale — re-run draft plan phase first."`  
+Content invalid → fail fast: `"Draft plan is corrupted — re-run draft plan phase."`  
+In both cases: `pipeline_status = 'failed_at_impact_analysis'`, `failed_phase = 'impact_analysis'`.
 
 ### Changes from current implementation
 
@@ -417,7 +431,19 @@ Computed post-validation, stored as `change_plans.plan_quality_score`:
 - `-0.15` if task coverage < 80% of total impact weight
 - Floored at `0.1`
 
-Used downstream to bias execution policy: low score (< 0.5) overrides `auto` policy → requires `approval` regardless of risk level.
+After penalties, score is capped by risk level:
+
+| Risk level | Score cap |
+|---|---|
+| `low` | 1.0 |
+| `medium` | 0.8 |
+| `high` | 0.6 |
+
+`final_score = min(penalized_score, risk_adjusted_cap)`
+
+This prevents a "perfect plan" from overriding actual change risk. A high-risk change with flawless task generation still scores ≤ 0.6.
+
+Used downstream to bias execution policy: final score < 0.5 overrides `auto` policy → requires `approval` regardless of risk level.
 
 ### Idempotency
 
