@@ -5,11 +5,16 @@ import type { ImpactFeedback } from '@/lib/impact/types'
 export function buildArchitecturePrompt(
   change: { title: string; intent: string; type: string },
   components: ImpactedComponent[],
-  feedback?: ImpactFeedback
+  feedback?: ImpactFeedback,
+  assumptions: string[] = []
 ): string {
   const componentList = components
     .map(c => `- ${c.name} (type: ${c.type}, impact: ${Math.round(c.impactWeight * 100)}%)`)
     .join('\n')
+
+  const assumptionsSection = assumptions.length > 0
+    ? `\nInitial assumptions from draft analysis:\n${assumptions.map(a => `- ${a}`).join('\n')}\n`
+    : ''
 
   let riskSection = ''
   if (feedback && feedback.risk_level !== 'low') {
@@ -52,7 +57,7 @@ Intent: ${change.intent}
 
 Impacted components (from impact analysis):
 ${componentList}
-${riskSection}
+${assumptionsSection}${riskSection}
 Design the high-level approach for implementing this change.
 For each component, describe what needs to change and how.
 If this change requires creating brand-new files not yet in the codebase, list their paths in newFilePaths.

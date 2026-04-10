@@ -4,7 +4,6 @@ import type { AIProvider } from '@/lib/ai/provider'
 import type { ImpactedComponent, PlannerTask } from './types'
 import type { ImpactFeedback } from '@/lib/impact/types'
 import { runArchitecturePhase, runComponentTasksPhase, runFallbackTasksPhase, runOrderingPhase, runSpecPhase } from './phases'
-import { runDraftPlan } from './draft-planner'
 
 export async function runPlanGeneration(
   changeId: string,
@@ -17,7 +16,7 @@ export async function runPlanGeneration(
     // Load change
     const { data: change } = await db
       .from('change_requests')
-      .select('id, project_id, title, intent, type, priority, risk_level, confidence_score, confidence_breakdown')
+      .select('id, project_id, title, intent, type, priority, risk_level, confidence_score, confidence_breakdown, draft_plan')
       .eq('id', changeId)
       .single()
 
@@ -46,10 +45,21 @@ export async function runPlanGeneration(
       impactWeight: row.impact_weight,
     }))
 
-    // Draft plan: fast AI pass to project what files/components will be created/touched.
-    // Augment with deterministic keyword match so AI alone is never a single point of failure.
-    const draftPlan = await runDraftPlan(change, ai)
+    // Read stored draft plan — do NOT re-run AI here
+    const draftPlanData = (change as any).draft_plan as {
+      new_file_paths: string[]
+      component_names: string[]
+      assumptions: string[]
+      confidence: number
+    } | null
 
+    const draftPlan = {
+      new_file_paths: draftPlanData?.new_file_paths ?? [],
+      component_names: draftPlanData?.component_names ?? [],
+      assumptions: draftPlanData?.assumptions ?? [],
+    }
+
+    // Keyword augmentation using stored component_names (no new AI call)
     const changeWords = [
       ...change.title.toLowerCase().split(/\s+/),
       ...change.intent.toLowerCase().split(/\s+/),
@@ -93,7 +103,7 @@ export async function runPlanGeneration(
     }
 
     // Phase 1: Architecture (feedback adjusts task granularity + sequencing in prompt)
-    const architecture = await runArchitecturePhase(change, components, ai, feedback)
+    const architecture = await runArchitecturePhase(change, components, ai, feedback, draftPlan.assumptions)
 
     // Create change_plans row
     const { data: plan, error: planError } = await db
