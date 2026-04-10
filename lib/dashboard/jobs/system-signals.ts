@@ -96,11 +96,12 @@ export async function computeAndStoreSystemSignals(
   const avgDurationMs = durations.length > 0 ? durations.reduce((s, v) => s + v, 0) / durations.length : null
 
   // Coverage quality
-  const { data: compRows } = await db
+  const { data: compRows, error: compRowsError } = await db
     .from('system_components')
     .select('id')
     .eq('project_id', projectId)
     .is('deleted_at', null)
+  if (compRowsError) console.error('[system-signals] system_components query failed:', compRowsError)
   const compIdList = compRows?.map(c => c.id) ?? []
 
   let lowConfComponents: unknown[] = []

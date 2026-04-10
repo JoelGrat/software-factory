@@ -34,6 +34,10 @@ describe('computeWeightedMissRate', () => {
   it('returns 0 when nothing was missed', () => {
     expect(computeWeightedMissRate([], [{ component_id: 'a', centrality: 5 }])).toBe(0)
   })
+
+  it('returns 0 when actual list is empty', () => {
+    expect(computeWeightedMissRate([], [])).toBe(0)
+  })
 })
 
 describe('formatTrendArrow', () => {
@@ -42,5 +46,10 @@ describe('formatTrendArrow', () => {
     expect(formatTrendArrow(-6)).toBe('↓')
     expect(formatTrendArrow(4)).toBe('~ stable')
     expect(formatTrendArrow(-4)).toBe('~ stable')
+  })
+
+  it('shows arrow at exactly 5 and -5', () => {
+    expect(formatTrendArrow(5)).toBe('↑')
+    expect(formatTrendArrow(-5)).toBe('↓')
   })
 })
