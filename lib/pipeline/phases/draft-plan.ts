@@ -26,7 +26,7 @@ export async function runDraftPlanPhase(
   // Load change
   const { data: change } = await db
     .from('change_requests')
-    .select('id, title, intent, type, pipeline_status, pipeline_run_id, input_hash, draft_plan')
+    .select('id, title, intent, type, pipeline_status, pipeline_run_id, input_hash, draft_plan, phase_timings')
     .eq('id', changeId)
     .single()
   if (!change) throw new Error(`Change not found: ${changeId}`)
