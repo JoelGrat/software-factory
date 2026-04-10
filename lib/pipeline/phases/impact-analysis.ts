@@ -11,11 +11,12 @@ export async function runImpactAnalysisPhase(
   const startedAt = new Date().toISOString()
 
   // Load change to check preconditions
-  const { data: change } = await db
+  const { data: change, error: loadErr } = await db
     .from('change_requests')
     .select('id, pipeline_status, input_hash, draft_plan, phase_timings')
     .eq('id', changeId)
     .single()
+  if (loadErr) throw new Error(`Failed to load change ${changeId}: ${loadErr.message}`)
   if (!change) throw new Error(`Change not found: ${changeId}`)
 
   // Precondition: pipeline_status must be 'draft_planned'
@@ -23,21 +24,14 @@ export async function runImpactAnalysisPhase(
     throw new Error(`Cannot start impact analysis: expected pipeline_status 'draft_planned', got '${change.pipeline_status}'`)
   }
 
-  // Precondition: draft_plan must exist and be valid
+  // Read draft_plan if present — tolerate missing (pre-pipeline changes or manual re-trigger)
   const dp = change.draft_plan as Record<string, unknown> | null
-  if (!dp) throw new Error('Cannot start impact analysis: draft_plan is missing — re-run draft plan phase')
-  if (!Array.isArray(dp.component_names) || dp.component_names.length === 0) {
-    throw new Error('Cannot start impact analysis: draft_plan.component_names is empty or invalid — re-run draft plan phase')
-  }
-  if (!Array.isArray(dp.new_file_paths)) {
-    throw new Error('Cannot start impact analysis: draft_plan.new_file_paths is invalid — re-run draft plan phase')
-  }
-  if (typeof dp.confidence !== 'number') {
-    throw new Error('Cannot start impact analysis: draft_plan.confidence is invalid — re-run draft plan phase')
-  }
-  if (dp.input_hash !== change.input_hash) {
-    throw new Error('Cannot start impact analysis: draft_plan is stale (hash mismatch) — re-run draft plan phase')
-  }
+  const draftPlanValid =
+    dp !== null &&
+    Array.isArray(dp.component_names) &&
+    dp.component_names.length > 0 &&
+    Array.isArray(dp.new_file_paths) &&
+    typeof dp.confidence === 'number'
 
   // Guarded status transition
   const { data: transitioned } = await db
@@ -51,11 +45,11 @@ export async function runImpactAnalysisPhase(
   }
 
   try {
-    const draftPlan = {
+    const draftPlan = draftPlanValid && dp ? {
       new_file_paths: dp.new_file_paths as string[],
       component_names: dp.component_names as string[],
       assumptions: Array.isArray(dp.assumptions) ? dp.assumptions as string[] : [],
-    }
+    } : { new_file_paths: [], component_names: [], assumptions: [] }
 
     // runImpactAnalysis handles its own status updates and writes
     // change_impacts / change_impact_components / change_risk_factors
