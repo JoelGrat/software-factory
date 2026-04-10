@@ -19,7 +19,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
 
   const [{ data: changes }, { count: fileCount }, { data: allComponents }] = await Promise.all([
     db.from('change_requests')
-      .select('id, title, type, priority, status, risk_level, created_at, updated_at')
+      .select('id, title, type, priority, status, risk_level, analysis_status, created_at, updated_at')
       .eq('project_id', id)
       .order('updated_at', { ascending: false }),
     db.from('files').select('*', { count: 'exact', head: true }).eq('project_id', id),
@@ -38,6 +38,25 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
         db.from('component_dependencies').select('from_id, to_id').in('from_id', allIds).is('deleted_at', null),
       ])
     : [{ data: [] }, { data: [] }]
+
+  // Fetch active changes (not yet completed/failed/stalled)
+  const { data: activeChangesRaw } = await db
+    .from('change_requests')
+    .select('id, title, status, analysis_status, risk_level, updated_at')
+    .eq('project_id', id)
+    .not('analysis_status', 'in', '("completed","failed","stalled")')
+    .order('updated_at', { ascending: false })
+
+  // Fetch recent analysis snapshots
+  const changeIds = (changes ?? []).map(c => c.id)
+  const { data: recentSnapshots } = changeIds.length > 0
+    ? await db
+        .from('analysis_result_snapshot')
+        .select('*')
+        .in('change_id', changeIds)
+        .order('completed_at', { ascending: false })
+        .limit(10)
+    : { data: [] }
 
   // Per-component file counts and confidence
   const fileCountMap: Record<string, number> = {}
@@ -86,6 +105,8 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
         avgConfidence: totalConfN > 0 ? Math.round(totalConfSum / totalConfN) : 0,
       }}
       initialComponents={components}
+      initialSnapshots={recentSnapshots ?? []}
+      initialActiveChanges={activeChangesRaw ?? []}
     />
   )
 }

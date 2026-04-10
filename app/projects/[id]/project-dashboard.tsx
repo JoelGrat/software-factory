@@ -4,6 +4,9 @@ import Link from 'next/link'
 import { LeftNav } from '@/components/app/left-nav'
 import { ProfileAvatar } from '@/components/app/profile-avatar'
 import { ChangeIntakeForm } from '@/components/change/change-intake-form'
+import { useAnalysisStream } from '@/hooks/use-analysis-stream'
+import { ActiveChanges } from './components/active-changes'
+import { RecentOutcomes } from './components/recent-outcomes'
 
 interface Project {
   id: string; name: string; scan_status: string; scan_error: string | null
@@ -19,7 +22,7 @@ interface ComponentItem {
 }
 interface Change {
   id: string; title: string; type: string; priority: string
-  status: string; risk_level: string | null; created_at: string; updated_at: string
+  status: string; risk_level: string | null; analysis_status: string; created_at: string; updated_at: string
 }
 
 const TYPE_COLORS: Record<string, string> = {
@@ -166,11 +169,19 @@ function getHotspots(components: ComponentItem[]) {
 
 export function ProjectDashboard({
   project: initial, initialChanges, initialStats, initialComponents,
+  initialSnapshots, initialActiveChanges,
 }: {
   project: Project; initialChanges: Change[]; initialStats: Stats
   initialComponents: ComponentItem[]
+  initialSnapshots: any[]
+  initialActiveChanges: Array<{ id: string; title: string; status: string; analysis_status: string; risk_level: string | null; updated_at: string }>
 }) {
   const [showNewChange, setShowNewChange] = useState(false)
+
+  const { events } = useAnalysisStream(initial.id)
+
+  const changeNames: Record<string, string> = {}
+  for (const c of initialChanges) changeNames[c.id] = c.title
 
   const project = initial
   const changes = initialChanges
@@ -204,6 +215,26 @@ export function ProjectDashboard({
         <LeftNav projectId={project.id} projectName={project.name} />
         <main className="flex-1 overflow-y-auto p-8">
           <div className="max-w-5xl mx-auto space-y-5">
+
+            {/* Active Changes + Recent Outcomes */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <ActiveChanges
+                initialChanges={initialActiveChanges.map(c => ({
+                  id: c.id,
+                  title: c.title,
+                  status: c.status,
+                  analysisStatus: c.analysis_status,
+                  risk_level: c.risk_level ?? '',
+                  updated_at: c.updated_at,
+                }))}
+                events={events}
+                onCreateChange={() => setShowNewChange(true)}
+              />
+              <RecentOutcomes
+                snapshots={initialSnapshots as any}
+                changeNames={changeNames}
+              />
+            </div>
 
             {/* Hotspots + Next Steps */}
             {isReady && hasData && (
