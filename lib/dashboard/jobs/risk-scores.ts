@@ -70,12 +70,13 @@ export async function computeAndStoreRiskScores(
   db: SupabaseClient,
   projectId: string
 ): Promise<void> {
-  const { data: components } = await db
+  const { data: components, error: compError } = await db
     .from('system_components')
     .select('id, is_anchored')
     .eq('project_id', projectId)
     .is('deleted_at', null)
 
+  if (compError) { console.error('[risk-scores] components query failed:', compError); return }
   if (!components || components.length === 0) return
 
   const compIds = components.map(c => c.id)
@@ -105,7 +106,7 @@ export async function computeAndStoreRiskScores(
   }
 
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
-  const { data: recentSnapshots } = await db
+  const { data: recentSnapshots, error: snapError } = await db
     .from('analysis_result_snapshot')
     .select('components_affected, model_miss, completed_at, miss_rate')
     .gte('completed_at', thirtyDaysAgo)
@@ -113,6 +114,8 @@ export async function computeAndStoreRiskScores(
       'change_id',
       (await db.from('change_requests').select('id').eq('project_id', projectId)).data?.map(r => r.id) ?? []
     )
+
+  if (snapError) { console.error('[risk-scores] snapshots query failed:', snapError); return }
 
   const missCountMap: Record<string, number> = {}
   const appearedInMap: Record<string, number> = {}
@@ -155,7 +158,7 @@ export async function computeAndStoreRiskScores(
         daysSinceLastMiss,
         dependencyCentrality: centralityMap[c.id] ?? 0,
         changeFrequency30d: appeared,
-        modelConfidence: conf ? conf.total / conf.n / 100 : 0.5,
+        modelConfidence: conf ? Math.min(1, Math.max(0, conf.total / conf.n / 100)) : 0.5,  // confidence stored as 0–100 in DB; normalize to 0–1
       }
     })
 
@@ -187,7 +190,7 @@ export async function computeAndStoreRiskScores(
   const capped = applyHardCap(scored)
 
   if (capped.length > 0) {
-    await db.from('risk_scores').upsert(
+    const { error: upsertError } = await db.from('risk_scores').upsert(
       capped.map(s => ({
         component_id: s.componentId,
         project_id: projectId,
@@ -195,13 +198,15 @@ export async function computeAndStoreRiskScores(
         tier: s.tier,
         computed_at: new Date().toISOString(),
       })),
-      { onConflict: 'component_id' }
+      { onConflict: 'component_id,project_id' }
     )
+    if (upsertError) console.error('[risk-scores] upsert failed:', upsertError)
   }
 
   const qualifyingIds = new Set(capped.map(s => s.componentId))
   const staleIds = compIds.filter(id => !qualifyingIds.has(id))
   if (staleIds.length > 0) {
-    await db.from('risk_scores').delete().in('component_id', staleIds)
+    const { error: deleteError } = await db.from('risk_scores').delete().in('component_id', staleIds)
+    if (deleteError) console.error('[risk-scores] stale delete failed:', deleteError)
   }
 }

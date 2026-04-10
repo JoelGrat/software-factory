@@ -72,3 +72,18 @@ describe('applyHardCap', () => {
     expect(capped.filter(s => s.tier === 'HIGH')).toHaveLength(2)
   })
 })
+
+describe('assignTier', () => {
+  it('returns HIGH for score >= 0.7', () => {
+    expect(assignTier(0.7)).toBe('HIGH')
+    expect(assignTier(0.9)).toBe('HIGH')
+  })
+  it('returns MEDIUM for score >= 0.4 and < 0.7', () => {
+    expect(assignTier(0.4)).toBe('MEDIUM')
+    expect(assignTier(0.69)).toBe('MEDIUM')
+  })
+  it('returns null for score < 0.4', () => {
+    expect(assignTier(0.39)).toBeNull()
+    expect(assignTier(0)).toBeNull()
+  })
+})
