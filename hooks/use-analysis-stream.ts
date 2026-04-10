@@ -37,6 +37,7 @@ export function useAnalysisStream(projectId: string): UseAnalysisStreamResult {
   const lastVersionRef = useRef<number>(0)
   const runVersionsRef = useRef<Map<string, number>>(new Map())
   const realEventsSeenRef = useRef<Map<string, Set<string>>>(new Map())
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const _setRunVersion = useCallback((changeId: string, version: number) => {
     runVersionsRef.current.set(changeId, version)
@@ -45,7 +46,7 @@ export function useAnalysisStream(projectId: string): UseAnalysisStreamResult {
   const _handleEvent = useCallback((event: DashboardEvent) => {
     // 1. Drop if version <= last seen (dedup)
     if (event.version > 0 && event.version <= lastVersionRef.current) return
-    if (event.version > 0) lastVersionRef.current = event.version
+    if (event.version > 0) lastVersionRef.current = Math.max(lastVersionRef.current, event.version)
 
     // 2. Drop if analysisVersion doesn't match current run (stale run events)
     const currentRunVersion = runVersionsRef.current.get(event.changeId)
@@ -103,6 +104,15 @@ export function useAnalysisStream(projectId: string): UseAnalysisStreamResult {
     }
   }, [projectId])
 
+  const poll = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/projects/${projectId}/dashboard-poll`)
+      if (!res.ok) return
+      const data = await res.json()
+      reconcile(data.snapshots ?? [], data.activeChanges ?? [])
+    } catch { /* ignore transient failures */ }
+  }, [projectId, reconcile])
+
   // SSE connection
   useEffect(() => {
     let es: EventSource | null = null
@@ -134,29 +144,23 @@ export function useAnalysisStream(projectId: string): UseAnalysisStreamResult {
         if (retries >= MAX_RETRIES) {
           setConnectionState('degraded')
         } else {
-          setTimeout(connect, 2000 * retries)
+          retryTimerRef.current = setTimeout(connect, 2000 * retries)
         }
       }
     }
 
     connect()
-    return () => { es?.close() }
-  }, [projectId, _handleEvent])
-
-  async function poll() {
-    try {
-      const res = await fetch(`/api/projects/${projectId}/dashboard-poll`)
-      if (!res.ok) return
-      const data = await res.json()
-      reconcile(data.snapshots ?? [], data.activeChanges ?? [])
-    } catch { /* ignore transient failures */ }
-  }
+    return () => {
+      if (retryTimerRef.current) clearTimeout(retryTimerRef.current)
+      es?.close()
+    }
+  }, [projectId, _handleEvent, poll])
 
   useEffect(() => {
     poll()
     const interval = setInterval(poll, POLL_INTERVAL_MS)
     return () => clearInterval(interval)
-  }, [projectId])
+  }, [projectId, poll])
 
   return { events, connectionState, activeChanges, snapshots, _handleEvent, _setRunVersion }
 }
