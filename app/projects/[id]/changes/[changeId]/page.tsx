@@ -23,7 +23,7 @@ export default async function ChangeDetailPage({
 
   const { data: change } = await db
     .from('change_requests')
-    .select('id, project_id, title, intent, type, priority, status, risk_level, confidence_score, analysis_quality, tags, created_at, updated_at')
+    .select('id, project_id, title, intent, type, priority, status, pipeline_status, failed_phase, risk_level, confidence_score, analysis_quality, tags, created_at, updated_at')
     .eq('id', changeId)
     .eq('project_id', id)
     .single()

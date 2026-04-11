@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git stash:*)",
+      "Bash(git checkout:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m ':*)",
+      "Bash(npx vitest:*)",
+      "Bash(git commit:*)",
+      "Bash(npx supabase:*)",
+      "Bash(grep -n \"status\\\\|ChangeCard\\\\|analysisStatus\\\\|change_requests\" C:/Users/joelg/softwareFactory_git/app/projects/[id]/page.tsx)",
+      "Bash(grep:*)",
+      "mcp__plugin_claude-mem_mcp-search__search"
+    ]
+  }
+}

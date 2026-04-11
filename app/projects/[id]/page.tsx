@@ -39,12 +39,12 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
       ])
     : [{ data: [] }, { data: [] }]
 
-  // Fetch active changes (not yet completed/failed/stalled)
+  // Fetch active changes — exclude only completed/stalled; keep failed so users can retry or dismiss
   const { data: activeChangesRaw } = await db
     .from('change_requests')
-    .select('id, title, status, analysis_status, risk_level, updated_at')
+    .select('id, title, status, analysis_status, pipeline_status, risk_level, updated_at')
     .eq('project_id', id)
-    .not('analysis_status', 'in', '("completed","failed","stalled")')
+    .not('analysis_status', 'in', '("completed","stalled")')
     .order('updated_at', { ascending: false })
 
   // Fetch recent analysis snapshots

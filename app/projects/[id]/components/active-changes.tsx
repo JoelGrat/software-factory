@@ -8,6 +8,7 @@ interface ChangeCard {
   title: string
   status: string
   analysisStatus: string
+  pipelineStatus: string
   risk_level: string
   updated_at: string
 }
@@ -82,6 +83,16 @@ const ANALYZING_STAGE_LABELS: Record<string, string> = {
   planning: 'Generating plan…',
 }
 
+const PIPELINE_STATUS_LABELS: Record<string, string> = {
+  validated:        'Starting…',
+  draft_planning:   'Drafting plan…',
+  draft_planned:    'Draft ready…',
+  impact_analyzing: 'Analyzing impact…',
+  impact_analyzed:  'Impact analyzed…',
+  plan_generating:  'Generating implementation plan…',
+  plan_generated:   'Plan ready',
+}
+
 const EXEC_STAGE_LABELS: Record<string, string> = {
   context_load: 'Loading context',
   impact_analysis: 'Analyzing impact',
@@ -110,8 +121,11 @@ function getCardState(change: ChangeCard, events: DashboardEvent[]): CardState {
   if (change.status === 'planned') {
     return { phase: 'planned', statusLine: 'Plan ready — manual start required', subLine: null, pct: null, iterationLabel: null }
   }
-  if (change.status === 'failed' && !latest) {
-    return { phase: 'failed', statusLine: 'Analysis failed', subLine: null, pct: null, iterationLabel: null }
+  if ((change.status === 'failed' || change.pipelineStatus?.startsWith('failed_at_')) && !latest) {
+    const failedPhase = change.pipelineStatus?.startsWith('failed_at_')
+      ? change.pipelineStatus.replace('failed_at_', '').replace(/_/g, ' ')
+      : ''
+    return { phase: 'failed', statusLine: failedPhase ? `Failed — ${failedPhase}` : 'Execution failed', subLine: null, pct: null, iterationLabel: null }
   }
 
   // Analysing statuses driven by DB (before events arrive)
@@ -119,6 +133,18 @@ function getCardState(change: ChangeCard, events: DashboardEvent[]): CardState {
     return {
       phase: 'analyzing',
       statusLine: ANALYZING_STAGE_LABELS[change.status] ?? 'Analyzing…',
+      subLine: null,
+      pct: null,
+      iterationLabel: null,
+    }
+  }
+
+  // Pipeline in-progress statuses (no events yet — new pipeline path)
+  if (!latest && PIPELINE_STATUS_LABELS[change.pipelineStatus]) {
+    const isPlanning = ['plan_generating', 'plan_generated'].includes(change.pipelineStatus)
+    return {
+      phase: isPlanning ? 'analyzing' : 'analyzing',
+      statusLine: PIPELINE_STATUS_LABELS[change.pipelineStatus],
       subLine: null,
       pct: null,
       iterationLabel: null,
@@ -197,7 +223,9 @@ function ChangeCardItem({
 }) {
   const router = useRouter()
   const [approving, setApproving] = useState(false)
+  const [approveError, setApproveError] = useState<string | null>(null)
   const [retrying, setRetrying] = useState(false)
+  const [dismissing, setDismissing] = useState(false)
   const ago = useRelativeTime(change.updated_at)
   const state = getCardState(change, events)
 
@@ -242,8 +270,14 @@ function ChangeCardItem({
 
   async function handleApprove() {
     setApproving(true)
+    setApproveError(null)
     try {
-      await fetch(`/api/change-requests/${change.id}/approve-execution`, { method: 'POST' })
+      const res = await fetch(`/api/change-requests/${change.id}/approve-execution`, { method: 'POST' })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setApproveError(data.detail ?? data.error ?? 'Something went wrong')
+        return
+      }
       router.refresh()
     } finally {
       setApproving(false)
@@ -253,11 +287,20 @@ function ChangeCardItem({
   async function handleRetry() {
     setRetrying(true)
     try {
-      // Re-run full pipeline from analysis
       await fetch(`/api/change-requests/${change.id}/analyze`, { method: 'POST' })
       router.refresh()
     } finally {
       setRetrying(false)
+    }
+  }
+
+  async function handleDismiss() {
+    setDismissing(true)
+    try {
+      await fetch(`/api/change-requests/${change.id}/dismiss`, { method: 'POST' })
+      router.refresh()
+    } finally {
+      setDismissing(false)
     }
   }
 
@@ -318,22 +361,27 @@ function ChangeCardItem({
 
       {/* Awaiting approval: primary actions */}
       {state.phase === 'awaiting_approval' && (
-        <div className="mt-3 flex gap-2">
-          <button
-            data-action
-            onClick={handleApprove}
-            disabled={approving}
-            className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-semibold px-3 py-1.5 rounded transition-colors"
-          >
-            {approving ? 'Starting…' : 'Approve & Execute'}
-          </button>
-          <button
-            data-action
-            onClick={() => router.push(`/projects/${projectId}/changes/${change.id}`)}
-            className="text-xs text-zinc-400 hover:text-zinc-200 px-3 py-1.5 rounded border border-zinc-700 hover:border-zinc-500 transition-colors"
-          >
-            Review Plan
-          </button>
+        <div className="mt-3 space-y-2">
+          <div className="flex gap-2">
+            <button
+              data-action
+              onClick={handleApprove}
+              disabled={approving}
+              className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-semibold px-3 py-1.5 rounded transition-colors"
+            >
+              {approving ? 'Starting…' : 'Approve & Execute'}
+            </button>
+            <button
+              data-action
+              onClick={() => router.push(`/projects/${projectId}/changes/${change.id}`)}
+              className="text-xs text-zinc-400 hover:text-zinc-200 px-3 py-1.5 rounded border border-zinc-700 hover:border-zinc-500 transition-colors"
+            >
+              Review Plan
+            </button>
+          </div>
+          {approveError && (
+            <p data-action className="text-xs text-red-400 leading-snug">{approveError}</p>
+          )}
         </div>
       )}
 
@@ -371,7 +419,7 @@ function ChangeCardItem({
         </div>
       )}
 
-      {/* Failed: retry analysis + view logs */}
+      {/* Failed: retry analysis + dismiss */}
       {state.phase === 'failed' && (
         <div className="mt-3 flex gap-2">
           <button
@@ -380,14 +428,23 @@ function ChangeCardItem({
             disabled={retrying}
             className="flex-1 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 text-zinc-200 text-xs font-semibold px-3 py-1.5 rounded transition-colors"
           >
-            {retrying ? 'Retrying…' : 'Retry Analysis'}
+            {retrying ? 'Retrying…' : 'Retry'}
           </button>
           <button
             data-action
             onClick={() => router.push(`/projects/${projectId}/changes/${change.id}`)}
             className="text-xs text-zinc-400 hover:text-zinc-200 px-3 py-1.5 rounded border border-zinc-700 hover:border-zinc-500 transition-colors"
           >
-            View Logs
+            Details
+          </button>
+          <button
+            data-action
+            onClick={handleDismiss}
+            disabled={dismissing}
+            className="text-xs text-zinc-500 hover:text-zinc-300 disabled:opacity-50 px-2 py-1.5 transition-colors"
+            title="Remove from active list"
+          >
+            {dismissing ? '…' : '✕'}
           </button>
         </div>
       )}

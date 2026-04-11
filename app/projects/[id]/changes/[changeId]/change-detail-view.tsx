@@ -148,6 +148,7 @@ export function ChangeDetailView({
     initialPlan && initialPlan.status !== 'approved' ? 'review' : 'tasks'
   )
   const [approving, setApproving] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
   const [generatingSpec, setGeneratingSpec] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -650,24 +651,42 @@ export function ChangeDetailView({
                     </div>
 
                     {/* Generate Plan CTA */}
-                    <div className="px-5 py-4 flex items-center justify-between">
-                      <p className="text-xs text-slate-600">
-                        {recommendation === 'REVIEW BEFORE PLANNING'
-                          ? 'High risk + low confidence — review carefully before generating a plan'
-                          : 'Approving generates a task plan. Execution happens separately.'}
-                      </p>
-                      <button
-                        onClick={async () => {
-                          const confirmed = change.risk_level !== 'high' ||
-                            window.confirm('This change carries high risk. Generate a plan anyway?')
-                          if (!confirmed) return
-                          const res = await fetch(`/api/change-requests/${change.id}/plan`, { method: 'POST' })
-                          if (res.ok) setChange(c => ({ ...c, status: 'planning' }))
-                        }}
-                        className="flex-shrink-0 px-4 py-2 rounded-lg bg-indigo-500 hover:bg-indigo-400 text-white text-sm font-bold font-headline transition-colors"
-                      >
-                        Generate Plan
-                      </button>
+                    <div className="px-5 py-4 space-y-2">
+                      {actionError && (
+                        <div className="flex items-start gap-2 rounded-lg bg-red-950/40 border border-red-500/30 px-3 py-2">
+                          <span className="material-symbols-outlined text-red-400 flex-shrink-0" style={{ fontSize: 15 }}>error</span>
+                          <p className="text-xs text-red-400 leading-snug">{actionError}</p>
+                        </div>
+                      )}
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs text-slate-600">
+                          {recommendation === 'REVIEW BEFORE PLANNING'
+                            ? 'High risk + low confidence — review carefully before generating a plan'
+                            : 'Approving generates a task plan. Execution happens separately.'}
+                        </p>
+                        <button
+                          onClick={async () => {
+                            const confirmed = change.risk_level !== 'high' ||
+                              window.confirm('This change carries high risk. Generate a plan anyway?')
+                            if (!confirmed) return
+                            setActionError(null)
+                            try {
+                              const res = await fetch(`/api/change-requests/${change.id}/plan`, { method: 'POST' })
+                              if (res.ok) {
+                                setChange(c => ({ ...c, status: 'planning' }))
+                              } else {
+                                const data = await res.json().catch(() => ({}))
+                                setActionError(data.detail ?? data.error ?? 'Failed to generate plan')
+                              }
+                            } catch {
+                              setActionError('Network error — could not reach the server')
+                            }
+                          }}
+                          className="flex-shrink-0 px-4 py-2 rounded-lg bg-indigo-500 hover:bg-indigo-400 text-white text-sm font-bold font-headline transition-colors"
+                        >
+                          Generate Plan
+                        </button>
+                      </div>
                     </div>
               </div>
             ) : (['awaiting_approval', 'planned', 'failed', 'review', 'done'].includes(change.status)) && plan ? (
@@ -1018,7 +1037,14 @@ export function ChangeDetailView({
 
                 {/* Approve footer */}
                 {plan.status !== 'approved' && (
-                  <div className="px-5 py-4 border-t border-white/5 flex items-center justify-end gap-3">
+                  <div className="px-5 py-4 border-t border-white/5 space-y-3">
+                  {actionError && (
+                    <div className="flex items-start gap-2 rounded-lg bg-red-950/40 border border-red-500/30 px-3 py-2">
+                      <span className="material-symbols-outlined text-red-400 flex-shrink-0" style={{ fontSize: 15 }}>error</span>
+                      <p className="text-xs text-red-400 leading-snug">{actionError}</p>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-end gap-3">
                     <button
                       onClick={async () => {
                         try {
@@ -1037,9 +1063,17 @@ export function ChangeDetailView({
                         disabled={approving}
                         onClick={async () => {
                           setApproving(true)
+                          setActionError(null)
                           try {
-                            await fetch(`/api/change-requests/${change.id}/approve-execution`, { method: 'POST' })
+                            const res = await fetch(`/api/change-requests/${change.id}/approve-execution`, { method: 'POST' })
+                            if (!res.ok) {
+                              const data = await res.json().catch(() => ({}))
+                              setActionError(data.detail ?? data.error ?? 'Something went wrong')
+                              return
+                            }
                             router.refresh()
+                          } catch {
+                            setActionError('Network error — could not reach the server')
                           } finally {
                             setApproving(false)
                           }
@@ -1053,6 +1087,7 @@ export function ChangeDetailView({
                         disabled={approving}
                         onClick={async () => {
                           setApproving(true)
+                          setActionError(null)
                           try {
                             const res = await fetch(`/api/change-requests/${change.id}/plan`, {
                               method: 'PATCH',
@@ -1061,7 +1096,12 @@ export function ChangeDetailView({
                             })
                             if (res.ok) {
                               setPlan(p => p ? { ...p, status: 'approved' } : p)
+                            } else {
+                              const data = await res.json().catch(() => ({}))
+                              setActionError(data.detail ?? data.error ?? 'Something went wrong')
                             }
+                          } catch {
+                            setActionError('Network error — could not reach the server')
                           } finally {
                             setApproving(false)
                           }
@@ -1071,6 +1111,7 @@ export function ChangeDetailView({
                         {approving ? 'Approving…' : 'Approve Plan'}
                       </button>
                     )}
+                  </div>
                   </div>
                 )}
               </div>
