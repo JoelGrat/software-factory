@@ -18,10 +18,10 @@ export async function POST(req: Request) {
 Current intent:
 ${intent}
 
-Improve this intent to be clearer, more specific, and actionable. Explain what needs to change and why. Keep it concise (2–5 sentences). Return only the improved intent text, no preamble.`
+Improve this intent to be clearer, more specific, and actionable. Explain what needs to change and why. Keep it concise (2–5 sentences). The intent MUST include at least 2 action verbs (e.g. add, fix, update, implement, remove, configure, migrate, replace). Return only the improved intent text, no preamble.`
     : `You are a software change request assistant. Generate a clear, specific intent for a "${type ?? 'feature'}" change request titled: "${title}".
 
-Describe what likely needs to change and why, in 2–5 sentences. Be concrete and actionable. Return only the intent text, no preamble.`
+Describe what likely needs to change and why, in 2–5 sentences. Be concrete and actionable. The intent MUST include at least 2 action verbs (e.g. add, fix, update, implement, remove, configure, migrate, replace). Return only the intent text, no preamble.`
 
   const result = await ai.complete(prompt, { maxTokens: 300, temperature: 0.4 })
 

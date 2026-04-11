@@ -56,6 +56,9 @@ describe('runFileBFS', () => {
     const result = runFileBFS(seeds, edges)
     expect(result.reachedFileIds.get('f2')).toBeCloseTo(0.7)
     expect(result.reachedFileIds.get('f1')).toBeCloseTo(0.49)
+    expect(result.predecessors.get('f3')).toBe('seed')
+    expect(result.predecessors.get('f2')).toBe('f3')
+    expect(result.predecessors.get('f1')).toBe('f2')
   })
 
   it('stops propagation when weight drops below 0.1', () => {
@@ -70,7 +73,7 @@ describe('runFileBFS', () => {
       { from_file_id: 'f2', to_file_id: 'f3', edge_type: 'static' },
       { from_file_id: 'f1', to_file_id: 'f2', edge_type: 'static' }, // 0.7^7 = 0.082 < 0.1 → stop
     ]
-    const result = runFileBFS(seeds, edges, 10)
+    const result = runFileBFS(seeds, edges, { depth_limit: 10 })
     expect(result.reachedFileIds.has('f7')).toBe(true)
     expect(result.reachedFileIds.has('f1')).toBe(false)
   })
@@ -105,7 +108,7 @@ describe('runFileBFS', () => {
       { from_file_id: 'f2', to_file_id: 'f3', edge_type: 'static' },
       { from_file_id: 'f1', to_file_id: 'f2', edge_type: 'static' },
     ]
-    const result = runFileBFS(seeds, edges, 1)
+    const result = runFileBFS(seeds, edges, { depth_limit: 1 })
     expect(result.reachedFileIds.has('f2')).toBe(true)
     expect(result.reachedFileIds.has('f1')).toBe(false)
   })

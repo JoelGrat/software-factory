@@ -1,114 +1,110 @@
+// tests/lib/change-requests/validator.test.ts
 import { describe, it, expect } from 'vitest'
 import {
   validateCreateChangeRequest,
-  validatePatchChangeRequest,
+  runContentValidation,
+  computeSuspicionFlags,
 } from '@/lib/change-requests/validator'
+import { MockAIProvider } from '@/lib/ai/adapters/mock'
 
-describe('validateCreateChangeRequest', () => {
-  const valid = {
-    title: 'Fix auth bug',
-    intent: 'Users cannot log in with OAuth providers',
-    type: 'bug',
-    priority: 'high',
-    tags: ['auth', 'critical'],
-  }
-
-  it('accepts a valid create payload', () => {
-    const result = validateCreateChangeRequest(valid)
-    expect(result.valid).toBe(true)
-    if (result.valid) {
-      expect(result.data.title).toBe('Fix auth bug')
-      expect(result.data.type).toBe('bug')
-      expect(result.data.priority).toBe('high')
-      expect(result.data.tags).toEqual(['auth', 'critical'])
-    }
-  })
-
-  it('defaults priority to medium when missing', () => {
-    const result = validateCreateChangeRequest({ ...valid, priority: undefined })
-    expect(result.valid).toBe(true)
-    if (result.valid) expect(result.data.priority).toBe('medium')
-  })
-
-  it('defaults tags to empty array when missing', () => {
-    const result = validateCreateChangeRequest({ ...valid, tags: undefined })
-    expect(result.valid).toBe(true)
-    if (result.valid) expect(result.data.tags).toEqual([])
-  })
-
-  it('trims whitespace from title and intent', () => {
-    const result = validateCreateChangeRequest({ ...valid, title: '  Fix auth  ', intent: '  Users cannot log in  ' })
-    expect(result.valid).toBe(true)
-    if (result.valid) {
-      expect(result.data.title).toBe('Fix auth')
-      expect(result.data.intent).toBe('Users cannot log in')
-    }
-  })
-
+describe('validateCreateChangeRequest — structural (Stage 1)', () => {
   it('rejects missing title', () => {
-    const result = validateCreateChangeRequest({ ...valid, title: '' })
+    const result = validateCreateChangeRequest({ intent: 'Add retry to AuthService login endpoint', type: 'feature' })
     expect(result.valid).toBe(false)
-    if (!result.valid) expect(result.error).toContain('title')
   })
 
-  it('rejects missing intent', () => {
-    const result = validateCreateChangeRequest({ ...valid, intent: '' })
+  it('rejects title shorter than 10 chars', () => {
+    const result = validateCreateChangeRequest({ title: 'Fix auth', intent: 'Add retry to AuthService login endpoint with exponential backoff', type: 'feature' })
     expect(result.valid).toBe(false)
-    if (!result.valid) expect(result.error).toContain('intent')
+    expect((result as any).error).toMatch(/10/)
   })
 
-  it('rejects invalid type', () => {
-    const result = validateCreateChangeRequest({ ...valid, type: 'unknown' })
+  it('rejects intent shorter than 30 chars', () => {
+    const result = validateCreateChangeRequest({ title: 'Fix auth login', intent: 'update login', type: 'feature' })
     expect(result.valid).toBe(false)
-    if (!result.valid) expect(result.error).toContain('type')
   })
 
-  it('rejects non-object input', () => {
-    expect(validateCreateChangeRequest(null)).toEqual({ valid: false, error: 'body must be an object' })
-    expect(validateCreateChangeRequest('string')).toEqual({ valid: false, error: 'body must be an object' })
+  it('rejects vague title phrases', () => {
+    const result = validateCreateChangeRequest({ title: 'refactor code', intent: 'Add retry to AuthService login endpoint with exponential backoff', type: 'refactor' })
+    expect(result.valid).toBe(false)
+  })
+
+  it('rejects intent with fewer than 2 action verbs', () => {
+    const result = validateCreateChangeRequest({ title: 'Auth service retry', intent: 'The login endpoint needs some attention for better reliability', type: 'feature' })
+    expect(result.valid).toBe(false)
+  })
+
+  it('rejects intent with no technical noun and fewer than 6 words', () => {
+    const result = validateCreateChangeRequest({ title: 'Fix login thing', intent: 'Make login work better and update stuff', type: 'bug' })
+    expect(result.valid).toBe(false)
+  })
+
+  it('accepts valid change with technical noun', () => {
+    const result = validateCreateChangeRequest({
+      title: 'Add login retry logic',
+      intent: 'Add exponential backoff retry to AuthService login endpoint to handle transient failures',
+      type: 'feature',
+    })
+    expect(result.valid).toBe(true)
+  })
+
+  it('accepts valid change with multi-word intent (>5 words, 2+ verbs)', () => {
+    const result = validateCreateChangeRequest({
+      title: 'Fix and update user registration flow',
+      intent: 'Fix the broken registration form and update validation to handle duplicate emails correctly',
+      type: 'bug',
+    })
+    expect(result.valid).toBe(true)
   })
 })
 
-describe('validatePatchChangeRequest', () => {
-  it('accepts a valid title update', () => {
-    const result = validatePatchChangeRequest({ title: 'New title' })
+describe('computeSuspicionFlags', () => {
+  it('flags short intent', () => {
+    expect(computeSuspicionFlags('add button')).toBeGreaterThanOrEqual(1)
+  })
+
+  it('flags intent with generic words', () => {
+    expect(computeSuspicionFlags('update the system feature to work better')).toBeGreaterThanOrEqual(1)
+  })
+
+  it('returns 0 for clear, specific intent', () => {
+    const intent = 'Add retry logic with exponential backoff to the AuthService login endpoint to handle transient network failures'
+    expect(computeSuspicionFlags(intent)).toBe(0)
+  })
+})
+
+describe('runContentValidation — Stage 2 AI scoring', () => {
+  it('accepts high-scoring intent', async () => {
+    const ai = new MockAIProvider()
+    ai.setDefaultResponse(JSON.stringify({ score: 0.9, reason: 'Clear and specific' }))
+    const result = await runContentValidation('Add retry logic', 'Add exponential backoff to login endpoint', 'feature', ai)
     expect(result.valid).toBe(true)
-    if (result.valid) expect(result.updates.title).toBe('New title')
   })
 
-  it('accepts a valid priority update', () => {
-    const result = validatePatchChangeRequest({ priority: 'low' })
-    expect(result.valid).toBe(true)
-    if (result.valid) expect(result.updates.priority).toBe('low')
-  })
-
-  it('accepts a valid tags update', () => {
-    const result = validatePatchChangeRequest({ tags: ['a', 'b'] })
-    expect(result.valid).toBe(true)
-    if (result.valid) expect(result.updates.tags).toEqual(['a', 'b'])
-  })
-
-  it('rejects empty payload', () => {
-    const result = validatePatchChangeRequest({})
+  it('rejects low-scoring intent (below 0.65)', async () => {
+    const ai = new MockAIProvider()
+    ai.setDefaultResponse(JSON.stringify({ score: 0.4, reason: 'Scope is unclear' }))
+    const result = await runContentValidation('Update the thing', 'Make it work better somehow', 'feature', ai)
     expect(result.valid).toBe(false)
-    if (!result.valid) expect(result.error).toContain('nothing')
+    expect((result as any).reasons).toContain('AI specificity score 0.4: Scope is unclear')
   })
 
-  it('rejects invalid priority', () => {
-    const result = validatePatchChangeRequest({ priority: 'urgent' })
-    expect(result.valid).toBe(false)
-    if (!result.valid) expect(result.error).toContain('priority')
+  it('returns structured rejection response', async () => {
+    const ai = new MockAIProvider()
+    ai.setDefaultResponse(JSON.stringify({ score: 0.3, reason: 'No specific component named' }))
+    const result = await runContentValidation('Update login', 'Make login better for users', 'feature', ai)
+    expect(result).toMatchObject({
+      valid: false,
+      error: 'INVALID_CHANGE_REQUEST',
+      reasons: expect.any(Array),
+      suggestion: expect.any(String),
+    })
   })
 
-  it('rejects tags that are not strings', () => {
-    const result = validatePatchChangeRequest({ tags: [1, 2] })
+  it('fails safe if AI returns malformed output (reject)', async () => {
+    const ai = new MockAIProvider()
+    ai.setDefaultResponse('not json at all')
+    const result = await runContentValidation('Update login endpoint', 'Update login endpoint', 'feature', ai)
     expect(result.valid).toBe(false)
-    if (!result.valid) expect(result.error).toContain('tags')
-  })
-
-  it('rejects empty title', () => {
-    const result = validatePatchChangeRequest({ title: '  ' })
-    expect(result.valid).toBe(false)
-    if (!result.valid) expect(result.error).toContain('title')
   })
 })

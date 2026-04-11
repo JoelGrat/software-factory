@@ -24,9 +24,9 @@ export async function GET(
   // Return current state for all active changes in the project
   const { data: activeChanges, error: acError } = await db
     .from('change_requests')
-    .select('id, status, analysis_status, analysis_version, updated_at')
+    .select('id, status, analysis_status, pipeline_status, analysis_version, updated_at')
     .eq('project_id', projectId)
-    .not('analysis_status', 'in', '("completed","failed","stalled")')
+    .not('analysis_status', 'in', '("completed","stalled")')
     .order('updated_at', { ascending: false })
 
   if (acError) {

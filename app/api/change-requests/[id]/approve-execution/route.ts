@@ -12,13 +12,13 @@ import { DockerExecutor } from '@/lib/execution/executors/docker-executor'
 
 const exec = promisify(execCb)
 
-async function checkDocker(): Promise<{ ok: boolean; error?: string }> {
+async function checkDocker(): Promise<string | null> {
   try {
     await exec('docker info', { timeout: 5000 })
-    return { ok: true }
+    return null
   } catch (err) {
-    const msg = (err as { stderr?: string; message?: string }).stderr ?? (err as Error).message ?? 'Unknown error'
-    return { ok: false, error: msg.split('\n')[0]?.trim() ?? msg }
+    const msg = (err as { stderr?: string; message?: string }).stderr ?? (err as Error).message ?? ''
+    return msg.split('\n')[0]?.trim() || 'Docker is not available'
   }
 }
 
@@ -60,11 +60,11 @@ export async function POST(
     )
   }
 
-  const docker = await checkDocker()
-  if (!docker.ok) {
+  const dockerError = await checkDocker()
+  if (dockerError) {
     return NextResponse.json(
-      { error: 'Docker is not running', detail: docker.error },
-      { status: 503 }
+      { error: 'Docker is not running', detail: `Execution requires Docker Desktop to be running. ${dockerError}` },
+      { status: 422 }
     )
   }
 

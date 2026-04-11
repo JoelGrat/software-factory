@@ -20,9 +20,10 @@ export async function runArchitecturePhase(
   change: { title: string; intent: string; type: string },
   components: ImpactedComponent[],
   ai: AIProvider,
-  feedback?: ImpactFeedback
+  feedback?: ImpactFeedback,
+  assumptions: string[] = []
 ): Promise<PlannerArchitecture> {
-  const prompt = buildArchitecturePrompt(change, components, feedback)
+  const prompt = buildArchitecturePrompt(change, components, feedback, assumptions)
   const result = await ai.complete(prompt, {
     responseSchema: {
       type: 'object',

@@ -17,7 +17,8 @@ export async function mapComponents(
   db: SupabaseClient,
   ai: AIProvider,
   projectedComponentNames: string[] = [],
-  newFilePaths: string[] = []
+  newFilePaths: string[] = [],
+  assumptions: string[] = []
 ): Promise<ComponentMapResult> {
   // 1. Get project_id for this change
   const { data: changeRow } = await db
@@ -68,8 +69,11 @@ export async function mapComponents(
   let aiUsed = false
   try {
     const componentList = components.map(c => c.name).join('\n')
+    const assumptionNote = assumptions.length > 0
+      ? `\nThe draft plan makes these assumptions: ${assumptions.join('; ')}`
+      : ''
     const result = await ai.complete(
-      `Given this software change, identify which system components are likely affected.\n\nChange title: ${change.title}\nIntent: ${change.intent}\n\nAvailable components:\n${componentList}\n\nRespond with JSON: {"affected": ["ComponentName1"]}`,
+      `Given this software change, identify which system components are likely affected.\n\nChange title: ${change.title}\nIntent: ${change.intent}${assumptionNote}\n\nAvailable components:\n${componentList}\n\nRespond with JSON: {"affected": ["ComponentName1"]}`,
       {
         responseSchema: {
           type: 'object',

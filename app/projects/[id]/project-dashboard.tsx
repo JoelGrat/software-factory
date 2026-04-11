@@ -179,7 +179,7 @@ export function ProjectDashboard({
   project: Project; initialChanges: Change[]; initialStats: Stats
   initialComponents: ComponentItem[]
   initialSnapshots: any[]
-  initialActiveChanges: Array<{ id: string; title: string; status: string; analysis_status: string; risk_level: string | null; updated_at: string }>
+  initialActiveChanges: Array<{ id: string; title: string; status: string; analysis_status: string; pipeline_status: string | null; risk_level: string | null; updated_at: string }>
   initialRiskScores: Array<{ componentId: string; componentName: string; riskScore: number; tier: 'HIGH' | 'MEDIUM'; incomingDeps: number }>
   initialActionItems: Array<{ id: string; tier: number; source: string; priorityScore: number; payload: any }>
   signalSnapshot: any | null
@@ -237,6 +237,7 @@ export function ProjectDashboard({
                   title: c.title,
                   status: c.status,
                   analysisStatus: c.analysis_status,
+                  pipelineStatus: c.pipeline_status ?? '',
                   risk_level: c.risk_level ?? '',
                   updated_at: c.updated_at,
                 }))}

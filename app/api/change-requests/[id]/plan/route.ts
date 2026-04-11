@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getProvider } from '@/lib/ai/registry'
-import { runPlanGeneration } from '@/lib/planning/plan-generator'
+import { runPlanGenerationPhase } from '@/lib/pipeline/phases/plan-generation'
 
 export async function POST(
   _req: Request,
@@ -30,10 +30,15 @@ export async function POST(
     )
   }
 
+  // Ensure pipeline_status is set correctly for the phase precondition check
   const adminDb = createAdminClient()
+  await adminDb.from('change_requests')
+    .update({ pipeline_status: 'impact_analyzed' })
+    .eq('id', id)
+
   const ai = getProvider()
-  runPlanGeneration(id, adminDb, ai).catch(err =>
-    console.error(`[plan-generator] change ${id} failed:`, err)
+  runPlanGenerationPhase(id, adminDb, ai).catch(err =>
+    console.error(`[plan-generation-phase] change ${id} failed:`, err)
   )
 
   return NextResponse.json({ status: 'planning' }, { status: 202 })
