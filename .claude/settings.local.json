@@ -10,7 +10,19 @@
       "Bash(npx supabase:*)",
       "Bash(grep -n \"status\\\\|ChangeCard\\\\|analysisStatus\\\\|change_requests\" C:/Users/joelg/softwareFactory_git/app/projects/[id]/page.tsx)",
       "Bash(grep:*)",
-      "mcp__plugin_claude-mem_mcp-search__search"
+      "mcp__plugin_claude-mem_mcp-search__search",
+      "Bash(ls:*)",
+      "Bash(git diff:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npm run:*)",
+      "Bash(git pull:*)",
+      "Bash(git merge feat/bulletproof-pipeline --no-ff -m ':*)",
+      "Bash(git push:*)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(list\\(d.get\\('dependencies',{}\\).keys\\(\\)\\) + list\\(d.get\\('devDependencies',{}\\).keys\\(\\)\\)\\)\")",
+      "Bash(node -e \"const d=require\\('./package.json'\\); console.log\\(Object.keys\\({...d.dependencies,...d.devDependencies}\\).join\\('\\\\n'\\)\\)\")",
+      "Bash(supabase db:*)",
+      "Bash(mkdir -p \"C:/Users/joelg/softwareFactory_git/app/api/change-requests/[id]/cancel\")",
+      "Bash(mkdir -p \"C:/Users/joelg/softwareFactory_git/app/api/change-requests/[id]/execute/events\")"
     ]
   }
 }

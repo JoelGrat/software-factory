@@ -541,6 +541,7 @@ export async function runExecution(
 
       let repairPhaseCount = 0
       let testsPassed = testResult.passed
+      const testRepairFiles: string[] = []
 
       if (!testResult.passed) {
         const failureDiags = testResult.failures.map((f, i) => ({
@@ -563,7 +564,10 @@ export async function runExecution(
           const attempt = await runRepairPhase(db, ai, executor, env, runId, changeId, state.iteration, failureSet, (change as { intent: string | null }).intent ?? '', seq)
           repairsAttempted++
           allFilesChanged = [...new Set([...allFilesChanged, ...attempt.filesPatched])]
+          testRepairFiles.push(...attempt.filesPatched)
           repairPhaseCount++
+          // Skip retest when the repair produced no patches — nothing changed, tests cannot pass
+          if (attempt.filesPatched.length === 0) break
           const retest = await executor.runTests(env, testScope)
           testsPassed = retest.passed
           if (testsPassed) break
@@ -571,7 +575,26 @@ export async function runExecution(
 
         if (!testsPassed) {
           finalFailureType = `tests: ${testResult.testsFailed} failed`
-          const currRecord: IterationRecord = { iteration: state.iteration, diagnosticSigs: [], errorCount: testResult.testsFailed, repairedFiles: [] }
+
+          // If all repair attempts produced zero patches the AI cannot generate a fix —
+          // escalate to stuck immediately rather than burning more iterations.
+          if (repairPhaseCount > 0 && testRepairFiles.length === 0) {
+            await insertEvent(db, { runId, changeId, seq: seq(), iteration: state.iteration, eventType: 'iteration.stuck', payload: { reason: 'no_repair_progress' } })
+            await log('error', 'Stuck: repair phase produced no patches — AI cannot fix this failure')
+            break
+          }
+
+          // Build diagnostic signatures from test names + first 60 chars of error so
+          // the stuck detector can fingerprint repeated identical failures.
+          const testDiagSigs = testResult.failures.map(
+            (f: { testName: string; error: string }) => `test:${f.testName}:${f.error.slice(0, 60)}`
+          )
+          const currRecord: IterationRecord = {
+            iteration: state.iteration,
+            diagnosticSigs: testDiagSigs,
+            errorCount: testResult.testsFailed,
+            repairedFiles: [...new Set(testRepairFiles)],
+          }
           const stuck = detectStuck(iterationHistory, currRecord, budget.perIteration)
           if (stuck.stuck) {
             await insertEvent(db, { runId, changeId, seq: seq(), iteration: state.iteration, eventType: 'iteration.stuck', payload: { reason: stuck.reason } })

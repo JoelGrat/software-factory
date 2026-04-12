@@ -27,6 +27,16 @@ export function detectStuck(
     return { stuck: true, reason: 'error_count_increased' }
   }
 
+  // 2b. Same non-zero error count for two consecutive iterations — repairs made no progress.
+  // Fingerprint check (rule 1) handles identical sigs; this catches cases where the error
+  // message shifts slightly but the failure count is unchanged.
+  if (prev.errorCount > 0 && current.errorCount === prev.errorCount && history.length >= 2) {
+    const prevPrev = history[history.length - 2]!
+    if (prevPrev.errorCount === prev.errorCount) {
+      return { stuck: true, reason: 'repeated_diagnostic' }
+    }
+  }
+
   // 3. Same file patched 3+ times across history + current
   const allRepairedFiles = [...history.flatMap(r => r.repairedFiles), ...current.repairedFiles]
   const fileCounts = new Map<string, number>()

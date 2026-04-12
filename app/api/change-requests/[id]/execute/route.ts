@@ -52,7 +52,7 @@ export async function POST(
     )
   }
 
-  if (!['planned', 'failed', 'review', 'done'].includes(change.status)) {
+  if (!['planned', 'failed', 'executing', 'review', 'done'].includes(change.status)) {
     return NextResponse.json(
       { error: `Cannot execute from status '${change.status}'.` },
       { status: 409 }
@@ -107,6 +107,7 @@ export async function POST(
   }
 
   // Clear previous execution history before re-running
+  await adminDb.from('execution_runs').delete().eq('change_id', id)   // cascades to execution_events
   await adminDb.from('execution_snapshots').delete().eq('change_id', id)
   await adminDb.from('execution_trace').delete().eq('change_id', id)
   await adminDb.from('execution_logs').delete().eq('change_id', id)

@@ -92,8 +92,12 @@ export async function runRepairPhase(
     if (result.success) filesPatched.push(patch.file)
   }
 
-  const confidenceScore = parsed.confidence ?? 0.5
-  const rationale = (parsed.rationale ?? 'repair phase applied').slice(0, 140)
+  const confidenceScore = parsed.confidence ?? 0
+  const rationale = parsed.rationale
+    ? parsed.rationale.slice(0, 140)
+    : filesPatched.length > 0
+      ? `Patched ${filesPatched.map(f => f.split('/').pop()).join(', ')} — AI response unparseable`
+      : 'No viable fix identified'
   const durationMs = Date.now() - startMs
 
   const attempt: RepairAttempt = {

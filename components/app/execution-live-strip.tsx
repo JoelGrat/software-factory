@@ -113,10 +113,10 @@ export function ExecutionLiveStrip({ events, runActive, elapsedMs, cancelState, 
       role="status"
       aria-live="polite"
       aria-label={`Execution: ${currentPhase}${detail ? ' — ' + detail : ''}`}
-      className="w-full rounded-xl bg-[#0f1929] border border-white/[0.06] px-5 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-2"
+      className="w-full rounded-xl bg-[#0f1929] border border-white/[0.06] px-5 py-2.5 flex items-center gap-x-3"
     >
       {/* Slots */}
-      <div className="flex items-center gap-2 flex-1 min-w-0">
+      <div className="flex items-center gap-2 flex-1 overflow-hidden">
         {SLOTS.map((slot, i) => {
           const state = slotState(slot.phase)
           const dotColor =

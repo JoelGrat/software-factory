@@ -94,12 +94,19 @@ export default function ExecutionView({ change, project }: { change: Change; pro
     setChangeStatus(data.changeStatus ?? change.status)
     setRun(data.run ?? null)
     setEvents(data.events ?? [])
+    // Restore cancel state from server — handles page refresh while cancellation is in flight
+    if (data.run?.cancellationRequested) {
+      setCancelState(prev => prev === 'idle' ? 'cancelled' : prev)
+    }
   }, [change.id, change.status])
 
-  // Polling with visibility-aware interval
+  // Polling with visibility-aware interval.
+  // Poll whenever the run is active OR the change is in executing state (run row may not exist yet).
+  const shouldPoll = run?.status === 'running' || changeStatus === 'executing'
+
   useEffect(() => {
     poll()
-    if (run?.status !== 'running') return
+    if (!shouldPoll) return
 
     const timer = setInterval(() => {
       if (document.hidden) return
@@ -115,7 +122,7 @@ export default function ExecutionView({ change, project }: { change: Change; pro
       clearInterval(timer)
       document.removeEventListener('visibilitychange', onVisibility)
     }
-  }, [poll, run?.status])
+  }, [poll, shouldPoll])
 
   // Redirect to review when complete
   useEffect(() => {
@@ -127,20 +134,22 @@ export default function ExecutionView({ change, project }: { change: Change; pro
   // Elapsed timer
   useEffect(() => {
     if (elapsedRef.current) clearInterval(elapsedRef.current)
-    if (run?.status === 'running' && run.startedAt) {
+    if (run?.status === 'running' && !run.cancellationRequested && run.startedAt) {
       const start = new Date(run.startedAt).getTime()
       elapsedRef.current = setInterval(() => setElapsedMs(Date.now() - start), 1000)
     } else {
       setElapsedMs(0)
     }
     return () => { if (elapsedRef.current) clearInterval(elapsedRef.current) }
-  }, [run?.status, run?.startedAt])
+  }, [run?.status, run?.cancellationRequested, run?.startedAt])
 
   async function handleStart() {
     setStarting(true)
     setStartError(null)
+    setCancelState('idle')
     const res = await fetch(`/api/change-requests/${change.id}/execute`, { method: 'POST' })
     if (res.ok) {
+      setChangeStatus('executing') // optimistic — keeps polling alive while run row is being created
       await poll()
     } else {
       const data = await res.json().catch(() => ({}))
@@ -208,7 +217,7 @@ export default function ExecutionView({ change, project }: { change: Change; pro
         <main className="flex-1 overflow-hidden flex">
           {/* Main content */}
           <div className="flex-1 overflow-y-auto p-10">
-          <div className="max-w-2xl mx-auto space-y-4">
+          <div className="max-w-3xl mx-auto space-y-4">
             <ChangeStepBar projectId={project?.id ?? ''} changeId={change.id} current="execution" changeStatus={changeStatus} />
 
             {/* Title */}
@@ -307,6 +316,8 @@ export default function ExecutionView({ change, project }: { change: Change; pro
                     iteration={n}
                     events={evs}
                     defaultExpanded={i === iterations.length - 1}
+                    isFinal={i === iterations.length - 1}
+                    runActive={runActive}
                   />
                 ))}
               </div>

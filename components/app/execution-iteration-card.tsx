@@ -13,6 +13,8 @@ interface Props {
   iteration: number
   events: IterationEvent[]
   defaultExpanded?: boolean
+  isFinal?: boolean
+  runActive?: boolean
 }
 
 function formatTime(iso: string): string {
@@ -25,7 +27,11 @@ function formatElapsed(ms: number): string {
   return m > 0 ? `${m}m ${s % 60}s` : `${s}s`
 }
 
-function deriveIterationStatus(events: IterationEvent[]): {
+function deriveIterationStatus(
+  events: IterationEvent[],
+  isFinal: boolean,
+  runActive: boolean,
+): {
   label: string
   color: string
   icon: string
@@ -34,7 +40,7 @@ function deriveIterationStatus(events: IterationEvent[]): {
   const stuck = events.find(e => e.event_type === 'iteration.stuck')
   const completed = events.find(e => e.event_type === 'iteration.completed')
 
-  if (stuck) return { label: 'Stuck', color: 'text-red-400 bg-red-400/10', icon: 'block', durationMs: 0 }
+  if (stuck) return { label: 'Blocked', color: 'text-red-400 bg-red-400/10', icon: 'block', durationMs: 0 }
 
   if (!completed) return { label: 'Running', color: 'text-blue-400 bg-blue-400/10', icon: 'pending', durationMs: 0 }
 
@@ -42,17 +48,19 @@ function deriveIterationStatus(events: IterationEvent[]): {
     events.some(e => e.event_type === 'phase.static_validation.passed') &&
     events.some(e => e.event_type === 'phase.unit.passed')
 
-  const label = allPassed ? 'Passed' : 'Failed'
-  const color = allPassed ? 'text-green-400 bg-green-400/10' : 'text-red-400 bg-red-400/10'
-  const icon = allPassed ? 'check' : 'close'
-  const durationMs = (completed?.payload?.durationMs as number | undefined) ?? 0
+  if (allPassed) {
+    return { label: 'Passed', color: 'text-green-400 bg-green-400/10', icon: 'check', durationMs: (completed?.payload?.durationMs as number | undefined) ?? 0 }
+  }
 
-  return { label, color, icon, durationMs }
+  // Failed — add context so it's clear whether the run continued
+  const label = !isFinal ? 'Failed — retrying' : runActive ? 'Failed — repairing' : 'Failed'
+  const durationMs = (completed?.payload?.durationMs as number | undefined) ?? 0
+  return { label, color: 'text-red-400 bg-red-400/10', icon: 'close', durationMs }
 }
 
-export function ExecutionIterationCard({ iteration, events, defaultExpanded = false }: Props) {
+export function ExecutionIterationCard({ iteration, events, defaultExpanded = false, isFinal = false, runActive = false }: Props) {
   const [expanded, setExpanded] = useState(defaultExpanded)
-  const { label, color, icon, durationMs } = deriveIterationStatus(events)
+  const { label, color, icon, durationMs } = deriveIterationStatus(events, isFinal, runActive)
 
   // Extract data from events
   const svFailed = events.find(e => e.event_type === 'phase.static_validation.failed')

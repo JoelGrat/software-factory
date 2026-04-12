@@ -100,6 +100,7 @@ export type StuckReason =
   | 'same_file_repeated'
   | 'alternating_diagnostic'
   | 'budget_hit'
+  | 'no_repair_progress'
 
 export interface StuckResult {
   stuck: boolean

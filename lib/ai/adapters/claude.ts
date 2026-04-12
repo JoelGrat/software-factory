@@ -16,7 +16,7 @@ export class ClaudeAIProvider implements AIProvider {
 
   async complete(prompt: string, options?: CompletionOptions): Promise<CompletionResult> {
     const maxRetries = options?.maxRetries ?? 3
-    const timeout    = options?.timeout    ?? 30_000
+    const timeout    = options?.timeout    ?? 120_000
     const startMs    = Date.now()
     let lastError: unknown
     let retryCount = 0
