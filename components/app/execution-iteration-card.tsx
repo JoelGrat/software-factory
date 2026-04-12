@@ -36,6 +36,8 @@ function deriveIterationStatus(events: IterationEvent[]): {
 
   if (stuck) return { label: 'Stuck', color: 'text-red-400 bg-red-400/10', icon: 'block', durationMs: 0 }
 
+  if (!completed) return { label: 'Running', color: 'text-blue-400 bg-blue-400/10', icon: 'pending', durationMs: 0 }
+
   const allPassed =
     events.some(e => e.event_type === 'phase.static_validation.passed') &&
     events.some(e => e.event_type === 'phase.unit.passed')
@@ -80,6 +82,7 @@ export function ExecutionIterationCard({ iteration, events, defaultExpanded = fa
       {/* Header */}
       <button
         onClick={() => setExpanded(!expanded)}
+        aria-expanded={expanded}
         className="w-full px-5 py-3.5 flex items-center justify-between gap-4 hover:bg-white/[0.02] transition-colors text-left"
       >
         <div className="flex items-center gap-3">

@@ -66,7 +66,34 @@ export function ExecutionLiveStrip({ events, runActive, elapsedMs, cancelState, 
 
   function slotState(slotPhase: Phase): 'running' | 'repair' | 'done' | 'queued' {
     const slotIndex = SLOTS.findIndex(s => s.phase === slotPhase)
-    const currentIndex = SLOTS.findIndex(s => s.phase === currentPhase)
+    let currentIndex = SLOTS.findIndex(s => s.phase === currentPhase)
+
+    if (currentIndex === -1) {
+      // repair/commit/idle — find the last phase that was active before the repair/commit
+      const phaseEventTypes: Record<string, Phase> = {
+        'phase.static_validation.started': 'static_validation',
+        'phase.static_validation.passed': 'static_validation',
+        'phase.static_validation.failed': 'static_validation',
+        'phase.unit.started': 'unit',
+        'phase.unit.passed': 'unit',
+        'phase.unit.failed': 'unit',
+        'phase.integration.started': 'integration',
+        'phase.integration.passed': 'integration',
+        'phase.integration.failed': 'integration',
+        'phase.smoke.started': 'smoke',
+        'phase.smoke.passed': 'smoke',
+        'phase.smoke.failed': 'smoke',
+      }
+      for (let i = events.length - 1; i >= 0; i--) {
+        const mappedPhase = phaseEventTypes[events[i]!.event_type]
+        if (mappedPhase) {
+          currentIndex = SLOTS.findIndex(s => s.phase === mappedPhase)
+          break
+        }
+      }
+    }
+
+    if (currentIndex === -1) return 'queued'
     if (slotIndex === currentIndex) return isRepairActive ? 'repair' : 'running'
     if (slotIndex < currentIndex) return 'done'
     return 'queued'
@@ -114,6 +141,7 @@ export function ExecutionLiveStrip({ events, runActive, elapsedMs, cancelState, 
             <div key={slot.phase} className="flex items-center gap-2 flex-shrink-0">
               {i > 0 && <div className={`w-4 h-px flex-shrink-0 ${state === 'queued' ? 'bg-white/[0.06]' : 'bg-white/[0.15]'}`} />}
               <div className="flex items-center gap-1.5">
+                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dotColor}`} />
                 <span className={`material-symbols-outlined ${iconColor}`} style={{ fontSize: '14px' }}>
                   {state === 'done' ? 'check' : slot.icon}
                 </span>
