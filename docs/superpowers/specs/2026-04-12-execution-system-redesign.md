@@ -366,11 +366,212 @@ Run this change to see live progress, iteration history, and repair evidence.
 
 ---
 
+## Section 5 — Concurrency Control
+
+**Policy: single active run per `change_id`.**
+
+When a new run is requested while one is already `running`:
+- **Reject** with HTTP 409 and message: "An execution is already in progress for this change."
+- The UI surfaces this as a non-modal inline error — not a spinner.
+
+Queuing runs is explicitly out of scope for this iteration.
+
+**Implementation:** Before inserting an `execution_runs` row, the API handler checks:
+
+```sql
+select id from execution_runs
+where change_id = $1 and status = 'running'
+limit 1
+```
+
+If a row exists → reject. Use a DB-level advisory lock or `insert ... where not exists` to prevent races between concurrent requests.
+
+---
+
+## Section 6 — Cancellation Semantics
+
+Cancellation is **cooperative until a command boundary**. The orchestrator checks a `cancelled` signal between phases, not mid-command.
+
+**Rules:**
+- The cancel request sets a flag in DB (`execution_runs.cancellation_requested = true`).
+- The orchestrator polls this flag at each phase boundary (after each `implementChanges`, `staticValidationPhase`, `testPhases` call).
+- On detection: exit loop cleanly, set `status = 'cancelled'`, emit `execution.cancelled` event.
+- **No commit after cancellation** — `commitPolicy()` is skipped entirely on cancel path.
+- **Hard kill only** if the process exceeds a grace period (30s) after cooperative cancel — kills the child process directly.
+- If cancellation arrives while already in `commitPolicy()` (mid-git-op): let the commit finish, then set status `cancelled`. A partial commit is worse than an unexpected one.
+
+**Button state → backend state mapping:**
+
+| UI State | Backend State |
+|---|---|
+| [Cancel] clicked | `cancellation_requested = true` set |
+| [Cancelling…] | Waiting for phase boundary |
+| [Cancelled] | `status = 'cancelled'`, run ended |
+| [Cannot cancel — committing] | `commitPolicy()` in progress |
+| [Force stop failed] | Hard kill timed out |
+
+---
+
+## Section 7 — Idempotency and Recovery
+
+**Problem:** if the server restarts mid-run, `execution_runs.status` stays `'running'` forever.
+
+**Recovery policy (runs on server startup and on a periodic cron):**
+
+```
+SELECT id FROM execution_runs
+WHERE status = 'running'
+  AND started_at < now() - interval '15 minutes'
+  AND (last_heartbeat_at IS NULL OR last_heartbeat_at < now() - interval '2 minutes')
+```
+
+Stale runs → set `status = 'blocked'`, write summary with `finalFailureType: 'server_interrupted'`, emit `execution.blocked` event.
+
+**Heartbeat:** the orchestrator writes `last_heartbeat_at = now()` to `execution_runs` every 30 seconds. Add `last_heartbeat_at timestamptz` column.
+
+**Phase idempotency:** each phase checks whether its events already exist in `execution_events` for the current `run_id` + `iteration` before executing. If found, skip (treat as already completed). This makes a crashed-then-resumed run safe without re-running work.
+
+---
+
+## Section 8 — Security Boundaries for Repair
+
+The repair system may autonomously modify files. It must be constrained.
+
+**Allowed directories (whitelist — configurable per project):**
+- `app/`, `components/`, `lib/`, `tests/`, `styles/`
+- Root config files: `tsconfig.json`, `tailwind.config.*`, `next.config.*`
+
+**Blocked files (hard deny, regardless of config):**
+- `.env`, `.env.*`, `.env.local`
+- `supabase/migrations/**` — migrations are append-only; repair must never touch them
+- `package.json`, `package-lock.json` — no dependency installs without explicit approval
+- Any file matching `*.pem`, `*.key`, `*.secret`
+
+**Per-repair limits:**
+- Max files patched per inline repair: 3
+- Max files patched per repair phase: 8
+- No shell commands beyond the defined check commands (`tsc`, `eslint`, test runner)
+- No `npm install` / `pnpm add` unless explicitly unlocked in project settings
+
+**Enforcement:** validated in the repair prompt construction layer — blocked paths are stripped from context and the model is instructed not to emit patches for them. Patches are also validated against the allowlist before being written to disk.
+
+---
+
+## Section 9 — Metrics
+
+Track per-run and aggregate. Required for knowing whether the redesign works.
+
+**Per-run (stored in `execution_summary`):** already covered — iterations used, repairs attempted, files changed, duration, commit outcome.
+
+**Aggregate metrics (queryable from `execution_runs` + `execution_events`):**
+
+| Metric | Source |
+|---|---|
+| Run success rate | `count(status=success) / count(*)` on `execution_runs` |
+| WIP rate | `count(status=wip) / count(*)` |
+| Avg iterations per run | `avg(summary->>'iterationsUsed')` |
+| Top failure types | `count` by `finalFailureType` |
+| Inline repair success % | `repair.inline.succeeded / (repair.inline.started)` from events |
+| Repair phase success % | `repair.phase.succeeded / (repair.phase.started)` |
+| Stuck detector frequency | `count(iteration.stuck)` events |
+| Avg phase duration | `avg(payload->>'durationMs')` grouped by `event_type` |
+
+No separate analytics table needed for MVP — queries run against `execution_runs` and `execution_events` directly. Add materialized views if query time degrades.
+
+---
+
+## Section 10 — Event Retention
+
+Append-only logs grow fast. Retention policy:
+
+| Data | Retention |
+|---|---|
+| `execution_events` full rows | 90 days, then delete |
+| `execution_runs` + `summary` | Indefinite |
+| Diagnostic payloads > 50KB | Compress (store as gzip base64 in payload, `compressed: true` flag) |
+
+Implement as a scheduled DB job (Supabase cron or `pg_cron`). Runs nightly.
+
+---
+
+## Section 11 — Schema Validation Ownership
+
+TypeScript types are not enforcement. Runtime validation at the write boundary is.
+
+**Policy:** every `execution_events` insert goes through a Zod schema keyed by `event_type`. If payload does not match the registered schema → log error, reject insert, emit `infra.retrying` or surface to operator.
+
+**Implementation pattern:**
+
+```ts
+const EVENT_PAYLOAD_SCHEMAS: Record<EventType, z.ZodSchema> = {
+  'phase.static_validation.failed': z.object({
+    diagnostics: z.array(diagnosticSchema).max(20),
+    totalCount: z.number(),
+    truncated: z.boolean(),
+    durationMs: z.number(),
+  }),
+  // ... one schema per event type
+}
+
+function insertEvent(event: RawEvent) {
+  const schema = EVENT_PAYLOAD_SCHEMAS[event.event_type]
+  const parsed = schema.safeParse(event.payload)
+  if (!parsed.success) throw new EventPayloadValidationError(event.event_type, parsed.error)
+  // ... insert
+}
+```
+
+---
+
+## Section 12 — Commit Safety
+
+**Additional rule:** never commit if the working tree contains pre-existing changes unrelated to this run.
+
+Before `commitPolicy()` executes:
+
+```bash
+git status --porcelain
+```
+
+If any modified/untracked files exist that are not in `filesChanged` for this run → abort commit, set outcome `no_commit`, surface as a warning in the UI: "Working tree contains unexpected changes. Commit skipped to prevent contamination."
+
+This prevents the agent from accidentally committing unrelated dirty state from the host environment.
+
+---
+
+## Section 4 — UI Amendments
+
+### "Why skipped?" on skipped phases
+
+When `phase.skipped` event fires in `fail_fast` mode, the iteration card shows the reason inline:
+
+```
+Integration tests  —  skipped (unit tests failed, fail_fast mode)
+Smoke checks       —  skipped (unit tests failed, fail_fast mode)
+```
+
+No ambiguity about what ran and why.
+
+### Timestamps
+
+Each iteration card shows both:
+- **Relative:** "01:23 elapsed"
+- **Absolute:** "Started 14:02:41" (shown on hover or expanded)
+
+Live strip shows elapsed time from `execution.started` event timestamp.
+
+### Downloadable log / copy diagnostics
+
+In the expanded iteration card, a "Copy diagnostics" button copies the full diagnostic payload as JSON to clipboard. A "Download log" button on the error panel exports all events for the run as NDJSON.
+
+---
+
 ## What is NOT in scope
 
 - E2E test infrastructure (modeled in failure router, not implemented)
 - Token budget tracking
 - Multi-agent parallel execution
 - Replay / re-run of a specific iteration
+- Run queuing (single active run enforced; queue is a future addition)
 
 These may be added in a follow-on spec.
