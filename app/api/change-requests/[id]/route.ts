@@ -11,7 +11,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const { data: change } = await db
     .from('change_requests')
     .select(`
-      id, project_id, title, intent, type, priority, status,
+      id, project_id, title, intent, type, priority, status, pipeline_status,
       risk_level, confidence_score, confidence_breakdown, analysis_quality,
       lock_version, execution_group, triggered_by, tags, created_at, updated_at,
       projects!inner(owner_id)
@@ -88,8 +88,8 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
 
   if (!change) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  if (change.status === 'executing') {
-    return NextResponse.json({ error: 'Cannot delete a change that is currently executing' }, { status: 409 })
+  if (change.status === 'done') {
+    return NextResponse.json({ error: 'Cannot delete a change that has been approved' }, { status: 409 })
   }
 
   // Best-effort: delete the git branch from GitHub before removing DB records

@@ -57,6 +57,7 @@ interface Change {
   type: string
   priority: string
   status: string
+  pipeline_status: string | null
   risk_level: string | null
   confidence_score: number | null
   analysis_quality: string | null
@@ -78,6 +79,7 @@ const RISK_COLORS: Record<string, string> = {
 }
 
 const ANALYZING_STATUSES = ['analyzing', 'analyzing_mapping', 'analyzing_propagation', 'analyzing_scoring', 'planning']
+const PIPELINE_IN_PROGRESS_STATUSES = ['validated', 'draft_planning', 'draft_planned', 'impact_analyzing', 'impact_analyzed', 'plan_generating']
 
 const ANALYSIS_STEPS = [
   { label: 'Mapping intent → components', statuses: ['analyzing', 'analyzing_mapping'] },
@@ -163,8 +165,8 @@ export function ChangeDetailView({
   const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [planningStep, setPlanningStep] = useState(0)
-  const isAnalyzing = ANALYZING_STATUSES.includes(change.status)
-  const canDelete = !['executing', 'done'].includes(change.status)
+  const isAnalyzing = ANALYZING_STATUSES.includes(change.status) || PIPELINE_IN_PROGRESS_STATUSES.includes(change.pipeline_status ?? '')
+  const canDelete = change.status !== 'done'
 
   // Impact analysis derived display values
   const RISK_MAX = 40
@@ -387,7 +389,7 @@ export function ChangeDetailView({
       if (!res.ok) return
       const updated = await res.json()
       setChange(updated)
-      if (!ANALYZING_STATUSES.includes(updated.status)) {
+      if (!ANALYZING_STATUSES.includes(updated.status) && !PIPELINE_IN_PROGRESS_STATUSES.includes(updated.pipeline_status ?? '')) {
         clearInterval(id)
         setImpact(updated.impact ?? null)
         setRiskFactors(updated.risk_factors ?? [])
@@ -401,13 +403,14 @@ export function ChangeDetailView({
   }, [change.id, isAnalyzing, router])
 
   useEffect(() => {
-    if (change.status !== 'planning') return
+    const isPlanningPhase = change.status === 'planning' || ['plan_generating', 'impact_analyzing', 'impact_analyzed', 'draft_planning', 'draft_planned', 'validated'].includes(change.pipeline_status ?? '')
+    if (!isPlanningPhase) return
     setPlanningStep(0)
     const id = setInterval(() => {
       setPlanningStep(s => Math.min(s + 1, PLANNING_SUBSTEPS.length - 1))
     }, 7000)
     return () => clearInterval(id)
-  }, [change.status])
+  }, [change.status, change.pipeline_status])
 
   useEffect(() => {
     if (!toast) return
@@ -765,7 +768,7 @@ export function ChangeDetailView({
                       </div>
                     </div>
               </div>
-            ) : (['awaiting_approval', 'planned', 'failed', 'review', 'done'].includes(change.status)) && plan ? (
+            ) : (['awaiting_approval', 'planned', 'executing', 'failed', 'review', 'done'].includes(change.status)) && plan ? (
               <div className="rounded-xl bg-[#131b2e] border border-white/5 overflow-hidden">
                 {/* Plan header */}
                 {(() => {
