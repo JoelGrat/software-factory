@@ -26,7 +26,7 @@ export async function writeStub(
   executionOutcome: 'success' | 'failure',
   analysisStatus: 'completed' | 'failed' | 'stalled'
 ): Promise<void> {
-  const { error } = await db.from('analysis_result_snapshot').insert({
+  const { error } = await db.from('analysis_result_snapshot').upsert({
     change_id: changeId,
     version,
     execution_outcome: executionOutcome,
@@ -37,7 +37,7 @@ export async function writeStub(
     files_modified: [],
     components_affected: [],
     completed_at: new Date().toISOString(),
-  })
+  }, { onConflict: 'change_id' })
   if (error) throw error
 }
 
