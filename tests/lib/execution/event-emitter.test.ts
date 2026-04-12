@@ -26,6 +26,19 @@ describe('validatePayload', () => {
     })).toThrow()
   })
 
+  it('validates phase.smoke.failed payload', () => {
+    expect(() => validatePayload('phase.smoke.failed', {
+      diagnostics: [],
+      totalCount: 0,
+      truncated: false,
+      durationMs: 50,
+    })).not.toThrow()
+
+    expect(() => validatePayload('phase.smoke.failed', {
+      diagnostics: 'bad',
+    })).toThrow()
+  })
+
   it('passes unknown event types with empty payload', () => {
     expect(() => validatePayload('execution.started', {})).not.toThrow()
   })

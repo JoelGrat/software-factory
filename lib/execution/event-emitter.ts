@@ -23,28 +23,19 @@ function assertArray(obj: Record<string, unknown>, key: string) {
   }
 }
 
+function validateFailedPhasePayload(p: unknown) {
+  assertObject(p)
+  assertArray(p, 'diagnostics')
+  assertField(p, 'totalCount', 'number')
+  assertField(p, 'truncated', 'boolean')
+  assertField(p, 'durationMs', 'number')
+}
+
 const VALIDATORS: Partial<Record<EventType, PayloadValidator>> = {
-  'phase.static_validation.failed': (p) => {
-    assertObject(p)
-    assertArray(p, 'diagnostics')
-    assertField(p, 'totalCount', 'number')
-    assertField(p, 'truncated', 'boolean')
-    assertField(p, 'durationMs', 'number')
-  },
-  'phase.unit.failed': (p) => {
-    assertObject(p)
-    assertArray(p, 'diagnostics')
-    assertField(p, 'totalCount', 'number')
-    assertField(p, 'truncated', 'boolean')
-    assertField(p, 'durationMs', 'number')
-  },
-  'phase.integration.failed': (p) => {
-    assertObject(p)
-    assertArray(p, 'diagnostics')
-    assertField(p, 'totalCount', 'number')
-    assertField(p, 'truncated', 'boolean')
-    assertField(p, 'durationMs', 'number')
-  },
+  'phase.static_validation.failed': validateFailedPhasePayload,
+  'phase.unit.failed': validateFailedPhasePayload,
+  'phase.integration.failed': validateFailedPhasePayload,
+  'phase.smoke.failed': validateFailedPhasePayload,
   'repair.inline.started': (p) => { assertObject(p) },
   'repair.inline.succeeded': (p) => { assertObject(p); assertField(p, 'durationMs', 'number') },
   'repair.inline.failed': (p) => { assertObject(p); assertField(p, 'durationMs', 'number') },
@@ -78,6 +69,10 @@ export function validatePayload(eventType: EventType, payload: unknown): void {
 
 // ── Sequence counter (in-memory per run) ──────────────────────────────────────
 
+// In-memory sequence counter per run. WARNING: resets on process restart.
+// If the process restarts mid-run, the counter starts from 0 and subsequent inserts
+// will violate the UNIQUE(run_id, seq) constraint. The error surface in insertEvent
+// will catch this, but the run cannot be resumed cleanly without re-seeding from DB.
 const seqCounters = new Map<string, number>()
 
 export function nextSeq(runId: string): number {
@@ -104,6 +99,7 @@ export interface EventInput {
 
 export async function insertEvent(db: SupabaseClient, input: EventInput): Promise<void> {
   validatePayload(input.eventType, input.payload)
+  // TODO: remove 'as any' cast after Database type is regenerated to include execution_events
   const { error } = await (db.from('execution_events') as any).insert({
     run_id: input.runId,
     change_id: input.changeId,
