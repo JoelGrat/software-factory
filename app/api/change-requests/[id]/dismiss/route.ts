@@ -21,11 +21,9 @@ export async function POST(
 
   if (!change) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  // Mark as completed so it leaves the active changes list
   const adminDb = createAdminClient()
-  await adminDb.from('change_requests')
-    .update({ analysis_status: 'completed' })
-    .eq('id', id)
+  const { error } = await adminDb.from('change_requests').delete().eq('id', id)
+  if (error) return NextResponse.json({ error: 'Delete failed' }, { status: 500 })
 
   return NextResponse.json({ ok: true })
 }
