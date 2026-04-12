@@ -1,5 +1,4 @@
 // lib/execution/execution-orchestrator.ts
-import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Project } from 'ts-morph'
@@ -8,7 +7,7 @@ import type { AIProvider } from '@/lib/ai/provider'
 import type { CodeExecutor } from './executors/code-executor'
 import type {
   FilePatch, SymbolContext, ExecutionScope, ExecutionLimits,
-  ContextMode, TestScope, BehavioralScope, ExecutionEnvironment,
+  ContextMode, BehavioralScope, ExecutionEnvironment,
   NewFileCreation,
 } from './types'
 import { DEFAULT_LIMITS } from './types'
@@ -24,6 +23,15 @@ import { recordEvent } from '@/lib/dashboard/event-history'
 import { writeStub, enrichSnapshot, markEnrichmentFailed } from '@/lib/dashboard/snapshot-writer'
 import type { DashboardEvent } from '@/lib/dashboard/event-types'
 import { runDashboardJobs } from '@/lib/dashboard/jobs/runner'
+import { DEFAULT_BUDGET } from './execution-types-v2'
+import type { ExecutionBudget, IterationRecord } from './execution-types-v2'
+import { insertEvent, clearSeq } from './event-emitter'
+import { detectStuck } from './stuck-detector'
+import { determineCommitOutcome } from './commit-policy'
+import { runInlineRepair } from './inline-repair'
+import { runRepairPhase } from './repair-phase'
+import { createExecutionRun, startHeartbeat, isCancellationRequested, finalizeRun } from './execution-run-manager'
+import type { DiagnosticSet, CommitOutcome, ExecutionSummary } from './execution-types-v2'
 
 async function emitAndRecord(
   db: SupabaseClient,
@@ -69,10 +77,6 @@ async function enrichSnapshotWithRetry(
       }
     }
   }
-}
-
-function errorSignature(output: string): string {
-  return createHash('sha256').update(output.slice(0, 500)).digest('hex').slice(0, 12)
 }
 
 function parseAiJson(content: string): Record<string, unknown> {
@@ -142,9 +146,27 @@ export async function runExecution(
   db: SupabaseClient,
   ai: AIProvider,
   executor: CodeExecutor,
-  limits: ExecutionLimits = DEFAULT_LIMITS
+  limits: ExecutionLimits = DEFAULT_LIMITS,
+  budget: ExecutionBudget = DEFAULT_BUDGET,
 ): Promise<void> {
   await db.from('change_requests').update({ status: 'executing' }).eq('id', changeId)
+
+  // Create execution run (concurrency guard)
+  const runId = await createExecutionRun(db, changeId)
+  if (!runId) {
+    console.warn(`[execution-orchestrator] concurrency block: run already active for change ${changeId}`)
+    return
+  }
+
+  let seqN = 0
+  const seq = () => ++seqN
+  const heartbeat = startHeartbeat(db, runId)
+  let repairsAttempted = 0
+  const iterationHistory: IterationRecord[] = []
+  let allFilesChanged: string[] = []
+  let finalFailureType: string | null = null
+  let commitOutcome: CommitOutcome = { type: 'no_commit', reason: 'not started' }
+  let runStatus: 'success' | 'wip' | 'budget_exceeded' | 'blocked' | 'cancelled' = 'budget_exceeded'
 
   let env: ExecutionEnvironment | null = null
   let projectId = ''
@@ -271,6 +293,12 @@ export async function runExecution(
       log,
     )
     await log('success', `Environment ready · branch ${branch}`)
+
+    await insertEvent(db, {
+      runId, changeId, seq: seq(), iteration: 0,
+      eventType: 'execution.started',
+      payload: {},
+    })
 
     // Read package.json once so new-file prompts know what imports are available
     let availablePackages: string[] = []
@@ -445,47 +473,121 @@ export async function runExecution(
         await log('success', `Done`)
       }
 
-      // Validate
-      await log('info', `Running type check…`)
-      const typeCheck = await executor.runTypeCheck(env)
-      if (!typeCheck.passed) {
-        const errCount = typeCheck.errors.length
-        await log('error', `Type check failed · ${errCount} error${errCount !== 1 ? 's' : ''}`)
-        // Index type-check errors by new file path so the next prompt attempt can fix them.
-        // Only update errors for files we attempted this iteration; leave others intact so
-        // errors from earlier failed iterations persist across low-confidence retry loops.
-        for (const nf of iterationNewFiles) {
-          const relevant = typeCheck.output.split('\n').filter(l => l.includes(nf.path)).join('\n')
-          if (relevant) newFileTypeErrors.set(nf.path, relevant)
-          else newFileTypeErrors.delete(nf.path)
+      // ── Static validation phase ─────────────────────────────────────────
+      await log('info', `Running static validation…`)
+      const svStart = Date.now()
+      await insertEvent(db, { runId, changeId, seq: seq(), iteration: state.iteration, eventType: 'phase.static_validation.started', payload: {} })
+
+      let typeCheck = await executor.runTypeCheck(env)
+      let inlineRepairCount = 0
+
+      while (!typeCheck.passed && inlineRepairCount < budget.perIteration.maxInlineRepairs) {
+        // Build diagnostic set (first 20, truncated flag)
+        const allDiags = typeCheck.errors.map(e => ({ file: e.file, line: e.line, message: e.message, code: 'TS' }))
+        const diagnostics: DiagnosticSet = {
+          diagnostics: allDiags.slice(0, 20),
+          totalCount: allDiags.length,
+          truncated: allDiags.length > 20,
         }
-        const sig = errorSignature(typeCheck.output)
-        state.errorHistory.set(sig, (state.errorHistory.get(sig) ?? 0) + 1)
-        if ((state.errorHistory.get(sig) ?? 0) >= limits.stagnationWindow) break
-        await writeSnapshot(db, changeId, state, 'error', false, 0, 0, typeCheck.output.slice(0, 8000))
+        await log('error', `Type check failed · ${allDiags.length} error${allDiags.length !== 1 ? 's' : ''}`)
+        const attempt = await runInlineRepair(db, ai, executor, env, runId, changeId, state.iteration, diagnostics, seq)
+        repairsAttempted++
+        allFilesChanged = [...new Set([...allFilesChanged, ...attempt.filesPatched])]
+        inlineRepairCount++
+        typeCheck = await executor.runTypeCheck(env)
+      }
+
+      const svDurationMs = Date.now() - svStart
+      if (!typeCheck.passed) {
+        const allDiags = typeCheck.errors.map(e => ({ file: e.file, line: e.line, message: e.message, code: 'TS' }))
+        const diagnosticSigs = allDiags.map(d => `${d.file}:${d.line}:${d.message.slice(0, 40)}`)
+        finalFailureType = `tsc: ${allDiags.length} error${allDiags.length !== 1 ? 's' : ''}`
+
+        await insertEvent(db, {
+          runId, changeId, seq: seq(), iteration: state.iteration,
+          eventType: 'phase.static_validation.failed',
+          payload: {
+            diagnostics: allDiags.slice(0, 20),
+            totalCount: allDiags.length,
+            truncated: allDiags.length > 20,
+            durationMs: svDurationMs,
+          },
+        })
+
+        const currRecord: IterationRecord = { iteration: state.iteration, diagnosticSigs, errorCount: allDiags.length, repairedFiles: [] }
+        const stuck = detectStuck(iterationHistory, currRecord, budget.perIteration)
+        if (stuck.stuck) {
+          await insertEvent(db, { runId, changeId, seq: seq(), iteration: state.iteration, eventType: 'iteration.stuck', payload: { reason: stuck.reason } })
+          await log('error', `Stuck detector fired: ${stuck.reason}`)
+          break
+        }
+        iterationHistory.push(currRecord)
+        await insertEvent(db, { runId, changeId, seq: seq(), iteration: state.iteration, eventType: 'iteration.completed', payload: { durationMs: Date.now() - svStart } })
         continue
       }
-      await log('success', `Type check passed`)
 
-      const testScope: TestScope = await selectTests(db, [], (change as { risk_level: string | null }).risk_level ?? 'low')
+      await log('success', `Static validation passed`)
+      await insertEvent(db, { runId, changeId, seq: seq(), iteration: state.iteration, eventType: 'phase.static_validation.passed', payload: { durationMs: svDurationMs } })
+
+      // ── Test phases ─────────────────────────────────────────────────────
+      const testScope = await selectTests(db, [], (change as { risk_level: string | null }).risk_level ?? 'low')
       const totalTests = testScope.directTests.length + testScope.dependentTests.length
       await log('info', `Running ${totalTests > 0 ? totalTests + ' test file' + (totalTests !== 1 ? 's' : '') : 'all tests'}…`)
+      await insertEvent(db, { runId, changeId, seq: seq(), iteration: state.iteration, eventType: 'phase.unit.started', payload: {} })
+
+      const utStart = Date.now()
       const testResult = await executor.runTests(env, testScope)
+      const utDurationMs = Date.now() - utStart
+
+      let repairPhaseCount = 0
+      let testsPassed = testResult.passed
 
       if (!testResult.passed) {
-        await log('error', `Tests failed · ${testResult.testsFailed} failed, ${testResult.testsPassed} passed`)
-        const sig = errorSignature(testResult.output)
-        state.errorHistory.set(sig, (state.errorHistory.get(sig) ?? 0) + 1)
-        if ((state.errorHistory.get(sig) ?? 0) >= limits.stagnationWindow) break
-        const testErrorSummary = testResult.failures.length > 0
-          ? testResult.failures.map(f => `FAIL: ${f.testName}\n${f.error}`).join('\n\n---\n\n')
-          : testResult.output.slice(0, 8000)
-        await writeSnapshot(db, changeId, state, 'error', false, testResult.testsPassed, testResult.testsFailed, testErrorSummary.slice(0, 8000))
-        continue
-      }
-      await log('success', `Tests passed · ${testResult.testsPassed} passed`)
+        const failureDiags = testResult.failures.map((f, i) => ({
+          file: f.testName, line: i + 1, message: f.error.slice(0, 200), code: 'TEST'
+        }))
+        const failureSet: DiagnosticSet = {
+          diagnostics: failureDiags.slice(0, 20),
+          totalCount: failureDiags.length,
+          truncated: failureDiags.length > 20,
+        }
 
-      // Behavioral checks
+        await insertEvent(db, {
+          runId, changeId, seq: seq(), iteration: state.iteration,
+          eventType: 'phase.unit.failed',
+          payload: { diagnostics: failureSet.diagnostics, totalCount: failureSet.totalCount, truncated: failureSet.truncated, durationMs: utDurationMs },
+        })
+
+        while (!testsPassed && repairPhaseCount < budget.perIteration.maxRepairPhaseAttempts) {
+          await log('error', `Tests failed · ${testResult.testsFailed} failed`)
+          const attempt = await runRepairPhase(db, ai, executor, env, runId, changeId, state.iteration, failureSet, (change as { intent: string | null }).intent ?? '', seq)
+          repairsAttempted++
+          allFilesChanged = [...new Set([...allFilesChanged, ...attempt.filesPatched])]
+          repairPhaseCount++
+          const retest = await executor.runTests(env, testScope)
+          testsPassed = retest.passed
+          if (testsPassed) break
+        }
+
+        if (!testsPassed) {
+          finalFailureType = `tests: ${testResult.testsFailed} failed`
+          const currRecord: IterationRecord = { iteration: state.iteration, diagnosticSigs: [], errorCount: testResult.testsFailed, repairedFiles: [] }
+          const stuck = detectStuck(iterationHistory, currRecord, budget.perIteration)
+          if (stuck.stuck) {
+            await insertEvent(db, { runId, changeId, seq: seq(), iteration: state.iteration, eventType: 'iteration.stuck', payload: { reason: stuck.reason } })
+            await log('error', `Stuck detector fired: ${stuck.reason}`)
+            break
+          }
+          iterationHistory.push(currRecord)
+          await insertEvent(db, { runId, changeId, seq: seq(), iteration: state.iteration, eventType: 'iteration.completed', payload: { durationMs: Date.now() - utStart } })
+          continue
+        }
+      }
+
+      await log('success', `Tests passed`)
+      await insertEvent(db, { runId, changeId, seq: seq(), iteration: state.iteration, eventType: 'phase.unit.passed', payload: { durationMs: utDurationMs } })
+
+      // ── Behavioral checks (unchanged) ────────────────────────────────────
       const behavioralScope: BehavioralScope = {
         patches: iterationPatches,
         criticalComponentTouched: Object.values(componentTypeMap).some(t => ['auth', 'db'].includes(t)),
@@ -494,72 +596,147 @@ export async function runExecution(
       if (!behavResult.passed) {
         const anomalyMsg = behavResult.anomalies.map(a => `[${a.severity}] ${a.description}`).join('\n')
         await log('error', `Behavioral check failed\n${anomalyMsg}`)
+        finalFailureType = 'behavioral: ' + behavResult.anomalies[0]?.description?.slice(0, 80)
         await writeSnapshot(db, changeId, state, 'error', false, 0, 0, anomalyMsg.slice(0, 8000))
         continue
       }
 
-      // All checks passed
+      // All checks passed for this iteration
       state.acceptedPatches.push(...iterationPatches)
       state.acceptedNewFiles.push(...iterationNewFiles)
+      allFilesChanged = [...new Set([...allFilesChanged, ...iterationPatches.map(p => p.path), ...iterationNewFiles.map(f => f.path)])]
+
       await writeSnapshot(
         db, changeId, state, 'passed', false,
         testResult.testsPassed, testResult.testsFailed, null,
-        [...new Set([
-          ...iterationPatches.map(p => p.path),
-          ...iterationNewFiles.map(f => f.path),
-        ])]
+        allFilesChanged
       )
+
+      await insertEvent(db, { runId, changeId, seq: seq(), iteration: state.iteration, eventType: 'iteration.completed', payload: { durationMs: Date.now() - svStart } })
 
       pendingTasks = pendingTasks.filter(t => !processedTaskIds.includes(t.id))
       if (pendingTasks.length === 0) {
         fullSuccess = true
         break
       }
+
+      // Check cancellation at iteration boundary
+      if (await isCancellationRequested(db, runId)) {
+        await log('info', 'Cancellation requested — stopping after iteration boundary')
+        runStatus = 'cancelled'
+        break
+      }
     }
 
-    // Commit and push
-    await log('info', `Committing and pushing to ${branch}…`)
-    await executor.getDiff(env)
-    const commitMsg = `feat: ${(change as { title: string }).title} (${changeId.slice(0, 8)})`
-    const commitResult = await executor.commitAndPush(env, branch, commitMsg)
+    // ── Commit policy ─────────────────────────────────────────────────────────
+    const cancelled = runStatus === 'cancelled'
+    let hasDiff = false
+    try {
+      const diff = await executor.getDiff(env!)
+      hasDiff = (diff?.filesChanged?.length ?? 0) > 0
+    } catch { /* treat as no diff */ }
 
-    await db.from('change_commits').insert({
-      change_id: changeId,
-      branch_name: commitResult.branch,
-      commit_hash: commitResult.commitHash,
+    // Check dirty tree
+    let dirtyFiles: string[] = []
+    try {
+      const { exec } = await import('node:child_process')
+      const { promisify } = await import('node:util')
+      const execAsync = promisify(exec)
+      const { stdout } = await execAsync('git status --porcelain', { cwd: env!.localWorkDir })
+      dirtyFiles = stdout.split('\n').filter(Boolean).map(l => l.slice(3).trim())
+    } catch { /* ignore */ }
+
+    commitOutcome = determineCommitOutcome({
+      allChecksPassed: fullSuccess,
+      hasDiff,
+      cancelled,
+      dirtyFiles,
+      runFilesChanged: allFilesChanged,
+      finalFailureType,
     })
-    await log('success', `Committed ${commitResult.commitHash.slice(0, 7)} → ${commitResult.branch}`)
 
-    if (!fullSuccess) {
-      await writeSnapshot(db, changeId, state, state.iteration >= limits.maxIterations ? 'max_iterations' : 'error')
+    if (commitOutcome.type === 'green' || commitOutcome.type === 'wip') {
+      try {
+        const commitMsg = commitOutcome.type === 'green'
+          ? `feat: ${(change as { title: string }).title} (${changeId.slice(0, 8)})`
+          : `wip: ${(change as { title: string }).title} (${finalFailureType ?? 'checks failed'})`
+
+        await log('info', `Committing → ${branch} [${commitOutcome.type}]`)
+        const commitResult = await executor.commitAndPush(env!, branch, commitMsg)
+        await db.from('change_commits').insert({
+          change_id: changeId,
+          branch_name: commitResult.branch,
+          commit_hash: commitResult.commitHash,
+        })
+        await log('success', `Committed ${commitResult.commitHash.slice(0, 7)} → ${commitResult.branch}`)
+        await insertEvent(db, {
+          runId, changeId, seq: seq(), iteration: state.iteration,
+          eventType: commitOutcome.type === 'green' ? 'commit.green' : 'commit.wip',
+          payload: commitOutcome.type === 'wip' ? { reason: commitOutcome.reason, durationMs: 0 } : { durationMs: 0 },
+        })
+      } catch (commitErr) {
+        await log('error', `Commit failed: ${(commitErr as Error).message}`)
+        await insertEvent(db, { runId, changeId, seq: seq(), iteration: state.iteration, eventType: 'commit.failed', payload: { reason: (commitErr as Error).message, durationMs: 0 } })
+        commitOutcome = { type: 'no_commit', reason: 'git error' }
+      }
+    } else {
+      const skipReason = commitOutcome.type === 'no_commit' ? commitOutcome.reason : 'cancelled'
+      await log('info', `Commit skipped: ${skipReason}`)
+      await insertEvent(db, {
+        runId, changeId, seq: seq(), iteration: state.iteration,
+        eventType: 'commit.skipped',
+        payload: { reason: skipReason, durationMs: 0 },
+      })
     }
 
-    await log(fullSuccess ? 'success' : 'error', fullSuccess ? 'Execution complete — ready for review' : 'Execution finished with errors')
+    // Determine final run status
+    if (!cancelled) {
+      if (fullSuccess) runStatus = 'success'
+      else if (commitOutcome.type === 'wip') runStatus = 'wip'
+      else runStatus = 'budget_exceeded'
+    }
+
+    await log(fullSuccess ? 'success' : 'error', fullSuccess ? 'Execution complete — ready for review' : `Execution finished: ${finalFailureType ?? 'budget exceeded'}`)
 
     const executionOutcome: 'success' | 'failure' = fullSuccess ? 'success' : 'failure'
 
-    // Step 1: Write stub (canonical completion signal)
-    let completionVersion: number
-    try {
-      completionVersion = await nextVersion(db, projectId)
-      // analysis_status 'completed' means the orchestrator ran to its conclusion (even if execution_outcome is 'failure').
-      // 'failed' in analysis_status is reserved for exception-path termination (crash, stub write failure, etc.)
-      await writeStub(db, changeId, completionVersion, executionOutcome, 'completed')
-    } catch (stubErr) {
-      console.error('[dashboard] stub write failed — not marking as completed:', stubErr)
-      return // keep analysis_status = 'running', caller should retry
+    const summary: ExecutionSummary = {
+      status: runStatus,
+      iterationsUsed: state.iteration,
+      repairsAttempted,
+      filesChanged: allFilesChanged,
+      finalFailureType,
+      commitOutcome,
+      durationMs: Date.now() - state.startedAt,
     }
 
-    // Step 2: Mark change as completed
-    await db
-      .from('change_requests')
-      .update({
-        status: fullSuccess ? 'review' : 'failed',
-        analysis_status: 'completed',
-      })
+    await insertEvent(db, {
+      runId, changeId, seq: seq(), iteration: state.iteration,
+      eventType: 'execution.completed',
+      payload: { summary },
+    })
+
+    clearInterval(heartbeat)
+    clearSeq(runId)
+    await finalizeRun(db, runId, runStatus, summary).catch(err =>
+      console.error('[execution-orchestrator] finalizeRun failed:', err)
+    )
+
+    // Write stub (existing dashboard compat)
+    let completionVersion: number | null = null
+    try {
+      completionVersion = await nextVersion(db, projectId)
+      await writeStub(db, changeId, completionVersion, executionOutcome, 'completed')
+    } catch (stubErr) {
+      console.error('[dashboard] stub write failed — updating status anyway:', stubErr)
+    }
+
+    await db.from('change_requests')
+      .update({ status: fullSuccess ? 'review' : 'failed', analysis_status: 'completed' })
       .eq('id', changeId)
 
-    // Step 3: Emit completed event
+    if (completionVersion === null) return
+
     const completedEvent: DashboardEvent = {
       type: 'completed', scope: 'analysis',
       changeId, projectId,
@@ -570,8 +747,7 @@ export async function runExecution(
     emitDashboardEvent(projectId, completedEvent)
     recordEvent(db, projectId, completedEvent).catch(() => {})
 
-    // Step 4: Enrich snapshot in background
-    const filesModified = state.acceptedPatches.map(p => p.path)
+    const filesModified = allFilesChanged
     enrichSnapshotWithRetry(db, projectId, changeId, {
       stagesCompleted: [`iteration_${state.iteration}`],
       filesModified,
@@ -595,6 +771,17 @@ export async function runExecution(
       error_summary: errorMessage,
     })
     await db.from('change_requests').update({ status: 'failed', analysis_status: 'failed' }).eq('id', changeId)
+    clearInterval(heartbeat)
+    clearSeq(runId)
+    await finalizeRun(db, runId, 'blocked', {
+      status: 'blocked',
+      iterationsUsed: 0,
+      repairsAttempted: 0,
+      filesChanged: [],
+      finalFailureType: errorMessage,
+      commitOutcome: { type: 'no_commit', reason: 'error' },
+      durationMs: 0,
+    }).catch(() => {})
     // Emit failed event if we have projectId (it may not be set if failure was before loading change)
     if (projectId) {
       try {

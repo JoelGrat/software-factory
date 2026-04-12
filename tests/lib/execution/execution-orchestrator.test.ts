@@ -140,6 +140,33 @@ function makeMockDb(opts: { planStatus?: string } = {}): { db: SupabaseClient; u
           insert: () => Promise.resolve({ error: null }),
         }
       }
+      if (table === 'execution_runs') {
+        return {
+          select: (_cols?: string) => ({
+            eq: () => ({
+              eq: () => ({
+                limit: () => ({
+                  maybeSingle: () => Promise.resolve({ data: null }),  // no existing run
+                }),
+              }),
+              single: () => Promise.resolve({ data: null }),
+            }),
+          }),
+          insert: (_data: unknown) => ({
+            select: (_cols?: string) => ({
+              single: () => Promise.resolve({ data: { id: 'run-1' }, error: null }),
+            }),
+          }),
+          update: (_data: unknown) => ({
+            eq: () => Promise.resolve({ error: null }),
+          }),
+        }
+      }
+      if (table === 'execution_events') {
+        return {
+          insert: () => Promise.resolve({ error: null }),
+        }
+      }
       if (table === 'event_history') {
         return {
           insert: () => Promise.resolve({ error: null }),
