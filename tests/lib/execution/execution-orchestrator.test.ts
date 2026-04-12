@@ -140,10 +140,35 @@ function makeMockDb(opts: { planStatus?: string } = {}): { db: SupabaseClient; u
           insert: () => Promise.resolve({ error: null }),
         }
       }
+      if (table === 'event_history') {
+        return {
+          insert: () => Promise.resolve({ error: null }),
+          select: () => ({
+            eq: () => ({
+              order: () => ({
+                range: () => ({ maybeSingle: () => Promise.resolve({ data: null }) }),
+                limit: () => ({ maybeSingle: () => Promise.resolve({ data: null }) }),
+              }),
+              gt: () => ({
+                order: () => Promise.resolve({ data: [] }),
+              }),
+              delete: () => ({ lt: () => Promise.resolve({ error: null }) }),
+            }),
+          }),
+          delete: () => ({ eq: () => ({ lt: () => Promise.resolve({ error: null }) }) }),
+        }
+      }
+      if (table === 'analysis_result_snapshot') {
+        return {
+          insert: () => Promise.resolve({ error: null }),
+          update: () => ({ eq: () => Promise.resolve({ error: null }) }),
+        }
+      }
       return {
         select: () => ({ eq: () => ({ single: () => Promise.resolve({ data: null }) }) }),
       }
     },
+    rpc: (_fn: string, _args?: Record<string, unknown>) => Promise.resolve({ data: 1, error: null }),
   } as unknown as SupabaseClient
 
   return { db, updates }
@@ -219,6 +244,7 @@ describe('runExecution', () => {
         }
         return (db as any).from(table)
       },
+      rpc: (db as any).rpc,
     } as unknown as SupabaseClient
 
     const executor = new MockCodeExecutor()
@@ -259,6 +285,7 @@ describe('runExecution', () => {
         }
         return (db as any).from(table)
       },
+      rpc: (db as any).rpc,
     } as unknown as SupabaseClient
 
     const executor = new MockCodeExecutor()
@@ -305,6 +332,7 @@ describe('runExecution', () => {
         }
         return (db as any).from(table)
       },
+      rpc: (db as any).rpc,
     } as unknown as SupabaseClient
 
     const ai = new MockAIProvider()

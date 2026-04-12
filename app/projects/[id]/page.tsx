@@ -39,17 +39,17 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
       ])
     : [{ data: [] }, { data: [] }]
 
-  // Fetch active changes — exclude only completed/stalled; keep failed so users can retry or dismiss
+  // Fetch active changes — exclude completed/stalled, but always keep failed so users can retry or dismiss
   const { data: activeChangesRaw } = await db
     .from('change_requests')
     .select('id, title, status, analysis_status, pipeline_status, risk_level, updated_at')
     .eq('project_id', id)
-    .not('analysis_status', 'in', '("completed","stalled")')
+    .or('analysis_status.not.in.(completed,stalled),status.eq.failed')
     .order('updated_at', { ascending: false })
 
   // Fetch recent analysis snapshots
   const changeIds = (changes ?? []).map(c => c.id)
-  const { data: recentSnapshots } = changeIds.length > 0
+  const { data: rawSnapshots } = changeIds.length > 0
     ? await db
         .from('analysis_result_snapshot')
         .select('*')
@@ -57,6 +57,25 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
         .order('completed_at', { ascending: false })
         .limit(10)
     : { data: [] }
+
+  // Map snake_case DB columns → camelCase to match AnalysisResultSnapshotData
+  const recentSnapshots = (rawSnapshots ?? []).map(s => ({
+    changeId: s.change_id,
+    version: s.version,
+    executionOutcome: s.execution_outcome,
+    snapshotStatus: s.snapshot_status,
+    minimal: s.minimal,
+    analysisStatus: s.analysis_status,
+    stagesCompleted: s.stages_completed,
+    filesModified: s.files_modified,
+    componentsAffected: s.components_affected,
+    jaccardAccuracy: s.jaccard_accuracy,
+    missRate: s.miss_rate,
+    modelMiss: s.model_miss,
+    failureCause: s.failure_cause,
+    durationMs: s.duration_ms,
+    completedAt: s.completed_at,
+  }))
 
   // Fetch precomputed dashboard data
   const [

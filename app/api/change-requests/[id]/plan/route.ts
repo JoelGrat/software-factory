@@ -22,18 +22,19 @@ export async function POST(
 
   if (!change) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  const ALLOWED = ['analyzed', 'planned']
+  const ALLOWED = ['analyzed', 'planned', 'awaiting_approval']
   if (!ALLOWED.includes(change.status)) {
     return NextResponse.json(
-      { error: `Cannot generate plan from status '${change.status}'. Must be 'analyzed' or 'planned'.` },
+      { error: `Cannot generate plan from status '${change.status}'. Must be 'analyzed', 'planned', or 'awaiting_approval'.` },
       { status: 409 }
     )
   }
 
   // Ensure pipeline_status is set correctly for the phase precondition check
+  // and reset change status to 'planning' so the polling loop engages
   const adminDb = createAdminClient()
   await adminDb.from('change_requests')
-    .update({ pipeline_status: 'impact_analyzed' })
+    .update({ status: 'planning', pipeline_status: 'impact_analyzed' })
     .eq('id', id)
 
   const ai = getProvider()

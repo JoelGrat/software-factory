@@ -311,7 +311,10 @@ function ChangeCardItem({
     <div
       onClick={(e) => {
         if ((e.target as HTMLElement).closest('[data-action]')) return
-        router.push(`/projects/${projectId}/changes/${change.id}`)
+        const dest = change.status === 'executing'
+          ? `/projects/${projectId}/changes/${change.id}/execution`
+          : `/projects/${projectId}/changes/${change.id}`
+        router.push(dest)
       }}
       className={`rounded-lg border p-3 text-sm cursor-pointer transition-all ${borderClass} ${hoverClass}`}
     >
