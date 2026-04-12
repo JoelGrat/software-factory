@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { insertEvent, validatePayload } from '@/lib/execution/event-emitter'
+import { insertEvent, validatePayload, nextSeq, clearSeq } from '@/lib/execution/event-emitter'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 function makeDb(insertFn: (row: unknown) => unknown) {
@@ -60,5 +60,49 @@ describe('insertEvent', () => {
       eventType: 'phase.static_validation.failed',
       payload: { diagnostics: 'not-an-array' },
     })).rejects.toThrow('EventPayloadValidationError')
+  })
+})
+
+describe('nextSeq / clearSeq', () => {
+  it('increments seq per runId', () => {
+    clearSeq('test-run-seq')
+    expect(nextSeq('test-run-seq')).toBe(1)
+    expect(nextSeq('test-run-seq')).toBe(2)
+    expect(nextSeq('test-run-seq')).toBe(3)
+  })
+
+  it('counters are independent per runId', () => {
+    clearSeq('run-a')
+    clearSeq('run-b')
+    expect(nextSeq('run-a')).toBe(1)
+    expect(nextSeq('run-b')).toBe(1)
+    expect(nextSeq('run-a')).toBe(2)
+  })
+
+  it('clearSeq resets counter to 0', () => {
+    clearSeq('test-clear')
+    nextSeq('test-clear')
+    nextSeq('test-clear')
+    clearSeq('test-clear')
+    expect(nextSeq('test-clear')).toBe(1)
+  })
+})
+
+describe('insertEvent DB error handling', () => {
+  it('throws when DB insert returns an error', async () => {
+    const db = {
+      from: () => ({
+        insert: () => ({ error: { message: 'unique constraint violation' } }),
+      }),
+    } as unknown as SupabaseClient
+
+    await expect(insertEvent(db, {
+      runId: 'run1',
+      changeId: 'cr1',
+      seq: 99,
+      iteration: 0,
+      eventType: 'execution.started',
+      payload: {},
+    })).rejects.toThrow('insertEvent failed')
   })
 })
