@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { LeftNav } from '@/components/app/left-nav'
 import { ProfileAvatar } from '@/components/app/profile-avatar'
+import { ChangeStepBar } from '@/components/app/change-step-bar'
 
 interface Project { id: string; name: string }
 
@@ -84,8 +85,12 @@ const ANALYSIS_STEPS = [
   { label: 'Computing risk score', statuses: ['analyzing_scoring'] },
 ]
 
-const PLANNING_STEPS = [
-  { label: 'Generating implementation plan', statuses: ['planning'] },
+const PLANNING_SUBSTEPS = [
+  'Drafting plan outline',
+  'Mapping tasks to components',
+  'Generating implementation steps',
+  'Estimating scope and files',
+  'Finalising plan',
 ]
 
 function ComponentImpactRow({ ic }: { ic: ImpactComponent }) {
@@ -149,9 +154,15 @@ export function ChangeDetailView({
   )
   const [approving, setApproving] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [addingTestTask, setAddingTestTask] = useState<string | null>(null)
+  const [addedCoverageItems, setAddedCoverageItems] = useState<Set<string>>(new Set())
+  const [addingRiskTask, setAddingRiskTask] = useState<string | null>(null)
+  const [addedRiskItems, setAddedRiskItems] = useState<Set<string>>(new Set())
+  const [toast, setToast] = useState<string | null>(null)
   const [generatingSpec, setGeneratingSpec] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [planningStep, setPlanningStep] = useState(0)
   const isAnalyzing = ANALYZING_STATUSES.includes(change.status)
   const canDelete = !['executing', 'done'].includes(change.status)
 
@@ -324,9 +335,6 @@ export function ChangeDetailView({
   if (riskFactors.find(f => f.factor === 'dynamic_imports')) {
     hiddenRisks.push('Dynamic imports in propagation graph — lazy-loaded modules not fully traversed, actual blast radius may be wider than reported')
   }
-  if (hiddenRisks.length === 0 && change.risk_level === 'low') {
-    hiddenRisks.push('No hidden risk patterns detected — low-risk routing/UI changes are still the most common source of silent breakage; confirm with an end-to-end navigation test')
-  }
 
   // Coverage gaps — scan task descriptions for test coverage quality
   const testTasks = planTasks.filter(t => /test|spec/i.test(t.description))
@@ -392,6 +400,21 @@ export function ChangeDetailView({
     return () => clearInterval(id)
   }, [change.id, isAnalyzing, router])
 
+  useEffect(() => {
+    if (change.status !== 'planning') return
+    setPlanningStep(0)
+    const id = setInterval(() => {
+      setPlanningStep(s => Math.min(s + 1, PLANNING_SUBSTEPS.length - 1))
+    }, 7000)
+    return () => clearInterval(id)
+  }, [change.status])
+
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(null), 3000)
+    return () => clearTimeout(t)
+  }, [toast])
+
   return (
     <div className="flex flex-col h-screen bg-[#0b1326] text-on-surface overflow-hidden">
       <header className="w-full h-16 flex-shrink-0 flex items-center justify-between px-6 bg-[#0b1326] border-b border-white/5 z-50 font-headline antialiased tracking-tight">
@@ -415,51 +438,38 @@ export function ChangeDetailView({
         <LeftNav />
         <main className="flex-1 overflow-y-auto bg-[#0b1326] p-10">
           <div className="max-w-3xl mx-auto space-y-8">
+            <ChangeStepBar projectId={project.id} changeId={change.id} current="plan" changeStatus={change.status} />
 
             {/* Header */}
-            <div className="flex items-start gap-4 flex-wrap">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap mb-2">
+            <div className="space-y-1.5">
+              {/* Title + badges */}
+              <div className="flex items-start justify-between gap-4">
+                <h1 className="text-2xl font-extrabold tracking-tight text-on-surface leading-snug">{change.title}</h1>
+                <div className="flex items-center gap-2 flex-shrink-0 pt-0.5">
                   <Badge label={change.type} colorClass={TYPE_COLORS[change.type] ?? 'text-slate-400 bg-slate-400/10'} />
-                  <Badge label={change.priority} colorClass="text-slate-400 bg-slate-400/10" />
                   {change.risk_level && <Badge label={`${change.risk_level} risk`} colorClass={RISK_COLORS[change.risk_level] ?? 'text-slate-400 bg-slate-400/10'} />}
-                  {change.tags.map(tag => (
-                    <span key={tag} className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-400/10 text-indigo-300 font-mono">{tag}</span>
-                  ))}
+                  {canDelete && (
+                    deleteConfirm ? (
+                      <div className="flex items-center gap-2 ml-1">
+                        <span className="text-xs text-slate-400">Delete?</span>
+                        <button onClick={handleDelete} disabled={deleting} className="text-xs font-semibold text-red-400 hover:text-red-300 disabled:opacity-50 transition-colors">
+                          {deleting ? 'Deleting…' : 'Yes'}
+                        </button>
+                        <button onClick={() => setDeleteConfirm(false)} className="text-xs text-slate-500 hover:text-slate-300 transition-colors">No</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => setDeleteConfirm(true)} className="p-1 text-slate-700 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-all" title="Delete change">
+                        <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>delete</span>
+                      </button>
+                    )
+                  )}
                 </div>
-                <h1 className="text-2xl font-extrabold font-headline tracking-tight text-on-surface">{change.title}</h1>
-                <p className="text-xs text-slate-500 mt-1 font-mono">
-                  Created {new Date(change.created_at).toLocaleDateString('en-GB')}
-                </p>
               </div>
-              {canDelete && (
-                deleteConfirm ? (
-                  <div className="flex items-center gap-3 pt-1">
-                    <span className="text-xs text-slate-400">Delete this change?</span>
-                    <button
-                      onClick={handleDelete}
-                      disabled={deleting}
-                      className="text-xs font-semibold text-red-400 hover:text-red-300 disabled:opacity-50 transition-colors"
-                    >
-                      {deleting ? 'Deleting…' : 'Yes, delete'}
-                    </button>
-                    <button
-                      onClick={() => setDeleteConfirm(false)}
-                      className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => setDeleteConfirm(true)}
-                    className="p-1.5 text-slate-600 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-all mt-0.5"
-                    title="Delete change"
-                  >
-                    <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>delete</span>
-                  </button>
-                )
-              )}
+              {/* Summary */}
+              <p className="text-xs text-slate-500 font-mono">
+                {change.priority} priority · created {new Date(change.created_at).toLocaleDateString('en-GB')}
+                {change.tags.length > 0 && ` · ${change.tags.join(', ')}`}
+              </p>
             </div>
 
             {/* Intent */}
@@ -470,37 +480,103 @@ export function ChangeDetailView({
 
             {/* Analysis state */}
             {isAnalyzing ? (
-              <div className="rounded-xl p-6 bg-[#131b2e] border border-white/5">
-                <p className="text-xs font-bold uppercase tracking-widest text-slate-400 font-headline mb-4">
+              <div className="rounded-xl bg-[#131b2e] border border-white/5 overflow-hidden">
+                <p className="text-xs font-bold uppercase tracking-widest text-slate-400 font-headline px-6 pt-5 pb-4">
                   {change.status === 'planning' ? 'Generating Plan' : 'Impact Analysis'}
                 </p>
-                <div className="space-y-3">
-                  {(() => {
-                    const steps = change.status === 'planning' ? PLANNING_STEPS : ANALYSIS_STEPS
-                    const currentStepIndex = steps.findIndex(s => s.statuses.includes(change.status))
-                    return steps.map((step, i) => {
-                      const isActive = step.statuses.includes(change.status)
-                      const isDone = i < currentStepIndex
-                      return (
-                        <div key={step.label} className="flex items-center gap-3">
-                          {isActive ? (
-                            <span className="relative flex h-2 w-2 flex-shrink-0">
-                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
-                              <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-400" />
+
+                {change.status === 'planning' ? (
+                  <div className="px-6 pb-5 space-y-5">
+                    {/* Animated substeps */}
+                    <div className="space-y-2.5">
+                      {PLANNING_SUBSTEPS.map((label, i) => {
+                        const isActive = i === planningStep
+                        const isDone = i < planningStep
+                        return (
+                          <div key={label} className="flex items-center gap-3">
+                            {isActive ? (
+                              <span className="relative flex h-2 w-2 flex-shrink-0">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
+                                <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-400" />
+                              </span>
+                            ) : isDone ? (
+                              <span className="h-2 w-2 rounded-full bg-green-400 flex-shrink-0" />
+                            ) : (
+                              <span className="h-2 w-2 rounded-full bg-slate-700 flex-shrink-0" />
+                            )}
+                            <span className={`text-sm ${isActive ? 'text-slate-200' : isDone ? 'text-slate-500' : 'text-slate-600'}`}>
+                              {label}
                             </span>
-                          ) : isDone ? (
-                            <span className="h-2 w-2 rounded-full bg-green-400 flex-shrink-0" />
-                          ) : (
-                            <span className="h-2 w-2 rounded-full bg-slate-700 flex-shrink-0" />
-                          )}
-                          <span className={`text-sm ${isActive ? 'text-slate-200' : isDone ? 'text-slate-500' : 'text-slate-600'}`}>
-                            {step.label}
-                          </span>
-                        </div>
-                      )
-                    })
-                  })()}
-                </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+
+                    {/* Scope context derived from impact analysis */}
+                    {(impactComponents.length > 0 || impact) && (
+                      <div className="border-t border-white/5 pt-4 space-y-3">
+                        {impact && (
+                          <div className="flex items-center gap-4 text-[11px] font-mono text-slate-500">
+                            {impact.blast_radius !== null && (
+                              <span>{impact.blast_radius} component{impact.blast_radius !== 1 ? 's' : ''} in scope</span>
+                            )}
+                            {change.risk_level && (
+                              <span className={`px-1.5 py-0.5 rounded uppercase tracking-wider text-[10px] ${RISK_COLORS[change.risk_level] ?? 'text-slate-400 bg-slate-700'}`}>
+                                {change.risk_level} risk
+                              </span>
+                            )}
+                            {impact.requires_migration && (
+                              <span className="text-amber-400/70">migration required</span>
+                            )}
+                          </div>
+                        )}
+                        {impactComponents.length > 0 && (
+                          <div>
+                            <p className="text-[10px] uppercase tracking-widest text-slate-600 font-headline mb-2">Planning coverage for</p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {impactComponents.slice(0, 8).map(ic => (
+                                <span key={ic.component_id} className="flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded bg-indigo-400/8 text-indigo-300/70 border border-indigo-400/10">
+                                  <span className="text-[9px] text-indigo-400/50 uppercase">{ic.system_components?.type ?? '?'}</span>
+                                  <span>{ic.system_components?.name ?? ic.component_id}</span>
+                                </span>
+                              ))}
+                              {impactComponents.length > 8 && (
+                                <span className="text-[11px] font-mono text-slate-600 px-2 py-0.5">+{impactComponents.length - 8} more</span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="px-6 pb-5 space-y-3">
+                    {(() => {
+                      const currentStepIndex = ANALYSIS_STEPS.findIndex(s => s.statuses.includes(change.status))
+                      return ANALYSIS_STEPS.map((step, i) => {
+                        const isActive = step.statuses.includes(change.status)
+                        const isDone = i < currentStepIndex
+                        return (
+                          <div key={step.label} className="flex items-center gap-3">
+                            {isActive ? (
+                              <span className="relative flex h-2 w-2 flex-shrink-0">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
+                                <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-400" />
+                              </span>
+                            ) : isDone ? (
+                              <span className="h-2 w-2 rounded-full bg-green-400 flex-shrink-0" />
+                            ) : (
+                              <span className="h-2 w-2 rounded-full bg-slate-700 flex-shrink-0" />
+                            )}
+                            <span className={`text-sm ${isActive ? 'text-slate-200' : isDone ? 'text-slate-500' : 'text-slate-600'}`}>
+                              {step.label}
+                            </span>
+                          </div>
+                        )
+                      })
+                    })()}
+                  </div>
+                )}
               </div>
             ) : change.status === 'open' ? (
               <div className="rounded-xl p-6 bg-[#131b2e] border border-white/5 text-center">
@@ -743,7 +819,7 @@ export function ChangeDetailView({
                 {planTab === 'review' && (
                   <div className="divide-y divide-white/5">
 
-                    {/* 1. Plan Verdict */}
+                    {/* 1. Recommended Decision */}
                     <div className="px-5 py-5">
                       <div className="flex items-center gap-6 mb-3">
                         <div>
@@ -771,10 +847,10 @@ export function ChangeDetailView({
                       </div>
                     </div>
 
-                    {/* 2. Actual Impacted Files */}
+                    {/* 2. Likely Impacted Files */}
                     {(reviewAllFiles.length > 0 || reviewNewFileCount > 0) && (
                       <div className="px-5 py-4">
-                        <p className="text-[10px] uppercase tracking-widest text-slate-500 font-headline mb-3">Impacted Files</p>
+                        <p className="text-[10px] uppercase tracking-widest text-slate-500 font-headline mb-3">Likely Impacted Files</p>
                         <div className="space-y-1.5">
                           {reviewAllFiles.map(file => (
                             <div key={file} className="flex items-baseline gap-2">
@@ -858,18 +934,54 @@ export function ChangeDetailView({
                       </div>
                     )}
 
-                    {/* 5. Hidden Risks */}
-                    {hiddenRisks.length > 0 && (
+                    {/* 5. Potential Risks */}
+                    {(hiddenRisks.length > 0) && (
                       <div className="px-5 py-4">
-                        <p className="text-[10px] uppercase tracking-widest text-slate-500 font-headline mb-3">Hidden Risks</p>
-                        <ul className="space-y-2">
-                          {hiddenRisks.map((risk, i) => (
-                            <li key={i} className="flex items-start gap-2">
-                              <span className="text-amber-500/80 mt-0.5 flex-shrink-0 text-xs">⚠</span>
+                        <p className="text-[10px] uppercase tracking-widest text-slate-500 font-headline mb-3">Potential Risks</p>
+                        <div className="space-y-1.5">
+                          {Array.from(addedRiskItems).map((risk, i) => (
+                            <div key={i} className="flex items-start gap-2">
+                              <span className="text-green-500/80 flex-shrink-0 text-xs mt-0.5">✓</span>
                               <span className="text-[11px] text-slate-400 font-mono leading-relaxed">{risk}</span>
-                            </li>
+                            </div>
                           ))}
-                        </ul>
+                          {hiddenRisks.filter(r => !addedRiskItems.has(r)).map((risk, i) => (
+                            <div key={i} className="flex items-start justify-between gap-2">
+                              <div className="flex items-start gap-2 min-w-0">
+                                <span className="text-amber-500/80 flex-shrink-0 text-xs mt-0.5">⚠</span>
+                                <span className="text-[11px] text-slate-400 font-mono leading-relaxed">{risk}</span>
+                              </div>
+                              {plan && plan.status !== 'approved' && (
+                                <button
+                                  disabled={addingRiskTask === risk}
+                                  onClick={async () => {
+                                    if (!plan) return
+                                    setAddingRiskTask(risk)
+                                    try {
+                                      const description = `Mitigate: ${risk.split(' — ')[0]}`
+                                      const res = await fetch(`/api/change-requests/${change.id}/plan/tasks`, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ description }),
+                                      })
+                                      if (res.ok) {
+                                        const task = await res.json()
+                                        setPlanTasks(prev => [...prev, task])
+                                        setAddedRiskItems(prev => new Set(prev).add(risk))
+                                        setToast(`Task added: ${description}`)
+                                      }
+                                    } finally {
+                                      setAddingRiskTask(null)
+                                    }
+                                  }}
+                                  className="flex-shrink-0 text-[10px] text-amber-500/60 hover:text-amber-400 disabled:opacity-40 transition-colors whitespace-nowrap"
+                                >
+                                  {addingRiskTask === risk ? 'Adding…' : '+ Add'}
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     )}
 
@@ -878,16 +990,46 @@ export function ChangeDetailView({
                       <div className="px-5 py-4">
                         <p className="text-[10px] uppercase tracking-widest text-slate-500 font-headline mb-3">Test Coverage</p>
                         <div className="space-y-1.5">
-                          {coveredItems.map((item, i) => (
+                          {[...coveredItems, ...Array.from(addedCoverageItems)].map((item, i) => (
                             <div key={i} className="flex items-start gap-2">
                               <span className="text-green-500/80 flex-shrink-0 text-xs mt-0.5">✓</span>
                               <span className="text-[11px] text-slate-400 font-mono">{item}</span>
                             </div>
                           ))}
-                          {missingItems.map((item, i) => (
-                            <div key={i} className="flex items-start gap-2">
-                              <span className="text-amber-500/80 flex-shrink-0 text-xs mt-0.5">⚠</span>
-                              <span className="text-[11px] text-slate-400 font-mono">Missing: {item}</span>
+                          {missingItems.filter(item => !addedCoverageItems.has(item)).map((item, i) => (
+                            <div key={i} className="flex items-start justify-between gap-2">
+                              <div className="flex items-start gap-2 min-w-0">
+                                <span className="text-amber-500/80 flex-shrink-0 text-xs mt-0.5">⚠</span>
+                                <span className="text-[11px] text-slate-400 font-mono">Missing: {item}</span>
+                              </div>
+                              {plan && plan.status !== 'approved' && (
+                                <button
+                                  disabled={addingTestTask === item}
+                                  onClick={async () => {
+                                    if (!plan) return
+                                    setAddingTestTask(item)
+                                    try {
+                                      const description = `Write test: ${item.split(' — ')[0]}`
+                                      const res = await fetch(`/api/change-requests/${change.id}/plan/tasks`, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ description }),
+                                      })
+                                      if (res.ok) {
+                                        const task = await res.json()
+                                        setPlanTasks(prev => [...prev, task])
+                                        setAddedCoverageItems(prev => new Set(prev).add(item))
+                                        setToast(`Task added: ${description}`)
+                                      }
+                                    } finally {
+                                      setAddingTestTask(null)
+                                    }
+                                  }}
+                                  className="flex-shrink-0 text-[10px] text-amber-500/60 hover:text-amber-400 disabled:opacity-40 transition-colors whitespace-nowrap"
+                                >
+                                  {addingTestTask === item ? 'Adding…' : '+ Add'}
+                                </button>
+                              )}
                             </div>
                           ))}
                         </div>
@@ -1047,11 +1189,17 @@ export function ChangeDetailView({
                   <div className="flex items-center justify-end gap-3">
                     <button
                       onClick={async () => {
+                        setActionError(null)
                         try {
                           const res = await fetch(`/api/change-requests/${change.id}/plan`, { method: 'POST' })
-                          if (res.ok) setChange(c => ({ ...c, status: 'planning' }))
+                          if (res.ok) {
+                            setChange(c => ({ ...c, status: 'planning' }))
+                          } else {
+                            const data = await res.json().catch(() => ({}))
+                            setActionError(data.error ?? `Failed to regenerate plan (${res.status})`)
+                          }
                         } catch {
-                          // network error — leave status as-is
+                          setActionError('Network error — could not regenerate plan')
                         }
                       }}
                       className="px-3 py-1.5 rounded-lg border border-white/10 text-slate-400 hover:text-slate-200 text-xs font-bold font-headline transition-colors"
@@ -1071,7 +1219,7 @@ export function ChangeDetailView({
                               setActionError(data.detail ?? data.error ?? 'Something went wrong')
                               return
                             }
-                            router.refresh()
+                            router.push(`/projects/${project.id}/changes/${change.id}/execution`)
                           } catch {
                             setActionError('Network error — could not reach the server')
                           } finally {
@@ -1120,6 +1268,14 @@ export function ChangeDetailView({
           </div>
         </main>
       </div>
+
+      {/* Toast */}
+      {toast && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 px-4 py-3 rounded-xl bg-[#1a2540] border border-white/10 shadow-xl text-sm text-slate-200 font-mono animate-in fade-in slide-in-from-bottom-2 duration-200">
+          <span className="text-green-400 text-xs">✓</span>
+          {toast}
+        </div>
+      )}
     </div>
   )
 }

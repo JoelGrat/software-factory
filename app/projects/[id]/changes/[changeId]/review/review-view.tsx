@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { LeftNav } from '@/components/app/left-nav'
 import { ProfileAvatar } from '@/components/app/profile-avatar'
+import { ChangeStepBar } from '@/components/app/change-step-bar'
 
 interface Task {
   id: string; description: string; status: string; order_index: number
@@ -105,19 +106,21 @@ export default function ReviewView({
         <LeftNav />
         <main className="flex-1 overflow-y-auto p-10">
           <div className="max-w-2xl mx-auto space-y-6">
+            <ChangeStepBar projectId={project?.id ?? ''} changeId={change.id} current="review" changeStatus={change.status} />
 
             {/* Header */}
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-xs uppercase tracking-widest font-bold text-indigo-400 font-headline mb-1">Review</p>
-                <h1 className="text-2xl font-extrabold font-headline tracking-tight text-on-surface">{change.title}</h1>
-                {change.intent && (
-                  <p className="text-sm text-slate-500 mt-1">{change.intent}</p>
-                )}
+            <div className="space-y-1.5">
+              <div className="flex items-start justify-between gap-4">
+                <h1 className="text-2xl font-extrabold tracking-tight text-on-surface leading-snug">{change.title}</h1>
+                <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded font-mono text-orange-400 bg-orange-400/10 flex-shrink-0 mt-0.5">
+                  review
+                </span>
               </div>
-              <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded font-mono text-orange-400 bg-orange-400/10 flex-shrink-0 mt-1">
-                review
-              </span>
+              <p className="text-xs text-slate-500 font-mono">
+                {doneTasks}/{tasks.length} tasks · {testsPassed} test{testsPassed !== 1 ? 's' : ''} passed
+                {testsFailed > 0 && ` · ${testsFailed} failed`}
+                {` · ${filesModified.length} file${filesModified.length !== 1 ? 's' : ''} · ${iterationCount} iteration${iterationCount !== 1 ? 's' : ''}`}
+              </p>
             </div>
 
             {/* Stats row */}

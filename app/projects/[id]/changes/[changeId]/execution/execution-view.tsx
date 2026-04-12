@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { LeftNav } from '@/components/app/left-nav'
 import { ProfileAvatar } from '@/components/app/profile-avatar'
+import { ChangeStepBar } from '@/components/app/change-step-bar'
 
 interface Snapshot {
   id: string; iteration: number; files_modified: string[]
@@ -218,22 +219,29 @@ export default function ExecutionView({ change, project }: { change: Change; pro
           {/* Main content */}
           <div className="flex-1 overflow-y-auto p-10">
           <div className="max-w-3xl mx-auto space-y-6">
+            <ChangeStepBar projectId={project?.id ?? ''} changeId={change.id} current="execution" changeStatus={status} />
 
             {/* Page header */}
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-xs uppercase tracking-widest font-bold text-indigo-400 font-headline mb-1">Execution</p>
-                <h1 className="text-2xl font-extrabold font-headline tracking-tight text-on-surface">{change.title}</h1>
+            <div className="space-y-1.5">
+              <div className="flex items-start justify-between gap-4">
+                <h1 className="text-2xl font-extrabold tracking-tight text-on-surface leading-snug">{change.title}</h1>
+                <div className="flex items-center gap-2 flex-shrink-0 pt-0.5">
+                  <Badge label={status} colorClass={STATUS_COLORS[status] ?? 'text-slate-400 bg-slate-400/10'} />
+                  {change.risk_level && (
+                    <Badge
+                      label={`${change.risk_level} risk`}
+                      colorClass={change.risk_level === 'high' ? 'text-red-400 bg-red-400/10' : change.risk_level === 'medium' ? 'text-amber-400 bg-amber-400/10' : 'text-green-400 bg-green-400/10'}
+                    />
+                  )}
+                </div>
               </div>
-              <div className="flex items-center gap-2 pt-1">
-                <Badge label={status} colorClass={STATUS_COLORS[status] ?? 'text-slate-400 bg-slate-400/10'} />
-                {change.risk_level && (
-                  <Badge
-                    label={`${change.risk_level} risk`}
-                    colorClass={change.risk_level === 'high' ? 'text-red-400 bg-red-400/10' : change.risk_level === 'medium' ? 'text-amber-400 bg-amber-400/10' : 'text-green-400 bg-green-400/10'}
-                  />
-                )}
-              </div>
+              <p className="text-xs text-slate-500 font-mono">
+                {tasks.length > 0
+                  ? `${tasks.filter(t => t.status === 'done').length}/${tasks.length} tasks`
+                  : 'No tasks'}
+                {snapshots.length > 0 && ` · iteration ${snapshots.length}`}
+                {latestSnapshot?.tests_passed != null && ` · ${latestSnapshot.tests_passed} tests passed`}
+              </p>
             </div>
 
             {/* Execute CTA */}
