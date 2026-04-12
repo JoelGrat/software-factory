@@ -72,6 +72,22 @@ export async function POST(
     return NextResponse.json({ error: 'No approved plan found' }, { status: 409 })
   }
 
+  // Concurrency guard — one active run per change
+  const { data: activeRun } = await db
+    .from('execution_runs')
+    .select('id')
+    .eq('change_id', id)
+    .eq('status', 'running')
+    .limit(1)
+    .maybeSingle()
+
+  if (activeRun) {
+    return NextResponse.json(
+      { error: 'An execution is already in progress for this change.' },
+      { status: 409 }
+    )
+  }
+
   const docker = await checkDocker()
   if (!docker.ok) {
     return NextResponse.json(
