@@ -40,11 +40,15 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
     : [{ data: [] }, { data: [] }]
 
   // Fetch active changes — exclude completed/stalled, but always keep failed so users can retry or dismiss
+  // Active changes: everything that hasn't finished (not done/review).
+  // Intentionally status-based, not analysis_status-based, to avoid a race
+  // where re-triggered execution sets status='executing' before analysis_status
+  // transitions from 'completed' (left by the cancelled run) to 'running'.
   const { data: activeChangesRaw } = await db
     .from('change_requests')
     .select('id, title, status, analysis_status, pipeline_status, risk_level, updated_at')
     .eq('project_id', id)
-    .or('analysis_status.not.in.(completed,stalled),status.eq.failed')
+    .not('status', 'in', '("done","review")')
     .order('updated_at', { ascending: false })
 
   // Fetch recent analysis snapshots
