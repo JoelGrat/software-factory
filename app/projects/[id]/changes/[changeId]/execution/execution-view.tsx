@@ -8,6 +8,46 @@ import { ChangeStepBar } from '@/components/app/change-step-bar'
 import { ExecutionLiveStrip } from '@/components/app/execution-live-strip'
 import { ExecutionIterationCard } from '@/components/app/execution-iteration-card'
 
+function str(v: unknown, fallback = ''): string {
+  return v != null ? String(v) : fallback
+}
+
+function formatEventAsLog(e: { event_type: string; iteration: number; payload?: Record<string, unknown> }): { level: 'success' | 'error' | 'info' | 'dim'; message: string } {
+  const t = e.event_type
+  const p = e.payload ?? {}
+  const iter = e.iteration > 0 ? ` [iter ${e.iteration}]` : ''
+
+  if (t === 'execution.started') return { level: 'info', message: 'Execution started' }
+  if (t === 'execution.completed') return { level: 'success', message: `Execution complete` }
+  if (t === 'execution.blocked') return { level: 'error', message: `Execution blocked — ${str(p.reason, 'unknown')}` }
+
+  if (t === 'phase.static_validation.started') return { level: 'info', message: `${iter} Running type check…` }
+  if (t === 'phase.static_validation.passed') return { level: 'success', message: `${iter} Type check passed` }
+  if (t === 'phase.static_validation.failed') return { level: 'error', message: `${iter} Type check failed · ${str(p.totalCount, '?')} error${p.totalCount !== 1 ? 's' : ''}` }
+
+  if (t === 'phase.unit.started') return { level: 'info', message: `${iter} Running tests…` }
+  if (t === 'phase.unit.passed') return { level: 'success', message: `${iter} Tests passed` }
+  if (t === 'phase.unit.failed') return { level: 'error', message: `${iter} Tests failed · ${str(p.totalCount, '?')} failure${p.totalCount !== 1 ? 's' : ''}` }
+
+  if (t === 'repair.inline.started') return { level: 'info', message: `${iter} Inline repair started…` }
+  if (t === 'repair.inline.succeeded') return { level: 'success', message: `${iter} Inline repair applied` }
+  if (t === 'repair.inline.failed') return { level: 'error', message: `${iter} Inline repair failed` }
+
+  if (t === 'repair.phase.started') return { level: 'info', message: `${iter} Repair phase started…` }
+  if (t === 'repair.phase.succeeded') return { level: 'success', message: `${iter} Repair phase applied` }
+  if (t === 'repair.phase.failed') return { level: 'error', message: `${iter} Repair phase failed` }
+
+  if (t === 'iteration.stuck') return { level: 'error', message: `${iter} Stuck — ${str(p.reason, 'unknown')}` }
+  if (t === 'iteration.completed') return { level: 'dim', message: `${iter} Iteration complete` }
+
+  if (t === 'commit.green') return { level: 'success', message: 'Green commit pushed' }
+  if (t === 'commit.wip') return { level: 'info', message: `WIP commit — ${str(p.reason)}` }
+  if (t === 'commit.skipped') return { level: 'dim', message: `Commit skipped — ${str(p.reason)}` }
+  if (t === 'commit.failed') return { level: 'error', message: `Commit failed — ${str(p.reason)}` }
+
+  return { level: 'dim', message: t }
+}
+
 interface LiveEvent {
   id: string
   seq: number
@@ -165,7 +205,9 @@ export default function ExecutionView({ change, project }: { change: Change; pro
 
       <div className="flex flex-1 overflow-hidden">
         <LeftNav />
-        <main className="flex-1 overflow-y-auto p-10">
+        <main className="flex-1 overflow-hidden flex">
+          {/* Main content */}
+          <div className="flex-1 overflow-y-auto p-10">
           <div className="max-w-2xl mx-auto space-y-4">
             <ChangeStepBar projectId={project?.id ?? ''} changeId={change.id} current="execution" changeStatus={changeStatus} />
 
@@ -304,6 +346,43 @@ export default function ExecutionView({ change, project }: { change: Change; pro
             {startError && (
               <p className="text-xs text-red-400 font-mono">{startError}</p>
             )}
+          </div>
+          </div>
+
+          {/* Log sidebar */}
+          <div className="w-80 flex-shrink-0 border-l border-white/5 flex flex-col bg-[#080f1e]">
+            <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between flex-shrink-0">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 font-headline">Execution Log</p>
+              {runActive && (
+                <span className="relative flex h-1.5 w-1.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-60" />
+                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-blue-400" />
+                </span>
+              )}
+            </div>
+            <div className="flex-1 overflow-y-auto px-3 py-2 font-mono text-[11px] space-y-0.5">
+              {events.length === 0 && (
+                <p className="text-slate-700 py-4 text-center">
+                  {run ? 'No events yet…' : 'Events will appear once execution starts.'}
+                </p>
+              )}
+              {events.map(e => {
+                const { level, message } = formatEventAsLog(e)
+                return (
+                  <div key={e.id} className={`flex gap-2 py-0.5 leading-relaxed ${
+                    level === 'success' ? 'text-green-400' :
+                    level === 'error'   ? 'text-red-400'   :
+                    level === 'dim'     ? 'text-slate-600' :
+                    'text-slate-300'
+                  }`}>
+                    <span className="flex-shrink-0 text-slate-700 select-none">
+                      {level === 'success' ? '✓' : level === 'error' ? '✗' : '›'}
+                    </span>
+                    <span className="whitespace-pre-wrap break-all">{message}</span>
+                  </div>
+                )
+              })}
+            </div>
           </div>
         </main>
       </div>

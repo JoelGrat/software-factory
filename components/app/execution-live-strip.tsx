@@ -113,10 +113,10 @@ export function ExecutionLiveStrip({ events, runActive, elapsedMs, cancelState, 
       role="status"
       aria-live="polite"
       aria-label={`Execution: ${currentPhase}${detail ? ' — ' + detail : ''}`}
-      className="w-full rounded-xl bg-[#0f1929] border border-white/[0.06] px-5 py-3 flex items-center gap-4"
+      className="w-full rounded-xl bg-[#0f1929] border border-white/[0.06] px-5 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-2"
     >
       {/* Slots */}
-      <div className="flex items-center gap-3 flex-1 min-w-0">
+      <div className="flex items-center gap-2 flex-1 min-w-0">
         {SLOTS.map((slot, i) => {
           const state = slotState(slot.phase)
           const dotColor =
@@ -138,9 +138,9 @@ export function ExecutionLiveStrip({ events, runActive, elapsedMs, cancelState, 
             'text-slate-700'
 
           return (
-            <div key={slot.phase} className="flex items-center gap-2 flex-shrink-0">
-              {i > 0 && <div className={`w-4 h-px flex-shrink-0 ${state === 'queued' ? 'bg-white/[0.06]' : 'bg-white/[0.15]'}`} />}
-              <div className="flex items-center gap-1.5">
+            <div key={slot.phase} className="flex items-center gap-1.5 flex-shrink-0">
+              {i > 0 && <div className={`w-3 h-px flex-shrink-0 ${state === 'queued' ? 'bg-white/[0.06]' : 'bg-white/[0.15]'}`} />}
+              <div className="flex items-center gap-1">
                 <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dotColor}`} />
                 <span className={`material-symbols-outlined ${iconColor}`} style={{ fontSize: '14px' }}>
                   {state === 'done' ? 'check' : slot.icon}
@@ -156,20 +156,20 @@ export function ExecutionLiveStrip({ events, runActive, elapsedMs, cancelState, 
 
       {/* Detail subtext */}
       {detail && runActive && (
-        <span className="text-[10px] font-mono text-slate-500 truncate hidden md:block flex-shrink min-w-0">
+        <span className="text-[10px] font-mono text-slate-500 truncate hidden lg:block flex-shrink min-w-0 max-w-[160px]">
           {detail}
         </span>
       )}
 
       {/* Elapsed + cancel */}
       {runActive && (
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <span className="text-[11px] font-mono text-slate-500">{formatElapsed(elapsedMs)}</span>
+        <div className="flex items-center gap-2 flex-shrink-0 ml-auto">
+          <span className="text-[11px] font-mono text-slate-500 tabular-nums">{formatElapsed(elapsedMs)}</span>
           <button
             onClick={onCancel}
             disabled={cancelDisabled}
             aria-label={cancelLabel}
-            className="px-2.5 py-1 rounded-lg text-[10px] font-bold font-headline uppercase tracking-wider border transition-colors
+            className="px-2.5 py-1 rounded-lg text-[10px] font-bold font-headline uppercase tracking-wider border transition-colors whitespace-nowrap
               disabled:opacity-40 disabled:cursor-not-allowed
               border-white/[0.10] text-slate-400 hover:border-white/[0.20] hover:text-slate-200"
           >
