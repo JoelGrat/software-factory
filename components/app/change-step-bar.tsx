@@ -1,3 +1,4 @@
+import React from 'react'
 import Link from 'next/link'
 
 const STEPS = [
@@ -103,10 +104,9 @@ export function ChangeStepBar({
         )
 
         return (
-          <>
+          <React.Fragment key={step.key}>
             {i > 0 && (
               <div
-                key={`line-${i}`}
                 className={`flex-1 h-px mx-4 transition-colors duration-300 ${
                   connectorLit ? 'bg-indigo-400/35' : 'bg-white/[0.06]'
                 }`}
@@ -115,7 +115,6 @@ export function ChangeStepBar({
 
             {isLocked ? (
               <div
-                key={step.key}
                 className="flex-shrink-0 cursor-default relative group/locked"
               >
                 {inner}
@@ -129,19 +128,18 @@ export function ChangeStepBar({
               </div>
             ) : isPipeline && isViewing ? (
               // On the pipeline step's own page — no link needed
-              <div key={step.key} className="flex-shrink-0">
+              <div className="flex-shrink-0">
                 {inner}
               </div>
             ) : (
               <Link
-                key={step.key}
                 href={`${base}${step.suffix}`}
                 className="flex-shrink-0 group transition-all"
               >
                 {inner}
               </Link>
             )}
-          </>
+          </React.Fragment>
         )
       })}
     </div>
