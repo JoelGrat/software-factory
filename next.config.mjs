@@ -1,11 +1,16 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Treat Supabase packages as server-side externals so they are require()'d
-  // directly rather than bundled into a vendor chunk. This prevents the
-  // "Cannot find module './vendor-chunks/@supabase.js'" crash that occurs when
-  // Next.js HMR rebuilds vendor chunks while a long-running execution API
-  // route is still in flight.
-  serverExternalPackages: ['@supabase/supabase-js', '@supabase/ssr'],
+  // Disable server-side chunk splitting in development so there are no
+  // vendor chunks that can be evicted by HMR while a long-running execution
+  // API route is still in flight. Without this, Next.js rebuilds vendor
+  // chunks mid-execution and the in-flight request crashes with
+  // "Cannot find module './vendor-chunks/@supabase.js'" (or similar).
+  webpack: (config, { isServer, dev }) => {
+    if (isServer && dev) {
+      config.optimization.splitChunks = false
+    }
+    return config
+  },
 };
 
 export default nextConfig;
