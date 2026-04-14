@@ -501,6 +501,15 @@ export async function runExecution(
         await log('verbose', `Done`)
       }
 
+      // ── Re-install if package.json changed ────────────────────────────────
+      const pkgChanged = [...iterationPatches, ...iterationNewFiles].some(
+        f => (f as { path: string }).path === 'package.json'
+      )
+      if (pkgChanged) {
+        await log('info', 'package.json changed — running npm install…')
+        await executor.runInstall(env)
+      }
+
       // ── Static validation phase ─────────────────────────────────────────
       await log('info', `Running static validation…`)
       const svStart = Date.now()
@@ -523,6 +532,10 @@ export async function runExecution(
         repairsAttempted++
         allFilesChanged = [...new Set([...allFilesChanged, ...attempt.filesPatched])]
         inlineRepairCount++
+        if (attempt.filesPatched.includes('package.json')) {
+          await log('info', 'package.json patched — running npm install…')
+          await executor.runInstall(env)
+        }
         typeCheck = await executor.runTypeCheck(env)
       }
 

@@ -25,6 +25,9 @@ export interface CodeExecutor {
   /** Write a brand-new file to the environment (localWorkDir + container) */
   createFile(env: ExecutionEnvironment, path: string, content: string): Promise<PatchResult>
 
+  /** Run `npm install` inside the container — call after package.json changes */
+  runInstall(env: ExecutionEnvironment): Promise<void>
+
   /** Run `tsc --noEmit` inside the container */
   runTypeCheck(env: ExecutionEnvironment): Promise<TypeCheckResult>
 
@@ -79,6 +82,10 @@ export class MockCodeExecutor implements CodeExecutor {
   async createFile(_env: ExecutionEnvironment, _path: string, _content: string): Promise<PatchResult> {
     this.calls.push('createFile')
     return this.patchResult
+  }
+
+  async runInstall(_env: ExecutionEnvironment): Promise<void> {
+    this.calls.push('runInstall')
   }
 
   async runTypeCheck(_env: ExecutionEnvironment): Promise<TypeCheckResult> {
