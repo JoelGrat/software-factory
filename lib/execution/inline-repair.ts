@@ -25,12 +25,8 @@ FILE CONTENTS:
 ${fileSection}
 
 RULES:
-- If the error is "Cannot find module 'X'" or "its corresponding type declarations", the package is not installed.
-  Fix by patching package.json to add X to devDependencies. npm install will run automatically after your patch.
-  Use the current package.json content if provided, otherwise produce a minimal valid package.json addition.
-  Do NOT try to fix "Cannot find module" errors by changing import paths or tsconfig — install the package.
-- For all other errors, fix the TypeScript source file directly.
-- Never change unrelated code.
+- Fix only the listed errors. Do not refactor or change unrelated code.
+- Missing module errors are handled automatically by the system before this prompt runs — do not try to fix them by changing imports or tsconfig.
 
 Respond with JSON:
 {
@@ -62,11 +58,9 @@ export async function runInlineRepair(
   })
 
   // Gather file contents for affected files (allowed only, max 3)
-  // Always include package.json so the AI can add missing packages
-  const affectedFiles = [...new Set([
-    ...diagnostics.diagnostics.map(d => d.file),
-    'package.json',
-  ])].filter(isPathAllowed).slice(0, 4)
+  const affectedFiles = [...new Set(diagnostics.diagnostics.map(d => d.file))]
+    .filter(isPathAllowed)
+    .slice(0, 3)
 
   const fileContexts: Record<string, string> = {}
   for (const filePath of affectedFiles) {

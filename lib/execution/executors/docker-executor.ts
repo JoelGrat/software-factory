@@ -117,9 +117,15 @@ export class DockerExecutor implements CodeExecutor {
     }
   }
 
-  async runInstall(env: ExecutionEnvironment): Promise<void> {
-    await env.log('docker', `npm install`)
-    await dockerExec(env.containerId, `cd ${env.containerWorkDir} && npm install --silent 2>&1`)
+  async runInstall(env: ExecutionEnvironment, packages?: string[]): Promise<void> {
+    if (packages && packages.length > 0) {
+      const pkgList = packages.join(' ')
+      await env.log('docker', `npm install --save-dev ${pkgList}`)
+      await dockerExec(env.containerId, `cd ${env.containerWorkDir} && npm install --save-dev ${pkgList} --silent 2>&1`)
+    } else {
+      await env.log('docker', `npm install`)
+      await dockerExec(env.containerId, `cd ${env.containerWorkDir} && npm install --silent 2>&1`)
+    }
   }
 
   async runTypeCheck(env: ExecutionEnvironment): Promise<TypeCheckResult> {

@@ -518,6 +518,23 @@ export async function runExecution(
       let typeCheck = await executor.runTypeCheck(env)
       let inlineRepairCount = 0
 
+      // Auto-install missing packages before entering the AI repair loop.
+      // "Cannot find module 'X'" errors cannot be fixed by editing TypeScript files —
+      // the package simply needs to be installed. Extract unique missing package names
+      // and run npm install --save-dev directly, without going through the AI.
+      if (!typeCheck.passed) {
+        const missingPkgs = [...new Set(
+          typeCheck.errors
+            .map(e => e.message.match(/Cannot find module '([^']+)' or its corresponding/)?.[1])
+            .filter((m): m is string => !!m && !m.startsWith('.') && !m.startsWith('/')
+        ))]
+        if (missingPkgs.length > 0) {
+          await log('info', `Installing missing packages: ${missingPkgs.join(', ')}`)
+          await executor.runInstall(env, missingPkgs)
+          typeCheck = await executor.runTypeCheck(env)
+        }
+      }
+
       while (!typeCheck.passed && inlineRepairCount < budget.perIteration.maxInlineRepairs) {
         // Build diagnostic set (first 20, truncated flag)
         const allDiags = typeCheck.errors.map(e => ({ file: e.file, line: e.line, message: e.message, code: 'TS' }))
@@ -532,10 +549,6 @@ export async function runExecution(
         repairsAttempted++
         allFilesChanged = [...new Set([...allFilesChanged, ...attempt.filesPatched])]
         inlineRepairCount++
-        if (attempt.filesPatched.includes('package.json')) {
-          await log('info', 'package.json patched — running npm install…')
-          await executor.runInstall(env)
-        }
         typeCheck = await executor.runTypeCheck(env)
       }
 
