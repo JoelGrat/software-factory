@@ -45,6 +45,11 @@ function formatEventAsLog(e: { event_type: string; iteration: number; payload?: 
   if (t === 'commit.skipped') return { level: 'dim', message: `Commit skipped — ${str(p.reason)}` }
   if (t === 'commit.failed') return { level: 'error', message: `Commit failed — ${str(p.reason)}` }
 
+  // Free-form log lines emitted by makeLogger
+  if (t === 'log.info') return { level: 'info', message: str(p.message) }
+  if (t === 'log.success') return { level: 'success', message: str(p.message) }
+  if (t === 'log.error') return { level: 'error', message: str(p.message) }
+
   return { level: 'dim', message: t }
 }
 

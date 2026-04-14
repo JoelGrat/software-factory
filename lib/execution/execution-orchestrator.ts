@@ -284,7 +284,7 @@ export async function runExecution(
       limits,
     }
 
-    const log = makeLogger(db, changeId, () => state.iteration)
+    const log = makeLogger(db, changeId, runId, () => state.iteration, seq)
 
     await log('info', `Cloning ${(project as any).repo_url} into container…`)
     env = await executor.prepareEnvironment(

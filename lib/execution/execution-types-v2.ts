@@ -16,6 +16,7 @@ export const EVENT_TYPES = [
   'repair.escalated',
   'commit.green', 'commit.wip', 'commit.skipped', 'commit.failed',
   'infra.retrying',
+  'log.info', 'log.success', 'log.error',
 ] as const
 
 export type EventType = typeof EVENT_TYPES[number]
