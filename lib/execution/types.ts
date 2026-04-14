@@ -62,7 +62,7 @@ export interface ValidationResult {
 
 // ── Execution environment ─────────────────────────────────────────────────────
 
-export type ExecLogger = (level: 'info' | 'success' | 'error' | 'docker', message: string) => Promise<void>
+export type ExecLogger = (level: 'info' | 'success' | 'error' | 'docker' | 'verbose', message: string) => Promise<void>
 
 export interface ExecutionEnvironment {
   containerId: string
@@ -106,6 +106,23 @@ export interface TestFailure {
   error: string
 }
 
+export type TestFailureType =
+  | 'TEST_ASSERTION_FAILURE'
+  | 'TEST_RUNTIME_ERROR'
+  | 'TEST_CONFIG_ERROR'
+  | 'TEST_TIMEOUT'
+  | 'PARSER_ERROR'
+  | 'NO_TESTS_FOUND'
+  | 'INCONSISTENT_TEST_RESULT'
+  | 'UNKNOWN_NONZERO_EXIT'
+
+export interface TestRawOutput {
+  command: string
+  exitCode: number
+  stdout: string
+  durationMs: number
+}
+
 export interface TestResult {
   passed: boolean
   failures: TestFailure[]
@@ -113,6 +130,8 @@ export interface TestResult {
   testsRun: number
   testsPassed: number
   testsFailed: number
+  failureType?: TestFailureType
+  raw?: TestRawOutput
 }
 
 export interface BehavioralAnomaly {

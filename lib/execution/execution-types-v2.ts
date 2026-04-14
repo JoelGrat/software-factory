@@ -11,6 +11,8 @@ export const EVENT_TYPES = [
   'phase.integration.started', 'phase.integration.passed', 'phase.integration.failed',
   'phase.smoke.started', 'phase.smoke.passed', 'phase.smoke.failed',
   'phase.skipped',
+  'baseline.started', 'baseline.clean', 'baseline.pre_existing',
+  'baseline.repair.started', 'baseline.repaired', 'baseline.blocked',
   'repair.inline.started', 'repair.inline.succeeded', 'repair.inline.failed',
   'repair.phase.started', 'repair.phase.succeeded', 'repair.phase.failed',
   'repair.escalated',
@@ -83,6 +85,12 @@ export type CommitOutcome =
 
 // ── Execution summary ──────────────────────────────────────────────────────────
 
+export type TestabilityStatus =
+  | 'full'               // tests ran normally, clean baseline
+  | 'full_repaired'      // baseline was broken, we fixed it, tests ran normally
+  | 'partial'            // pre-existing assertion failures filtered out; new failures checked
+  | 'blocked'            // test infrastructure unresolvable; tests never ran
+
 export interface ExecutionSummary {
   status: 'success' | 'wip' | 'budget_exceeded' | 'blocked' | 'cancelled'
   iterationsUsed: number
@@ -91,6 +99,7 @@ export interface ExecutionSummary {
   finalFailureType: string | null
   commitOutcome: CommitOutcome
   durationMs: number
+  testabilityStatus: TestabilityStatus
 }
 
 // ── Stuck detector ─────────────────────────────────────────────────────────────

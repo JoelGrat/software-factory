@@ -8,7 +8,7 @@ import { Project } from 'ts-morph'
 import type { CodeExecutor } from './code-executor'
 import type {
   ExecutionEnvironment, ExecLogger, FilePatch, PatchResult, TypeCheckResult,
-  TestResult, BehavioralResult, BehavioralScope, DiffSummary,
+  TestResult, TestFailureType, TestRawOutput, BehavioralResult, BehavioralScope, DiffSummary,
   CommitResult, TestScope,
 } from '../types'
 
@@ -145,18 +145,72 @@ export class DockerExecutor implements CodeExecutor {
   async runTests(env: ExecutionEnvironment, scope: TestScope): Promise<TestResult> {
     const allTests = [...scope.directTests, ...scope.dependentTests]
     const filter = allTests.length > 0 ? allTests.join(' ') : ''
-    const cmd = filter
-      ? `cd ${env.containerWorkDir} && npx vitest run ${filter} --reporter=json 2>&1`
-      : `cd ${env.containerWorkDir} && npx vitest run --reporter=json 2>&1`
+    const baseArgs = filter ? `run ${filter}` : `run`
+    const cmd = `cd ${env.containerWorkDir} && npx vitest ${baseArgs} --reporter=json 2>&1; echo "__EXIT:$?"`
 
     await env.log('docker', filter ? `npx vitest run ${filter}` : `npx vitest run`)
+
+    const tStart = Date.now()
+    let rawStdout = ''
     try {
       const { stdout } = await dockerExec(env.containerId, cmd)
-      return parseVitestJson(stdout)
+      rawStdout = stdout
     } catch (err) {
-      const output = (err as { stdout?: string }).stdout ?? String(err)
-      return parseVitestJson(output)
+      rawStdout = (err as { stdout?: string }).stdout ?? String(err)
     }
+
+    const durationMs = Date.now() - tStart
+
+    // Extract exit code appended by the shell
+    const exitMatch = rawStdout.match(/__EXIT:(\d+)\s*$/)
+    const exitCode = exitMatch ? parseInt(exitMatch[1]!) : -1
+    const stdout = exitMatch ? rawStdout.slice(0, exitMatch.index) : rawStdout
+
+    const raw: TestRawOutput = {
+      command: `npx vitest ${baseArgs} --reporter=json`,
+      exitCode,
+      stdout,
+      durationMs,
+    }
+
+    const result = parseVitestJson(stdout, raw)
+
+    // Contradiction: exit code says failure but parsed result shows zero failures and no diagnostics
+    // → INCONSISTENT_TEST_RESULT → retry with verbose reporter to capture real output
+    if (!result.passed && result.testsFailed === 0 && result.failures.length === 0 && exitCode !== 0) {
+      await env.log('verbose', `Inconsistent test result (exit=${exitCode}, failures=0) — retrying with verbose reporter`)
+      const verboseCmd = `cd ${env.containerWorkDir} && npx vitest ${baseArgs.replace('--reporter=json', '')} --reporter=verbose 2>&1; echo "__EXIT:$?"`
+      let verboseOut = ''
+      try {
+        const { stdout: vs } = await dockerExec(env.containerId, verboseCmd)
+        verboseOut = vs
+      } catch (err) {
+        verboseOut = (err as { stdout?: string }).stdout ?? String(err)
+      }
+      const verboseExitMatch = verboseOut.match(/__EXIT:(\d+)\s*$/)
+      const verboseExitCode = verboseExitMatch ? parseInt(verboseExitMatch[1]!) : exitCode
+      const verboseStdout = verboseExitMatch ? verboseOut.slice(0, verboseExitMatch.index) : verboseOut
+      const verboseRaw: TestRawOutput = {
+        command: `npx vitest ${baseArgs} --reporter=verbose`,
+        exitCode: verboseExitCode,
+        stdout: verboseStdout,
+        durationMs: Date.now() - tStart,
+      }
+      // Re-classify using the verbose output — we now have real diagnostic text
+      const verboseFailureType = classifyFromVerboseOutput(verboseStdout, verboseExitCode)
+      return {
+        passed: false,
+        failures: [],
+        output: verboseStdout,
+        testsRun: 0,
+        testsPassed: 0,
+        testsFailed: 0,
+        failureType: verboseFailureType,
+        raw: verboseRaw,
+      }
+    }
+
+    return result
   }
 
   async runBehavioralChecks(env: ExecutionEnvironment, scope: BehavioralScope): Promise<BehavioralResult> {
@@ -221,7 +275,71 @@ export class DockerExecutor implements CodeExecutor {
   }
 }
 
-function parseVitestJson(output: string): TestResult {
+// Classify failure type from verbose/plain-text vitest output (after JSON parse fails or inconsistency retry)
+function classifyFromVerboseOutput(output: string, exitCode: number): TestFailureType {
+  if (exitCode === 124 || /timed? ?out/i.test(output)) return 'TEST_TIMEOUT'
+
+  if (
+    /cannot parse/i.test(output) ||
+    /parse failed/i.test(output) ||
+    /expected a semicolon/i.test(output) ||
+    /unexpected token/i.test(output)
+  ) return 'TEST_CONFIG_ERROR'
+
+  if (
+    /cannot find module/i.test(output) ||
+    /failed to resolve import/i.test(output) ||
+    /transform failed/i.test(output) ||
+    /error\[plugin\]/i.test(output)
+  ) return 'TEST_CONFIG_ERROR'
+
+  if (
+    /no test files found/i.test(output) ||
+    /no tests ran/i.test(output)
+  ) return 'NO_TESTS_FOUND'
+
+  if (/failed suites/i.test(output) || /failed to run/i.test(output)) return 'TEST_CONFIG_ERROR'
+
+  return 'INCONSISTENT_TEST_RESULT'
+}
+
+function classifyTestFailureType(failures: TestResult['failures'], output: string, exitCode: number): TestFailureType {
+  if (exitCode === 124 || /timed? ?out/i.test(output)) return 'TEST_TIMEOUT'
+
+  // Config / setup errors — no tests collected
+  if (
+    /no test files found/i.test(output) ||
+    /0 tests/i.test(output) ||
+    /no tests ran/i.test(output)
+  ) return 'NO_TESTS_FOUND'
+
+  if (
+    /error: cannot find module/i.test(output) ||
+    /failed to resolve import/i.test(output) ||
+    /transform failed/i.test(output) ||
+    /error\[plugin\]/i.test(output) ||
+    /vitest could not resolve/i.test(output)
+  ) return 'TEST_CONFIG_ERROR'
+
+  if (failures.length === 0) return 'UNKNOWN_NONZERO_EXIT'
+
+  // Classify based on failure messages
+  const errorMessages = failures.map(f => f.error).join('\n')
+
+  if (
+    /uncaught (reference|type|syntax|range)error/i.test(errorMessages) ||
+    /cannot read propert/i.test(errorMessages) ||
+    /is not a function/i.test(errorMessages) ||
+    /cannot access.*before initialization/i.test(errorMessages)
+  ) return 'TEST_RUNTIME_ERROR'
+
+  // Default: actual assertion failures
+  return 'TEST_ASSERTION_FAILURE'
+}
+
+function parseVitestJson(output: string, raw?: TestRawOutput): TestResult {
+  const exitCode = raw?.exitCode ?? -1
+
   try {
     const jsonStart = output.indexOf('{')
     if (jsonStart === -1) throw new Error('No JSON found')
@@ -237,9 +355,30 @@ function parseVitestJson(output: string): TestResult {
         }
       }
     }
-    return { passed: numFailedTests === 0, failures, output, testsRun: numTotalTests, testsPassed: numPassedTests, testsFailed: numFailedTests }
+    const passed = numFailedTests === 0 && (exitCode === 0 || exitCode === -1)
+    const failureType = passed ? undefined : classifyTestFailureType(failures, output, exitCode)
+    return { passed, failures, output, testsRun: numTotalTests, testsPassed: numPassedTests, testsFailed: numFailedTests, failureType, raw }
   } catch {
-    const passed = !output.includes('FAIL') && !output.includes('failed')
-    return { passed, failures: [], output, testsRun: 0, testsPassed: 0, testsFailed: 0 }
+    // JSON parse failed — determine if it's a config error or unknown
+    const lowerOut = output.toLowerCase()
+    const failed = exitCode !== 0 || lowerOut.includes('fail') || lowerOut.includes('error')
+    const passed = !failed
+
+    let failureType: TestFailureType | undefined
+    if (!passed) {
+      if (lowerOut.includes('no test files') || lowerOut.includes('no tests')) {
+        failureType = 'NO_TESTS_FOUND'
+      } else if (
+        lowerOut.includes('cannot find module') ||
+        lowerOut.includes('transform failed') ||
+        lowerOut.includes('failed to resolve')
+      ) {
+        failureType = 'TEST_CONFIG_ERROR'
+      } else {
+        failureType = 'PARSER_ERROR'
+      }
+    }
+
+    return { passed, failures: [], output, testsRun: 0, testsPassed: 0, testsFailed: 0, failureType, raw }
   }
 }

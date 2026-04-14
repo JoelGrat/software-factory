@@ -30,6 +30,8 @@ import { detectStuck } from './stuck-detector'
 import { determineCommitOutcome } from './commit-policy'
 import { runInlineRepair } from './inline-repair'
 import { runRepairPhase } from './repair-phase'
+import { runBaselineRepair } from './baseline-repair'
+import type { TestabilityStatus } from './execution-types-v2'
 import { createExecutionRun, startHeartbeat, isCancellationRequested, finalizeRun } from './execution-run-manager'
 import type { DiagnosticSet, CommitOutcome, ExecutionSummary } from './execution-types-v2'
 
@@ -308,6 +310,28 @@ export async function runExecution(
       availablePackages = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies })
     } catch { /* best-effort */ }
 
+    // ── Baseline test run + repair ────────────────────────────────────────────
+    // Run tests before any patches are applied. If infrastructure is broken,
+    // attempt repair. Hard-block if it cannot be fixed.
+    const baselineTestScope = await selectTests(db, [], (change as { risk_level: string | null }).risk_level ?? 'low')
+    const baselineResult = await runBaselineRepair(db, ai, executor, env, runId, changeId, baselineTestScope, log, seq)
+
+    if (baselineResult.status === 'blocked') {
+      finalFailureType = `baseline: test infrastructure unresolvable [${baselineResult.category}]`
+      await log('error', `Execution blocked — test infrastructure cannot be made testable after ${baselineResult.repairAttempts} repair attempt${baselineResult.repairAttempts !== 1 ? 's' : ''}`)
+      await insertEvent(db, { runId, changeId, seq: seq(), iteration: 0, eventType: 'execution.blocked', payload: { reason: finalFailureType } })
+      // Fall through to the finally block which will write the snapshot and finalise the run
+      throw Object.assign(new Error(finalFailureType), { executionBlocked: true })
+    }
+
+    const preExistingFailedTests = baselineResult.preExistingFailedTests
+    // When the baseline itself had config errors (now repaired or blocked above),
+    // the config error flag is no longer needed — we either fixed it or hard-blocked.
+    let testabilityStatus: TestabilityStatus =
+      baselineResult.status === 'clean'      ? 'full' :
+      baselineResult.status === 'repaired'   ? 'full_repaired' :
+      baselineResult.status === 'pre_existing' ? 'partial' : 'full'
+
     // Per-file type-check errors from failed iterations — fed back into the prompt on retry
     const newFileTypeErrors = new Map<string, string>()
 
@@ -319,7 +343,7 @@ export async function runExecution(
       if (state.aiCallCount >= limits.maxAiCalls) break
 
       state.iteration++
-      await log('info', `── Iteration ${state.iteration} ──`)
+      await log('verbose', `── Iteration ${state.iteration} ──`)
 
       // Emit progress event — pct is a rough estimate based on iteration
       const pct = Math.min(Math.round((state.iteration / limits.maxIterations) * 80), 80)
@@ -345,7 +369,7 @@ export async function runExecution(
       for (const task of pendingTasks) {
         if (state.aiCallCount >= limits.maxAiCalls) break
 
-        await log('info', `Task: ${task.description}`)
+        await log('verbose', `Task: ${task.description}`)
         const filePaths = componentFileMap[task.component_id ?? ''] ?? []
 
         // No files to modify — mark done immediately (or create new file if specified)
@@ -374,13 +398,13 @@ export async function runExecution(
             }
             const created = iterationNewFiles.some(f => f.path === task.new_file_path)
             if (!created) {
-              await log('error', `Done (new file not created — low confidence or AI error)`)
+              await log('verbose', `Skipped new file — confidence below threshold or AI error`)
               continue  // leave task pending so the next iteration retries it
             }
           }
           processedTaskIds.push(task.id)
           await db.from('change_plan_tasks').update({ status: 'done' }).eq('id', task.id).eq('plan_id', plan.id)
-          await log('success', `Done`)
+          await log('verbose', `Done`)
           continue
         }
 
@@ -470,7 +494,7 @@ export async function runExecution(
         // Mark done immediately so the UI shows live task-by-task progress.
         // pendingTasks is tracked in-memory, so failed iterations still retry these tasks.
         await db.from('change_plan_tasks').update({ status: 'done' }).eq('id', task.id).eq('plan_id', plan.id)
-        await log('success', `Done`)
+        await log('verbose', `Done`)
       }
 
       // ── Static validation phase ─────────────────────────────────────────
@@ -532,6 +556,10 @@ export async function runExecution(
       // ── Test phases ─────────────────────────────────────────────────────
       const testScope = await selectTests(db, [], (change as { risk_level: string | null }).risk_level ?? 'low')
       const totalTests = testScope.directTests.length + testScope.dependentTests.length
+
+      let snapshotTestsPassed = 0
+      let snapshotTestsFailed = 0
+
       await log('info', `Running ${totalTests > 0 ? totalTests + ' test file' + (totalTests !== 1 ? 's' : '') : 'all tests'}…`)
       await insertEvent(db, { runId, changeId, seq: seq(), iteration: state.iteration, eventType: 'phase.unit.started', payload: {} })
 
@@ -544,7 +572,10 @@ export async function runExecution(
       const testRepairFiles: string[] = []
 
       if (!testResult.passed) {
-        const failureDiags = testResult.failures.map((f, i) => ({
+        // Filter out failures that existed before we applied any patches
+        const newFailures = testResult.failures.filter(f => !preExistingFailedTests.has(f.testName))
+        const filteredResult = { ...testResult, failures: newFailures, testsFailed: newFailures.length }
+        const failureDiags = newFailures.map((f, i) => ({
           file: f.testName, line: i + 1, message: f.error.slice(0, 200), code: 'TEST'
         }))
         const failureSet: DiagnosticSet = {
@@ -553,14 +584,63 @@ export async function runExecution(
           truncated: failureDiags.length > 20,
         }
 
+        // Failure types that carry no actionable diagnostic evidence — repair cannot help
+        const NO_EVIDENCE_TYPES = new Set(['INCONSISTENT_TEST_RESULT', 'NO_TESTS_FOUND', 'PARSER_ERROR'])
+
+        // For TEST_CONFIG_ERROR the verbose output contains the exact file + parse error —
+        // synthesize a diagnostic so the repair phase can act on it (e.g. rename .js→.ts or strip TS syntax)
+        if (testResult.failureType === 'TEST_CONFIG_ERROR' && failureDiags.length === 0 && testResult.raw?.stdout) {
+          // Strip ANSI escape codes before parsing — vitest colours the caret line which breaks regexes
+          // eslint-disable-next-line no-control-regex
+          const verboseOut = testResult.raw.stdout.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
+          // Extract lines like: Cannot parse /app/path/to/file.js:
+          const fileMatch = verboseOut.match(/Cannot parse ([^\n:]+):/)
+          if (fileMatch) {
+            const filePath = fileMatch[1]!.trim().replace(/^\/app\//, '')
+            // Find the error line number from the caret context: "17: interface UserProfile {\n             ^"
+            const lineMatch = verboseOut.match(/(\d+):[^\n]*\n[^\n]*\^/)
+            const lineNum = lineMatch ? parseInt(lineMatch[1]!) : 1
+            // Grab the one-line error description ("Expected a semicolon…")
+            const errMatch = verboseOut.match(/Parse failed[^\n]*\n([^\n]+)/)
+            const errMsg = errMatch ? errMatch[1]!.trim() : 'Parse error in test file'
+            failureDiags.push({ file: filePath, line: lineNum, message: errMsg, code: 'PARSE' })
+            failureSet.diagnostics = failureDiags.slice(0, 20)
+            failureSet.totalCount = failureDiags.length
+          }
+        }
+
+        const hasActionableEvidence = failureDiags.length > 0 && !NO_EVIDENCE_TYPES.has(filteredResult.failureType ?? '')
+
+        const failureLabel = filteredResult.failureType
+          ? `${filteredResult.testsFailed} failed [${filteredResult.failureType}]`
+          : `${filteredResult.testsFailed} failed`
+
         await insertEvent(db, {
           runId, changeId, seq: seq(), iteration: state.iteration,
           eventType: 'phase.unit.failed',
-          payload: { diagnostics: failureSet.diagnostics, totalCount: failureSet.totalCount, truncated: failureSet.truncated, durationMs: utDurationMs },
+          payload: {
+            diagnostics: failureSet.diagnostics,
+            totalCount: failureSet.totalCount,
+            truncated: failureSet.truncated,
+            durationMs: utDurationMs,
+            failureType: filteredResult.failureType,
+          },
         })
 
+        if (!hasActionableEvidence) {
+          await log('error', `Tests failed · ${failureLabel}`)
+          if (filteredResult.failureType === 'INCONSISTENT_TEST_RESULT') {
+            await log('error', `Inconsistent result — vitest exited non-zero but reported 0 failures. Verbose output:\n${(filteredResult.raw?.stdout ?? '').slice(0, 1000)}`)
+          } else {
+            await log('error', `No actionable diagnostics (${filteredResult.failureType ?? 'unknown'}) — skipping repair`)
+          }
+          finalFailureType = `tests: ${failureLabel}`
+          await insertEvent(db, { runId, changeId, seq: seq(), iteration: state.iteration, eventType: 'iteration.stuck', payload: { reason: 'no_actionable_evidence', failureType: filteredResult.failureType } })
+          break
+        }
+
         while (!testsPassed && repairPhaseCount < budget.perIteration.maxRepairPhaseAttempts) {
-          await log('error', `Tests failed · ${testResult.testsFailed} failed`)
+          await log('error', `Tests failed · ${failureLabel}`)
           const attempt = await runRepairPhase(db, ai, executor, env, runId, changeId, state.iteration, failureSet, (change as { intent: string | null }).intent ?? '', seq)
           repairsAttempted++
           allFilesChanged = [...new Set([...allFilesChanged, ...attempt.filesPatched])]
@@ -569,12 +649,13 @@ export async function runExecution(
           // Skip retest when the repair produced no patches — nothing changed, tests cannot pass
           if (attempt.filesPatched.length === 0) break
           const retest = await executor.runTests(env, testScope)
-          testsPassed = retest.passed
+          const retestNewFailures = retest.failures.filter(f => !preExistingFailedTests.has(f.testName))
+          testsPassed = retest.passed || retestNewFailures.length === 0
           if (testsPassed) break
         }
 
         if (!testsPassed) {
-          finalFailureType = `tests: ${testResult.testsFailed} failed`
+          finalFailureType = `tests: ${failureLabel}`
 
           // If all repair attempts produced zero patches the AI cannot generate a fix —
           // escalate to stuck immediately rather than burning more iterations.
@@ -584,15 +665,14 @@ export async function runExecution(
             break
           }
 
-          // Build diagnostic signatures from test names + first 60 chars of error so
-          // the stuck detector can fingerprint repeated identical failures.
-          const testDiagSigs = testResult.failures.map(
+          // Build diagnostic signatures from filtered (new) failures only
+          const testDiagSigs = newFailures.map(
             (f: { testName: string; error: string }) => `test:${f.testName}:${f.error.slice(0, 60)}`
           )
           const currRecord: IterationRecord = {
             iteration: state.iteration,
             diagnosticSigs: testDiagSigs,
-            errorCount: testResult.testsFailed,
+            errorCount: newFailures.length,
             repairedFiles: [...new Set(testRepairFiles)],
           }
           const stuck = detectStuck(iterationHistory, currRecord, budget.perIteration)
@@ -607,10 +687,12 @@ export async function runExecution(
         }
       }
 
+      snapshotTestsPassed = testResult.testsPassed
+      snapshotTestsFailed = testResult.testsFailed
       await log('success', `Tests passed`)
       await insertEvent(db, { runId, changeId, seq: seq(), iteration: state.iteration, eventType: 'phase.unit.passed', payload: { durationMs: utDurationMs } })
 
-      // ── Behavioral checks (unchanged) ────────────────────────────────────
+      // ── Behavioral checks ─────────────────────────────────────────────────
       const behavioralScope: BehavioralScope = {
         patches: iterationPatches,
         criticalComponentTouched: Object.values(componentTypeMap).some(t => ['auth', 'db'].includes(t)),
@@ -631,7 +713,7 @@ export async function runExecution(
 
       await writeSnapshot(
         db, changeId, state, 'passed', false,
-        testResult.testsPassed, testResult.testsFailed, null,
+        snapshotTestsPassed, snapshotTestsFailed, null,
         allFilesChanged
       )
 
@@ -719,6 +801,19 @@ export async function runExecution(
       else runStatus = 'budget_exceeded'
     }
 
+    // ── Confidence surface ────────────────────────────────────────────────────
+    const testabilityLabel =
+      testabilityStatus === 'full'          ? 'FULL'                             :
+      testabilityStatus === 'full_repaired' ? 'FULL (baseline was repaired)'     :
+      testabilityStatus === 'partial'       ? 'PARTIAL (pre-existing failures filtered)' :
+                                              'NOT EXECUTED (test infrastructure blocked)'
+
+    await log('verbose', [
+      `Type Safety:         ${fullSuccess || finalFailureType?.startsWith('tsc') === false ? 'PASS' : 'FAIL'}`,
+      `Runtime Validation:  ${testabilityLabel}`,
+      `Overall Confidence:  ${testabilityStatus === 'full' && fullSuccess ? 'HIGH' : 'LOW'}`,
+    ].join('\n'))
+
     await log(fullSuccess ? 'success' : 'error', fullSuccess ? 'Execution complete — ready for review' : `Execution finished: ${finalFailureType ?? 'budget exceeded'}`)
 
     const executionOutcome: 'success' | 'failure' = fullSuccess ? 'success' : 'failure'
@@ -731,6 +826,7 @@ export async function runExecution(
       finalFailureType,
       commitOutcome,
       durationMs: Date.now() - state.startedAt,
+      testabilityStatus,
     }
 
     await insertEvent(db, {
@@ -780,6 +876,7 @@ export async function runExecution(
 
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err)
+    const isBlocked = (err as { executionBlocked?: boolean }).executionBlocked === true
     await db.from('execution_snapshots').insert({
       change_id: changeId,
       iteration: 0,
@@ -790,10 +887,10 @@ export async function runExecution(
       propagated_files: [],
       plan_divergence: false,
       partial_success: false,
-      termination_reason: 'error',
+      termination_reason: isBlocked ? 'blocked' : 'error',
       error_summary: errorMessage,
     })
-    await db.from('change_requests').update({ status: 'failed', analysis_status: 'failed' }).eq('id', changeId)
+    await db.from('change_requests').update({ status: 'failed', analysis_status: isBlocked ? 'stalled' : 'failed' }).eq('id', changeId)
     clearInterval(heartbeat)
     clearSeq(runId)
     await finalizeRun(db, runId, 'blocked', {
@@ -804,6 +901,7 @@ export async function runExecution(
       finalFailureType: errorMessage,
       commitOutcome: { type: 'no_commit', reason: 'error' },
       durationMs: 0,
+      testabilityStatus: 'blocked' as const,
     }).catch(() => {})
     // Emit failed event if we have projectId (it may not be set if failure was before loading change)
     if (projectId) {

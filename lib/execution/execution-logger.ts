@@ -11,25 +11,33 @@ export function makeLogger(
   getSeq: () => number,
 ): ExecLogger {
   return async (level, message) => {
+    // verbose lines go only to execution_logs (not shown in the live sidebar)
+    const emitToEvents = level !== 'verbose' && level !== 'docker'
     const eventType = level === 'success' ? 'log.success' : level === 'error' ? 'log.error' : 'log.info'
-    await Promise.all([
-      // execution_logs kept for backward compat (GET /execute handler, approve-execution cleanup)
+
+    const writes: Promise<unknown>[] = [
       db.from('execution_logs').insert({
         change_id: changeId,
         iteration: getIteration(),
         level,
         message,
       }),
-      // execution_events feeds the live log sidebar in the execution view
-      insertEvent(db, {
-        runId,
-        changeId,
-        seq: getSeq(),
-        iteration: getIteration(),
-        eventType,
-        payload: { message },
-      }).catch(() => { /* non-fatal — structured events are best-effort */ }),
-    ])
+    ]
+
+    if (emitToEvents) {
+      writes.push(
+        insertEvent(db, {
+          runId,
+          changeId,
+          seq: getSeq(),
+          iteration: getIteration(),
+          eventType,
+          payload: { message },
+        }).catch(() => { /* non-fatal */ })
+      )
+    }
+
+    await Promise.all(writes)
   }
 }
 
