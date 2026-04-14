@@ -91,6 +91,8 @@ export default function ExecutionView({ change, project }: { change: Change; pro
   const [cancelState, setCancelState] = useState<'idle' | 'requesting' | 'cancelled' | 'committing' | 'force_failed'>('idle')
   const [elapsedMs, setElapsedMs] = useState(0)
   const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // Track the status we arrived with — only auto-redirect if we *transition* to 'review'
+  const initialStatusRef = useRef(change.status)
 
   const poll = useCallback(async () => {
     const res = await fetch(`/api/change-requests/${change.id}/execute/events`)
@@ -129,9 +131,11 @@ export default function ExecutionView({ change, project }: { change: Change; pro
     }
   }, [poll, shouldPoll])
 
-  // Redirect to review when complete
+  // Redirect to review only when the status *transitions* to 'review' during this visit.
+  // If we arrived with status already 'review' (user navigated back after completion),
+  // don't redirect — let them view the execution history.
   useEffect(() => {
-    if (changeStatus === 'review') {
+    if (changeStatus === 'review' && initialStatusRef.current !== 'review') {
       router.push(`/projects/${project?.id}/changes/${change.id}/review`)
     }
   }, [changeStatus, router, project?.id, change.id])
