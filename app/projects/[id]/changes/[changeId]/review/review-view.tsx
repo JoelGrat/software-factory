@@ -67,7 +67,7 @@ export default function ReviewView({
     setError(null)
     const res = await fetch(`/api/change-requests/${change.id}/approve`, { method: 'POST' })
     if (res.ok) {
-      router.push(`/projects/${project?.id}/changes/${change.id}`)
+      router.push(`/projects/${project?.id}`)
     } else {
       const data = await res.json().catch(() => ({}))
       setError(data.error ?? 'Failed to approve')
