@@ -234,6 +234,15 @@ export async function runBaselineRepair(
     return { status: 'pre_existing', category, preExistingFailedTests: names, repairAttempts: 0 }
   }
 
+  // ── No test files — not a failure, just an empty slate ───────────────────
+  // The change being executed may be creating the tests. Let it proceed.
+  // We'll verify the test suite exists after patches are applied.
+  if (category === 'no_tests') {
+    await log('verbose', `Baseline: no test files found — proceeding so execution can create them`)
+    await insertEvent(db, { runId, changeId, seq: seq(), iteration: 0, eventType: 'baseline.clean', payload: { note: 'no_tests_yet' } })
+    return { status: 'clean', category: 'no_tests', preExistingFailedTests: new Set(), repairAttempts: 0 }
+  }
+
   // ── Infrastructure failure — attempt repair ────────────────────────────────
   await log('error', `Baseline test infrastructure broken [${category}] — diagnosing and attempting repair`)
 

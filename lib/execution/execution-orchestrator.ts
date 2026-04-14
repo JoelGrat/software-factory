@@ -589,7 +589,10 @@ export async function runExecution(
         }
 
         // Failure types that carry no actionable diagnostic evidence — repair cannot help
-        const NO_EVIDENCE_TYPES = new Set(['INCONSISTENT_TEST_RESULT', 'NO_TESTS_FOUND', 'PARSER_ERROR'])
+        // NO_TESTS_FOUND is no longer in this set — if the AI was supposed to create tests
+        // and they still don't exist after patching, we want the failure to surface clearly
+        // (not be silently swallowed) so the user can see what went wrong.
+        const NO_EVIDENCE_TYPES = new Set(['INCONSISTENT_TEST_RESULT', 'PARSER_ERROR'])
 
         // For TEST_CONFIG_ERROR the verbose output contains the exact file + parse error —
         // synthesize a diagnostic so the repair phase can act on it (e.g. rename .js→.ts or strip TS syntax)
