@@ -517,7 +517,8 @@ export async function runExecution(
           totalCount: allDiags.length,
           truncated: allDiags.length > 20,
         }
-        await log('error', `Type check failed · ${allDiags.length} error${allDiags.length !== 1 ? 's' : ''}`)
+        const errorPreview = allDiags.slice(0, 5).map(d => `  ${d.file}:${d.line} — ${d.message}`).join('\n')
+        await log('error', `Type check failed · ${allDiags.length} error${allDiags.length !== 1 ? 's' : ''}\n${errorPreview}`)
         const attempt = await runInlineRepair(db, ai, executor, env, runId, changeId, state.iteration, diagnostics, seq)
         repairsAttempted++
         allFilesChanged = [...new Set([...allFilesChanged, ...attempt.filesPatched])]
@@ -530,6 +531,8 @@ export async function runExecution(
         const allDiags = typeCheck.errors.map(e => ({ file: e.file, line: e.line, message: e.message, code: 'TS' }))
         const diagnosticSigs = allDiags.map(d => `${d.file}:${d.line}:${d.message.slice(0, 40)}`)
         finalFailureType = `tsc: ${allDiags.length} error${allDiags.length !== 1 ? 's' : ''}`
+        const finalErrorPreview = allDiags.slice(0, 5).map(d => `  ${d.file}:${d.line} — ${d.message}`).join('\n')
+        await log('error', `[iter ${state.iteration}] Type check failed · ${allDiags.length} error${allDiags.length !== 1 ? 's' : ''}\n${finalErrorPreview}`)
 
         await insertEvent(db, {
           runId, changeId, seq: seq(), iteration: state.iteration,
