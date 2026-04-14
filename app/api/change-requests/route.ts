@@ -62,8 +62,15 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Failed to create change request' }, { status: 500 })
   }
 
-  // Set pipeline_status before firing async pipeline
+  // Clear any pinned baseline_blocked suggestion for this project — the user
+  // has acknowledged it by creating a change.
   const adminDb = createAdminClient()
+  await adminDb.from('action_items')
+    .delete()
+    .eq('project_id', body.project_id)
+    .eq('source', 'baseline_blocked')
+
+  // Set pipeline_status before firing async pipeline
   await adminDb.from('change_requests')
     .update({ pipeline_status: 'validated' })
     .eq('id', change.id)
