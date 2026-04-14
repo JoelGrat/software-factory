@@ -531,6 +531,9 @@ export async function runExecution(
         if (missingPkgs.length > 0) {
           await log('info', `Installing missing packages: ${missingPkgs.join(', ')}`)
           await executor.runInstall(env, missingPkgs)
+          // package.json and package-lock.json are now modified — include them in
+          // allFilesChanged so the commit policy doesn't flag them as unexpected.
+          allFilesChanged = [...new Set([...allFilesChanged, 'package.json', 'package-lock.json'])]
           typeCheck = await executor.runTypeCheck(env)
         }
       }
@@ -667,6 +670,8 @@ export async function runExecution(
           await log('error', `Tests failed · ${failureLabel}`)
           if (filteredResult.failureType === 'INCONSISTENT_TEST_RESULT') {
             await log('error', `Inconsistent result — vitest exited non-zero but reported 0 failures. Verbose output:\n${(filteredResult.raw?.stdout ?? '').slice(0, 1000)}`)
+          } else if (filteredResult.failureType === 'PARSER_ERROR') {
+            await log('error', `Test runner output could not be parsed (exit ${filteredResult.raw?.exitCode ?? '?'}). Raw output:\n${(filteredResult.raw?.stdout ?? filteredResult.output).slice(0, 1000)}`)
           } else {
             await log('error', `No actionable diagnostics (${filteredResult.failureType ?? 'unknown'}) — skipping repair`)
           }
