@@ -9,6 +9,7 @@ interface QuickStartProps {
 
 interface PreFillData {
   intent?: string
+  title?: string
 }
 
 export function QuickStart({ projectId, onChangeCreated }: QuickStartProps) {
@@ -26,6 +27,7 @@ export function QuickStart({ projectId, onChangeCreated }: QuickStartProps) {
     function handler(e: Event) {
       const detail = (e as CustomEvent<PreFillData>).detail
       if (detail.intent) setIntent(detail.intent)
+      if (detail.title) setTitle(detail.title)
       setOpen(true)
     }
     window.addEventListener('open-quick-start', handler)

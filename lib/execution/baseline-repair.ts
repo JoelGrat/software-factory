@@ -106,6 +106,95 @@ function extractDiagnosticSet(result: TestResult): DiagnosticSet | null {
   return null
 }
 
+// ── Suggestion creation ────────────────────────────────────────────────────────
+
+const CATEGORY_LABELS: Record<BaselineFailureCategory, string> = {
+  pre_existing_assertions: 'Pre-existing test failures',
+  missing_dependency:      'Missing test dependency',
+  syntax_error:            'TypeScript syntax in .js test file',
+  bad_config:              'Vitest configuration error',
+  no_tests:                'No test files found',
+  flaky:                   'Flaky / inconsistent test result',
+  unknown:                 'Unknown test infrastructure error',
+}
+
+function buildSuggestion(category: BaselineFailureCategory, blockedChangeId: string): {
+  title: string
+  intent: string
+  label: string
+} {
+  const categoryLabel = CATEGORY_LABELS[category]
+
+  switch (category) {
+    case 'no_tests':
+      return {
+        title: 'Add test configuration',
+        intent: 'The project has no test files that vitest can discover. Add a vitest.config.ts (or vitest.config.js), set up the test include patterns, and add at least one smoke-test to verify the setup works.',
+        label: 'Set up test infrastructure — no test files discovered',
+      }
+    case 'syntax_error':
+      return {
+        title: 'Fix TypeScript syntax in .js test files',
+        intent: 'One or more test files use a .js extension but contain TypeScript syntax (e.g. interface, type, enum declarations). Rename them to .ts (or .tsx for React) and ensure the vitest config includes the correct transform for TypeScript files.',
+        label: `Fix baseline: ${categoryLabel}`,
+      }
+    case 'missing_dependency':
+      return {
+        title: 'Fix missing test dependency',
+        intent: 'The test suite cannot start because a required module cannot be resolved. Install the missing dependency or fix the import path. Check the execution log for the exact module name that failed to resolve.',
+        label: `Fix baseline: ${categoryLabel}`,
+      }
+    case 'bad_config':
+      return {
+        title: 'Fix vitest configuration',
+        intent: 'Vitest failed to transform or load the test suite due to a configuration error (transform failure, plugin error, or missing preset). Review vitest.config.ts and ensure the transform pipeline is correctly configured for all file types in the project.',
+        label: `Fix baseline: ${categoryLabel}`,
+      }
+    default:
+      return {
+        title: 'Fix test infrastructure',
+        intent: `The test suite cannot run (${categoryLabel}). Diagnose and fix the root cause so vitest can execute tests successfully. Check the execution log for the specific error.`,
+        label: `Fix baseline: ${categoryLabel}`,
+      }
+  }
+}
+
+export async function createBaselineBlockedSuggestion(
+  db: SupabaseClient,
+  projectId: string,
+  blockedChangeId: string,
+  category: BaselineFailureCategory,
+): Promise<void> {
+  const suggestion = buildSuggestion(category, blockedChangeId)
+
+  // Remove any existing unresolved baseline_blocked suggestion for this project
+  // to avoid stacking duplicates across multiple blocked runs.
+  await db.from('action_items')
+    .delete()
+    .eq('project_id', projectId)
+    .eq('source', 'baseline_blocked')
+    .is('resolved_at', null)
+
+  const { error } = await db.from('action_items').insert({
+    project_id: projectId,
+    tier: 1,
+    priority_score: 0.95,
+    source: 'baseline_blocked',
+    pinned: true,
+    payload_json: {
+      label: suggestion.label,
+      suggestedTitle: suggestion.title,
+      suggestedIntent: suggestion.intent,
+      category,
+      blockedChangeId,
+    },
+  })
+
+  if (error) {
+    console.error('[baseline-repair] failed to create suggestion:', error)
+  }
+}
+
 // ── Main export ────────────────────────────────────────────────────────────────
 
 const MAX_BASELINE_REPAIR_ATTEMPTS = 2

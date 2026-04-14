@@ -30,7 +30,7 @@ import { detectStuck } from './stuck-detector'
 import { determineCommitOutcome } from './commit-policy'
 import { runInlineRepair } from './inline-repair'
 import { runRepairPhase } from './repair-phase'
-import { runBaselineRepair } from './baseline-repair'
+import { runBaselineRepair, createBaselineBlockedSuggestion } from './baseline-repair'
 import type { TestabilityStatus } from './execution-types-v2'
 import { createExecutionRun, startHeartbeat, isCancellationRequested, finalizeRun } from './execution-run-manager'
 import type { DiagnosticSet, CommitOutcome, ExecutionSummary } from './execution-types-v2'
@@ -320,7 +320,11 @@ export async function runExecution(
       finalFailureType = `baseline: test infrastructure unresolvable [${baselineResult.category}]`
       await log('error', `Execution blocked — test infrastructure cannot be made testable after ${baselineResult.repairAttempts} repair attempt${baselineResult.repairAttempts !== 1 ? 's' : ''}`)
       await insertEvent(db, { runId, changeId, seq: seq(), iteration: 0, eventType: 'execution.blocked', payload: { reason: finalFailureType } })
-      // Fall through to the finally block which will write the snapshot and finalise the run
+
+      // Create a pinned dashboard suggestion so the user can act on this without hunting through logs
+      await createBaselineBlockedSuggestion(db, projectId, changeId, baselineResult.category!)
+      await log('info', `Suggestion created on dashboard — go to the project dashboard to create a fix change`)
+
       throw Object.assign(new Error(finalFailureType), { executionBlocked: true })
     }
 

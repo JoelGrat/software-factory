@@ -223,8 +223,11 @@ export async function computeAndStoreActionItems(
     .sort((a, b) => a.tier - b.tier || b.priorityScore - a.priorityScore)
     .slice(0, 5)
 
-  // Replace all action_items for this project
-  const { error: deleteError } = await db.from('action_items').delete().eq('project_id', projectId)
+  // Replace all non-pinned action_items for this project.
+  // Pinned items (system-generated, e.g. baseline_blocked) are preserved until explicitly resolved.
+  const { error: deleteError } = await db.from('action_items').delete()
+    .eq('project_id', projectId)
+    .eq('pinned', false)
   if (deleteError) { console.error('[action-items] delete failed:', deleteError); return }
 
   if (sorted.length > 0) {

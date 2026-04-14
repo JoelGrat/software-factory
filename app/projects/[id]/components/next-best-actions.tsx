@@ -17,6 +17,11 @@ interface ActionItem {
     centrality?: number
     riskScore?: number
     lastOccurredAt?: string
+    // baseline_blocked fields
+    suggestedTitle?: string
+    suggestedIntent?: string
+    category?: string
+    blockedChangeId?: string
   }
 }
 
@@ -45,20 +50,23 @@ function ActionCard({ item, index }: { item: ActionItem; index: number }) {
     : 'bg-zinc-800 text-zinc-400'
   const badgeLabel = isHigh ? 'HIGH' : isMedium ? 'MEDIUM' : 'LOW'
 
+  const isBaselineBlocked = item.source === 'baseline_blocked'
+
   const sourceLabel: Record<string, string> = {
     pattern: 'Pattern',
     risk_radar: 'Risk Radar',
     model_quality: 'Model Quality',
     opportunity: 'Opportunity',
+    baseline_blocked: 'Infrastructure',
   }
 
   const timeHook = item.payload.lastOccurredAt
     ? `(last occurrence ${formatTimeAgo(item.payload.lastOccurredAt)})`
     : ''
 
-  function openQuickStart(intent: string, componentId?: string) {
+  function openQuickStart(intent: string, componentId?: string, title?: string) {
     window.dispatchEvent(new CustomEvent('open-quick-start', {
-      detail: { intent, componentId },
+      detail: { intent, componentId, title },
     }))
   }
 
@@ -100,6 +108,17 @@ function ActionCard({ item, index }: { item: ActionItem; index: number }) {
               <button className="text-xs text-zinc-400 hover:text-zinc-200 underline">
                 View in System Model →
               </button>
+            ) : isBaselineBlocked ? (
+              <button
+                onClick={() => openQuickStart(
+                  item.payload.suggestedIntent ?? item.payload.label,
+                  undefined,
+                  item.payload.suggestedTitle,
+                )}
+                className="text-xs bg-red-900 hover:bg-red-800 text-red-200 px-2 py-1 rounded font-medium"
+              >
+                Create Fix Change →
+              </button>
             ) : (
               <button
                 onClick={() => openQuickStart(item.payload.label, item.payload.componentId)}
@@ -108,7 +127,7 @@ function ActionCard({ item, index }: { item: ActionItem; index: number }) {
                 {item.source === 'risk_radar' ? 'Stabilize Component' : 'Create Fix Change →'}
               </button>
             )}
-            {item.payload.componentId && (
+            {item.payload.componentId && !isBaselineBlocked && (
               <button className="text-xs text-zinc-400 hover:text-zinc-200 underline">
                 View in System Model →
               </button>
