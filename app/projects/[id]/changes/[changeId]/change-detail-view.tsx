@@ -95,6 +95,20 @@ const PLANNING_SUBSTEPS = [
   'Finalising plan',
 ]
 
+/** Map pipeline_status → the substep index the pipeline is currently at.
+ *  Used to seed the animation from the correct position when the user re-enters the page. */
+function stepFromPipelineStatus(pipelineStatus: string | null): number {
+  switch (pipelineStatus) {
+    case 'validated':
+    case 'draft_planning':   return 0
+    case 'draft_planned':    return 1
+    case 'impact_analyzing': return 2
+    case 'impact_analyzed':  return 3
+    case 'plan_generating':  return 4
+    default:                 return 0
+  }
+}
+
 function ComponentImpactRow({ ic }: { ic: ImpactComponent }) {
   const weight = Math.round(ic.impact_weight * 100)
   const barColor = weight >= 70 ? 'bg-red-500/50' : weight >= 40 ? 'bg-amber-500/50' : 'bg-indigo-500/40'
@@ -164,7 +178,7 @@ export function ChangeDetailView({
   const [generatingSpec, setGeneratingSpec] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [deleting, setDeleting] = useState(false)
-  const [planningStep, setPlanningStep] = useState(0)
+  const [planningStep, setPlanningStep] = useState(() => stepFromPipelineStatus(initial.pipeline_status))
   const isAnalyzing = ANALYZING_STATUSES.includes(change.status) || PIPELINE_IN_PROGRESS_STATUSES.includes(change.pipeline_status ?? '')
   const canDelete = change.status !== 'done'
 
@@ -402,10 +416,15 @@ export function ChangeDetailView({
     return () => clearInterval(id)
   }, [change.id, isAnalyzing, router])
 
+  // When pipeline_status advances (via polling), jump the substep display forward.
+  // For the legacy status='planning' path (no pipeline_status granularity) use a timer.
   useEffect(() => {
-    const isPlanningPhase = change.status === 'planning' || ['plan_generating', 'impact_analyzing', 'impact_analyzed', 'draft_planning', 'draft_planned', 'validated'].includes(change.pipeline_status ?? '')
-    if (!isPlanningPhase) return
-    setPlanningStep(0)
+    if (PIPELINE_IN_PROGRESS_STATUSES.includes(change.pipeline_status ?? '')) {
+      setPlanningStep(stepFromPipelineStatus(change.pipeline_status))
+      return
+    }
+    if (change.status !== 'planning') return
+    // Legacy path: no pipeline_status signal — advance on a timer
     const id = setInterval(() => {
       setPlanningStep(s => Math.min(s + 1, PLANNING_SUBSTEPS.length - 1))
     }, 7000)
