@@ -352,7 +352,10 @@ function parseVitestJson(output: string, raw?: TestRawOutput): TestResult {
   const exitCode = raw?.exitCode ?? -1
 
   try {
-    const jsonStart = output.indexOf('{')
+    // vitest --reporter=json emits the JSON object as a line starting with '{'.
+    // Use /^{/m so we don't false-match on inline objects in vite warning messages
+    // (e.g. "The following esbuild options were set: `{ jsx: 'automatic' }`").
+    const jsonStart = output.search(/^\{/m)
     if (jsonStart === -1) throw new Error('No JSON found')
     const json = JSON.parse(output.slice(jsonStart))
     const numTotalTests = json.numTotalTests ?? 0
@@ -370,9 +373,10 @@ function parseVitestJson(output: string, raw?: TestRawOutput): TestResult {
     const failureType = passed ? undefined : classifyTestFailureType(failures, output, exitCode)
     return { passed, failures, output, testsRun: numTotalTests, testsPassed: numPassedTests, testsFailed: numFailedTests, failureType, raw }
   } catch {
-    // JSON parse failed — determine if it's a config error or unknown
+    // JSON parse failed — determine if it's a config error or unknown.
+    // Trust exit code first: exit 0 means vitest considers everything passed.
     const lowerOut = output.toLowerCase()
-    const failed = exitCode !== 0 || lowerOut.includes('fail') || lowerOut.includes('error')
+    const failed = exitCode !== 0 || (exitCode === -1 && (lowerOut.includes('fail') || lowerOut.includes('error')))
     const passed = !failed
 
     let failureType: TestFailureType | undefined
