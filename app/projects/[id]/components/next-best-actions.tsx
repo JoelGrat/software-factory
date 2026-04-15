@@ -1,4 +1,5 @@
 'use client'
+import Link from 'next/link'
 
 interface ActionItem {
   id: string
@@ -27,6 +28,7 @@ interface ActionItem {
 
 interface NextBestActionsProps {
   actionItems: ActionItem[]
+  projectId: string
 }
 
 function formatTimeAgo(iso?: string): string {
@@ -38,7 +40,7 @@ function formatTimeAgo(iso?: string): string {
   return `${Math.floor(hours / 24)}d ago`
 }
 
-function ActionCard({ item, index }: { item: ActionItem; index: number }) {
+function ActionCard({ item, index, projectId }: { item: ActionItem; index: number; projectId: string }) {
   const isHigh = item.tier === 1
   const isMedium = item.tier === 2
   const isOpportunity = item.tier === 3
@@ -105,9 +107,12 @@ function ActionCard({ item, index }: { item: ActionItem; index: number }) {
 
           <div className="flex gap-2">
             {isOpportunity ? (
-              <button className="text-xs text-zinc-400 hover:text-zinc-200 underline">
+              <Link
+                href={`/projects/${projectId}/system-model`}
+                className="text-xs text-zinc-400 hover:text-zinc-200 underline"
+              >
                 View in System Model →
-              </button>
+              </Link>
             ) : isBaselineBlocked ? (
               <button
                 onClick={() => openQuickStart(
@@ -127,10 +132,13 @@ function ActionCard({ item, index }: { item: ActionItem; index: number }) {
                 {item.source === 'risk_radar' ? 'Stabilize Component' : 'Create Fix Change →'}
               </button>
             )}
-            {item.payload.componentId && !isBaselineBlocked && (
-              <button className="text-xs text-zinc-400 hover:text-zinc-200 underline">
+            {item.payload.componentId && !isBaselineBlocked && !isOpportunity && (
+              <Link
+                href={`/projects/${projectId}/system-model`}
+                className="text-xs text-zinc-400 hover:text-zinc-200 underline"
+              >
                 View in System Model →
-              </button>
+              </Link>
             )}
           </div>
         </div>
@@ -139,7 +147,7 @@ function ActionCard({ item, index }: { item: ActionItem; index: number }) {
   )
 }
 
-export function NextBestActions({ actionItems }: NextBestActionsProps) {
+export function NextBestActions({ actionItems, projectId }: NextBestActionsProps) {
   const onlyOpportunities = actionItems.every(i => i.tier === 3)
 
   if (actionItems.length === 0) {
@@ -158,7 +166,7 @@ export function NextBestActions({ actionItems }: NextBestActionsProps) {
       </h2>
       <div className="space-y-2">
         {actionItems.map((item, i) => (
-          <ActionCard key={item.id} item={item} index={i} />
+          <ActionCard key={item.id} item={item} index={i} projectId={projectId} />
         ))}
       </div>
     </section>

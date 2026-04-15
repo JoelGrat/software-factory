@@ -253,7 +253,7 @@ export function ProjectDashboard({
             {/* Risk Radar + Next Best Actions */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <RiskRadar riskScores={initialRiskScores} projectId={project.id} />
-              <NextBestActions actionItems={initialActionItems} />
+              <NextBestActions actionItems={initialActionItems} projectId={project.id} />
             </div>
 
             {/* System Signals (full width) */}
