@@ -91,9 +91,11 @@ export async function generateDetailedPlan(
   change: { title: string; intent: string },
   spec: ChangeSpec,
   plannerVersion: number,
-  ai: AIProvider
+  ai: AIProvider,
+  onSubstep?: (status: string) => Promise<void>
 ): Promise<DetailedPlan> {
   // First attempt
+  await onSubstep?.('plan_creating_phases')
   const prompt = buildDetailedPlanPrompt(change, spec, plannerVersion)
   const result = await ai.complete(prompt, { maxTokens: 8192 })
 
@@ -104,10 +106,15 @@ export async function generateDetailedPlan(
     throw new Error(`Plan generation produced non-JSON response: ${result.content.slice(0, 200)}`)
   }
 
+  await onSubstep?.('plan_validating')
   const validation = validatePlanOutput(plan)
-  if (validation.passed) return plan
+  if (validation.passed) {
+    await onSubstep?.('plan_finalizing')
+    return plan
+  }
 
   // One retry with gate failures included
+  await onSubstep?.('plan_creating_phases')
   const retryPrompt = buildDetailedPlanPrompt(change, spec, plannerVersion, validation.diagnostics.issues)
   const retryResult = await ai.complete(retryPrompt, { maxTokens: 8192 })
 
@@ -118,10 +125,12 @@ export async function generateDetailedPlan(
     throw new Error(`Plan generation retry produced non-JSON response: ${retryResult.content.slice(0, 200)}`)
   }
 
+  await onSubstep?.('plan_validating')
   const retryValidation = validatePlanOutput(retryPlan)
   if (!retryValidation.passed) {
     throw new PlanQualityGateError(retryValidation.diagnostics)
   }
 
+  await onSubstep?.('plan_finalizing')
   return retryPlan
 }

@@ -78,7 +78,11 @@ export async function runPipeline(
     if (shouldRunStage(startStage, 'spec')) {
       const t = Date.now()
       await updatePipelineStatus(db, changeId, 'spec_generating')
-      const { spec, markdown } = await generateSpec(changeId, db, ai)
+      const { spec, markdown } = await generateSpec(
+        changeId, db, ai,
+        (s) => updatePipelineStatus(db, changeId, s)
+      )
+      await updatePipelineStatus(db, changeId, 'spec_validating')
       const specCheck = validateSpecInput(spec)
       if (!specCheck.passed) {
         throw Object.assign(new Error(`Spec validation failed: ${specCheck.diagnostics.summary}`), {
@@ -99,7 +103,10 @@ export async function runPipeline(
       if (!specRow) {
         throw Object.assign(new Error('No spec found — cannot generate plan'), { _stage: 'plan' as PlannerStage })
       }
-      const plan = await generateDetailedPlan(change, specRow.structured, plannerVersion, ai)
+      const plan = await generateDetailedPlan(
+        change, specRow.structured, plannerVersion, ai,
+        (s) => updatePipelineStatus(db, changeId, s)
+      )
       const branchName = deriveBranchName(plan.goal, changeId)
       const { id } = await createPlan(db, changeId, branchName, plannerVersion)
       planId = id

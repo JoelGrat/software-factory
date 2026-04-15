@@ -81,27 +81,99 @@ const RISK_COLORS: Record<string, string> = {
 const ANALYZING_STATUSES = ['analyzing', 'analyzing_mapping', 'analyzing_propagation', 'analyzing_scoring', 'planning']
 const PIPELINE_IN_PROGRESS_STATUSES = [
   'validated', 'planning',
-  'spec_generating', 'spec_generated',
-  'plan_generating', 'plan_generated',
+  'spec_generating', 'spec_loading_context', 'spec_inferring_components', 'spec_inferring_files',
+  'spec_generating_canonical', 'spec_validating', 'spec_generated',
+  'plan_generating', 'plan_creating_phases', 'plan_validating', 'plan_finalizing', 'plan_generated',
   'impact_analyzing', 'impact_analyzed',
   'scoring', 'scored',
 ]
 
-const PIPELINE_STEPS = [
-  { label: 'Generating specification', statuses: ['spec_generating', 'spec_generated'] },
-  { label: 'Building execution plan',  statuses: ['plan_generating', 'plan_generated'] },
-  { label: 'Analyzing impact',         statuses: ['impact_analyzing', 'impact_analyzed'] },
-  { label: 'Scoring risk',             statuses: ['scoring', 'scored'] },
+interface PipelineSubstep {
+  label: string
+  status: string
+}
+
+interface PipelineStageConfig {
+  label: string
+  /** All pipeline_status values that mean this stage is active (including substeps). */
+  activeStatuses: string[]
+  /** The pipeline_status that means this stage just finished. */
+  doneStatus: string
+  substeps: PipelineSubstep[]
+}
+
+const PIPELINE_STAGES: PipelineStageConfig[] = [
+  {
+    label: 'Generating specification',
+    activeStatuses: [
+      'validated', 'planning',
+      'spec_generating', 'spec_loading_context', 'spec_inferring_components',
+      'spec_inferring_files', 'spec_generating_canonical', 'spec_validating',
+    ],
+    doneStatus: 'spec_generated',
+    substeps: [
+      { label: 'Load project context',       status: 'spec_loading_context' },
+      { label: 'Infer candidate components', status: 'spec_inferring_components' },
+      { label: 'Infer likely files',         status: 'spec_inferring_files' },
+      { label: 'Generate canonical spec',    status: 'spec_generating_canonical' },
+      { label: 'Validate output',            status: 'spec_validating' },
+    ],
+  },
+  {
+    label: 'Building execution plan',
+    activeStatuses: ['plan_generating', 'plan_creating_phases', 'plan_validating', 'plan_finalizing'],
+    doneStatus: 'plan_generated',
+    substeps: [
+      { label: 'Create phases and tasks',  status: 'plan_creating_phases' },
+      { label: 'Validate dependencies',    status: 'plan_validating' },
+      { label: 'Finalize plan',            status: 'plan_finalizing' },
+    ],
+  },
+  {
+    label: 'Analyzing impact',
+    activeStatuses: ['impact_analyzing'],
+    doneStatus: 'impact_analyzed',
+    substeps: [
+      { label: 'Map intent to components', status: 'impact_analyzing' },
+    ],
+  },
+  {
+    label: 'Scoring risk',
+    activeStatuses: ['scoring'],
+    doneStatus: 'scored',
+    substeps: [
+      { label: 'Compute risk score', status: 'scoring' },
+    ],
+  },
 ]
 
-/** Map pipeline_status → which pipeline step is currently active (0-indexed). */
-function stepFromPipelineStatus(pipelineStatus: string | null): number {
+/** Returns the index of the currently active stage, or -1 if none are active. */
+function activeStageIndex(pipelineStatus: string | null): number {
+  if (!pipelineStatus) return -1
+  return PIPELINE_STAGES.findIndex(
+    s => s.activeStatuses.includes(pipelineStatus) || s.doneStatus === pipelineStatus
+  )
+}
+
+/** Returns true if the stage at `index` is fully completed given the current status. */
+function isStageCompleted(index: number, pipelineStatus: string | null): boolean {
+  if (!pipelineStatus) return false
+  const active = activeStageIndex(pipelineStatus)
+  if (active === -1) return false
+  // If a later stage is active (or done), this stage is completed
+  if (active > index) return true
+  // If this is the active stage, it's completed only if the doneStatus matches
+  if (active === index && pipelineStatus === PIPELINE_STAGES[index].doneStatus) return true
+  return false
+}
+
+/** Within an active stage, return the index of the currently running substep. */
+function activeSubstepIndex(stageIndex: number, pipelineStatus: string | null): number {
   if (!pipelineStatus) return 0
-  if (['spec_generating', 'spec_generated'].includes(pipelineStatus))   return 0
-  if (['plan_generating', 'plan_generated'].includes(pipelineStatus))   return 1
-  if (['impact_analyzing', 'impact_analyzed'].includes(pipelineStatus)) return 2
-  if (['scoring', 'scored'].includes(pipelineStatus))                   return 3
-  return 0
+  const stage = PIPELINE_STAGES[stageIndex]
+  if (!stage) return 0
+  const idx = stage.substeps.findIndex(s => s.status === pipelineStatus)
+  return idx === -1 ? 0 : idx
 }
 
 function ComponentImpactRow({ ic }: { ic: ImpactComponent }) {
@@ -173,7 +245,7 @@ export function ChangeDetailView({
   const [generatingSpec, setGeneratingSpec] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [deleting, setDeleting] = useState(false)
-  const [pipelineStep, setPipelineStep] = useState(() => stepFromPipelineStatus(initial.pipeline_status))
+  const [pipelineStatus, setPipelineStatus] = useState(initial.pipeline_status)
   const isAnalyzing = ANALYZING_STATUSES.includes(change.status) || PIPELINE_IN_PROGRESS_STATUSES.includes(change.pipeline_status ?? '')
   const canDelete = change.status !== 'done'
 
@@ -398,6 +470,7 @@ export function ChangeDetailView({
       if (!res.ok) return
       const updated = await res.json()
       setChange(updated)
+      setPipelineStatus(updated.pipeline_status ?? null)
       if (!ANALYZING_STATUSES.includes(updated.status) && !PIPELINE_IN_PROGRESS_STATUSES.includes(updated.pipeline_status ?? '')) {
         clearInterval(id)
         setImpact(updated.impact ?? null)
@@ -410,11 +483,6 @@ export function ChangeDetailView({
     }, 2000)
     return () => clearInterval(id)
   }, [change.id, isAnalyzing, router])
-
-  // When pipeline_status advances (via polling), move the step indicator forward.
-  useEffect(() => {
-    setPipelineStep(stepFromPipelineStatus(change.pipeline_status))
-  }, [change.pipeline_status])
 
   useEffect(() => {
     if (!toast) return
@@ -491,24 +559,54 @@ export function ChangeDetailView({
                 <p className="text-xs font-bold uppercase tracking-widest text-slate-400 font-headline px-6 pt-5 pb-4">
                   Planning
                 </p>
-                <div className="px-6 pb-5 space-y-2.5">
-                  {PIPELINE_STEPS.map((step, i) => {
-                    const isActive = i === pipelineStep
-                    const isDone = i < pipelineStep
+                <div className="px-6 pb-5 space-y-1">
+                  {PIPELINE_STAGES.map((stage, i) => {
+                    const active = activeStageIndex(pipelineStatus)
+                    const isActive = i === active && pipelineStatus !== stage.doneStatus
+                    const isDone = isStageCompleted(i, pipelineStatus)
+                    const substepIdx = isActive ? activeSubstepIndex(i, pipelineStatus) : 0
+
+                    if (isActive) {
+                      // Expanded: show stage header + substeps
+                      return (
+                        <div key={stage.label} className="py-1">
+                          <div className="flex items-center gap-3 mb-2">
+                            <span className="relative flex h-2 w-2 flex-shrink-0">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
+                              <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-400" />
+                            </span>
+                            <span className="text-sm font-medium text-slate-200">{stage.label}</span>
+                          </div>
+                          <div className="ml-5 pl-3 border-l border-white/5 space-y-1.5">
+                            {stage.substeps.map((sub, si) => {
+                              const subDone = si < substepIdx
+                              const subActive = si === substepIdx
+                              return (
+                                <div key={sub.status} className="flex items-center gap-2">
+                                  <span className={`text-xs w-3 flex-shrink-0 font-mono ${subDone ? 'text-green-400' : subActive ? 'text-indigo-300' : 'text-slate-700'}`}>
+                                    {subDone ? '✓' : subActive ? '•' : '○'}
+                                  </span>
+                                  <span className={`text-xs ${subDone ? 'text-slate-500' : subActive ? 'text-slate-300' : 'text-slate-600'}`}>
+                                    {sub.label}
+                                  </span>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )
+                    }
+
+                    // Collapsed: single line
                     return (
-                      <div key={step.label} className="flex items-center gap-3">
-                        {isActive ? (
-                          <span className="relative flex h-2 w-2 flex-shrink-0">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
-                            <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-400" />
-                          </span>
-                        ) : isDone ? (
+                      <div key={stage.label} className="flex items-center gap-3 py-1">
+                        {isDone ? (
                           <span className="h-2 w-2 rounded-full bg-green-400 flex-shrink-0" />
                         ) : (
                           <span className="h-2 w-2 rounded-full bg-slate-700 flex-shrink-0" />
                         )}
-                        <span className={`text-sm ${isActive ? 'text-slate-200' : isDone ? 'text-slate-500' : 'text-slate-600'}`}>
-                          {step.label}
+                        <span className={`text-sm ${isDone ? 'text-slate-500' : 'text-slate-600'}`}>
+                          {stage.label}
                         </span>
                       </div>
                     )

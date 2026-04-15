@@ -108,6 +108,61 @@ Return a JSON object:
 }`
 }
 
+export interface TaskFileContext {
+  path: string
+  content: string
+  /** true if this file doesn't exist yet and should be created */
+  isNew: boolean
+}
+
+/**
+ * File-level task implementation prompt.
+ * Replaces the symbol-extraction approach: the AI receives every file involved
+ * in the task and returns a full replacement for each one.
+ */
+export function buildTaskImplementationPrompt(
+  task: { description: string; intent: string },
+  files: TaskFileContext[],
+  previousErrors?: string,
+): string {
+  const fileSection = files
+    .map(f =>
+      f.isNew
+        ? `// === ${f.path} (NEW FILE — does not exist yet) ===`
+        : `// === ${f.path} ===\n${f.content}`,
+    )
+    .join('\n\n')
+
+  const filePaths = files.map(f => f.path)
+
+  return `You are a TypeScript/Next.js engineer implementing a planned change.
+
+## Task
+${task.description}
+
+## Change Intent
+${task.intent}
+
+## Files
+${fileSection}
+${previousErrors ? `\n## Previous Attempt Failed — Fix These Errors\n\`\`\`\n${previousErrors}\n\`\`\`\nDo NOT repeat the same approach.\n` : ''}
+## Rules
+- Implement the task. Modify existing files or create new ones as needed.
+- Do not change unrelated code. Keep diffs minimal.
+- Preserve existing imports and exports unless the task explicitly changes them.
+- Files to return: ${filePaths.join(', ')}
+
+## Output
+Return a JSON object:
+{
+  "files": [
+    { "path": "path/to/file.ts", "content": "<complete file content after change>" }
+  ],
+  "confidence": <0.0–1.0>,
+  "reasoning": "<one sentence explanation, max 140 chars>"
+}`
+}
+
 export function buildNewFilePrompt(
   task: PatchTask,
   filePath: string,

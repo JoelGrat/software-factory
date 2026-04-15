@@ -84,14 +84,24 @@ const ANALYZING_STAGE_LABELS: Record<string, string> = {
 }
 
 const PIPELINE_STATUS_LABELS: Record<string, string> = {
-  spec_generating:  'Generating specification…',
-  spec_generated:   'Specification ready…',
-  plan_generating:  'Building execution plan…',
-  plan_generated:   'Plan generated…',
-  impact_analyzing: 'Analyzing impact…',
-  impact_analyzed:  'Impact analyzed…',
-  scoring:          'Scoring risk…',
-  scored:           'Risk scored…',
+  validated:                  'Starting planning…',
+  planning:                   'Starting planning…',
+  spec_generating:            'Generating specification…',
+  spec_loading_context:       'Loading project context…',
+  spec_inferring_components:  'Inferring candidate components…',
+  spec_inferring_files:       'Inferring likely files…',
+  spec_generating_canonical:  'Generating canonical spec…',
+  spec_validating:            'Validating specification…',
+  spec_generated:             'Specification ready…',
+  plan_generating:            'Building execution plan…',
+  plan_creating_phases:       'Creating phases and tasks…',
+  plan_validating:            'Validating plan…',
+  plan_finalizing:            'Finalizing plan…',
+  plan_generated:             'Plan generated…',
+  impact_analyzing:           'Analyzing impact…',
+  impact_analyzed:            'Impact analyzed…',
+  scoring:                    'Scoring risk…',
+  scored:                     'Risk scored…',
 }
 
 const EXEC_STAGE_LABELS: Record<string, string> = {
@@ -149,6 +159,16 @@ function getCardState(change: ChangeCard, events: DashboardEvent[]): CardState {
       pct: null,
       iterationLabel: null,
     }
+  }
+
+  // Public status: planning → pipeline started but pipeline_status not yet propagated
+  if (!latest && change.status === 'planning') {
+    return { phase: 'analyzing', statusLine: 'Starting planning…', subLine: null, pct: null, iterationLabel: null }
+  }
+
+  // Newly created, not yet started
+  if (!latest && (change.status === 'open' || change.status === 'validated')) {
+    return { phase: 'queued', statusLine: 'Ready to plan', subLine: null, pct: null, iterationLabel: null }
   }
 
   // No events yet

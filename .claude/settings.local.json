@@ -22,7 +22,12 @@
       "Bash(node -e \"const d=require\\('./package.json'\\); console.log\\(Object.keys\\({...d.dependencies,...d.devDependencies}\\).join\\('\\\\n'\\)\\)\")",
       "Bash(supabase db:*)",
       "Bash(mkdir -p \"C:/Users/joelg/softwareFactory_git/app/api/change-requests/[id]/cancel\")",
-      "Bash(mkdir -p \"C:/Users/joelg/softwareFactory_git/app/api/change-requests/[id]/execute/events\")"
+      "Bash(mkdir -p \"C:/Users/joelg/softwareFactory_git/app/api/change-requests/[id]/execute/events\")",
+      "Bash(where supabase *)",
+      "Bash(npm test *)",
+      "Bash(npx eslint *)",
+      "Bash(node *)",
+      "Bash(git rm *)"
     ]
   }
 }

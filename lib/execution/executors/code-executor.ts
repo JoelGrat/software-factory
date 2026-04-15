@@ -43,8 +43,8 @@ export interface CodeExecutor {
   /** git add -A && git commit && git push inside the container */
   commitAndPush(env: ExecutionEnvironment, branch: string, message: string): Promise<CommitResult>
 
-  /** git reset --hard HEAD then re-apply acceptedPatches — call at start of each iteration */
-  resetIteration(env: ExecutionEnvironment, acceptedPatches: FilePatch[]): Promise<void>
+  /** git reset --hard HEAD then re-apply accepted file writes — call at start of each iteration */
+  resetIteration(env: ExecutionEnvironment, acceptedFileWrites: { path: string; content: string }[]): Promise<void>
 
   /** Stop container and clean up local temp dir */
   cleanup(env: ExecutionEnvironment): Promise<void>

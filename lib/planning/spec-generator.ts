@@ -145,7 +145,8 @@ Respond with JSON.`)
 export async function generateSpec(
   changeId: string,
   db: SupabaseClient,
-  ai: AIProvider
+  ai: AIProvider,
+  onSubstep?: (status: string) => Promise<void>
 ): Promise<{ spec: ChangeSpec; markdown: string }> {
   const { data: change } = await db
     .from('change_requests')
@@ -154,12 +155,16 @@ export async function generateSpec(
     .single()
   if (!change) throw new Error(`Change not found: ${changeId}`)
 
-  const [candidateComponents, projectContext] = await Promise.all([
-    inferCandidateComponents(change, db, change.project_id),
-    loadProjectContext(db, change.project_id),
-  ])
+  await onSubstep?.('spec_loading_context')
+  const projectContext = await loadProjectContext(db, change.project_id)
+
+  await onSubstep?.('spec_inferring_components')
+  const candidateComponents = await inferCandidateComponents(change, db, change.project_id)
+
+  await onSubstep?.('spec_inferring_files')
   const likelyFilePaths = inferLikelyFilePaths(change)
   const assumptions = deriveAssumptions(change)
 
+  await onSubstep?.('spec_generating_canonical')
   return generateCanonicalSpec(change, { candidateComponents, likelyFilePaths, assumptions, projectContext }, ai)
 }

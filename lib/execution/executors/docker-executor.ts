@@ -272,11 +272,11 @@ export class DockerExecutor implements CodeExecutor {
     return { commitHash: stdout.trim(), branch }
   }
 
-  async resetIteration(env: ExecutionEnvironment, acceptedPatches: FilePatch[]): Promise<void> {
+  async resetIteration(env: ExecutionEnvironment, acceptedFileWrites: { path: string; content: string }[]): Promise<void> {
     await dockerExec(env.containerId, `cd ${env.containerWorkDir} && git reset --hard HEAD`)
     await dockerCpToLocal(env.containerId, env.containerWorkDir, env.localWorkDir)
-    for (const patch of acceptedPatches) {
-      await this.applyPatch(env, patch)
+    for (const fw of acceptedFileWrites) {
+      await this.createFile(env, fw.path, fw.content)
     }
   }
 

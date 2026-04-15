@@ -1,21 +1,19 @@
 // lib/execution/execution-orchestrator.ts
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { Project } from 'ts-morph'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { AIProvider } from '@/lib/ai/provider'
 import type { CodeExecutor } from './executors/code-executor'
 import type {
-  FilePatch, SymbolContext, ExecutionScope, ExecutionLimits,
-  ContextMode, BehavioralScope, ExecutionEnvironment,
+  ExecutionScope, ExecutionLimits,
+  BehavioralScope, ExecutionEnvironment,
   NewFileCreation,
 } from './types'
 import { DEFAULT_LIMITS } from './types'
-import { extractSymbol } from './symbol-extractor'
-import { validatePatch } from './patch-validator'
 import { selectTests } from './test-selector'
-import { hashInput, hashOutput, recordTrace } from './execution-tracer'
-import { buildSymbolPatchPrompt, buildFilePatchPrompt, buildNewFilePrompt } from './prompt-builders'
+import { buildTaskImplementationPrompt, buildNewFilePrompt } from './prompt-builders'
+import type { TaskFileContext } from './prompt-builders'
+import { isPathAllowed } from './repair-guard'
 import { makeLogger } from './execution-logger'
 import { emitDashboardEvent } from '@/lib/dashboard/event-bus'
 import { nextVersion } from '@/lib/dashboard/event-counter'
@@ -87,30 +85,25 @@ function parseAiJson(content: string): Record<string, unknown> {
   return JSON.parse(stripped)
 }
 
-function chooseContextMode(ctx: SymbolContext, limits: ExecutionLimits): ContextMode {
-  if (ctx.complexity > limits.symbolComplexityHighThreshold) return 'file'
-  if (ctx.complexity < limits.symbolComplexityLowThreshold) return 'symbol'
-  return 'multi-symbol'
-}
-
-const COMPONENT_DEPTH: Record<string, number> = {
-  ui: 0, component: 1, module: 2, api: 3, service: 4, auth: 5, repository: 6, db: 7,
-}
+/** Characters-per-prompt cap for file context sent to the AI */
+const TASK_FILE_CHAR_CAP = 24_000
+/** Max files loaded per task */
+const TASK_FILE_CAP = 5
 
 interface PlanTask {
   id: string
-  component_id: string | null
   description: string
   order_index: number
   status: string
-  new_file_path: string | null
+  files: string[]
 }
 
 interface ExecutionState {
   iteration: number
   aiCallCount: number
   startedAt: number
-  acceptedPatches: FilePatch[]
+  /** File writes that passed all checks — applied at the start of each iteration */
+  acceptedFileWrites: { path: string; content: string }[]
   acceptedNewFiles: NewFileCreation[]
   executionScope: ExecutionScope
   errorHistory: Map<string, number>
@@ -220,58 +213,26 @@ export async function runExecution(
     if (!(project as any).repo_url) throw new Error('No repository configured')
     if (!(project as any).repo_token) throw new Error('No access token configured')
 
-    // Load tasks
+    // Load tasks — ordered by plan's order_index (DB→UI order matches plan intent)
     const { data: rawTasks } = await db
       .from('change_plan_tasks')
-      .select('id, component_id, description, order_index, status, new_file_path')
+      .select('id, description, order_index, status, files')
       .eq('plan_id', plan.id)
       .order('order_index', { ascending: true })
-    const allTasks: PlanTask[] = rawTasks ?? []
+    const allTasks: PlanTask[] = (rawTasks ?? []).map(t => ({
+      ...t,
+      files: (t.files ?? []) as string[],
+    }))
 
-    // Load impacted components for ordering
-    const componentTypeMap: Record<string, string> = {}
-    const componentFileMap: Record<string, string[]> = {}
+    // Reset any in_progress tasks left over from this run (safe — scoped to runId)
+    await db
+      .from('change_plan_tasks')
+      .update({ status: 'pending', locked_by_run_id: null })
+      .eq('plan_id', plan.id)
+      .eq('locked_by_run_id', runId)
+      .eq('status', 'in_progress')
 
-    const { data: impact } = await db
-      .from('change_impacts')
-      .select('id')
-      .eq('change_id', changeId)
-      .maybeSingle()
-
-    if (impact) {
-      const { data: impactComponents } = await db
-        .from('change_impact_components')
-        .select('component_id, system_components(name, type)')
-        .eq('impact_id', impact.id)
-        .order('impact_weight', { ascending: false })
-        .limit(20)
-
-      for (const ic of (impactComponents ?? []) as unknown as Array<{ component_id: string; system_components: { name: string; type: string } | null }>) {
-        if (ic.system_components) {
-          componentTypeMap[ic.component_id] = ic.system_components.type
-        }
-      }
-
-      for (const componentId of Object.keys(componentTypeMap)) {
-        const { data: assignments } = await db
-          .from('component_assignment')
-          .select('file_id, files(path)')
-          .eq('component_id', componentId)
-          .eq('is_primary', true)
-        componentFileMap[componentId] = ((assignments ?? []) as unknown as Array<{ files: { path: string } | null }>)
-          .map(a => a.files?.path)
-          .filter(Boolean) as string[]
-      }
-    }
-
-    const plannedFiles = Object.values(componentFileMap).flat()
-
-    // Sort tasks leaf-first
-    const sortedTasks = [...allTasks].sort((a, b) => {
-      const depthA = COMPONENT_DEPTH[componentTypeMap[a.component_id ?? ''] ?? ''] ?? 3
-      const depthB = COMPONENT_DEPTH[componentTypeMap[b.component_id ?? ''] ?? ''] ?? 3
-      return depthA - depthB
-    })
+    const plannedFiles = [...new Set(allTasks.flatMap(t => t.files))]
 
     const branch = (plan as { branch_name?: string }).branch_name ?? `sf/${changeId.slice(0, 8)}-exec`
 
@@ -279,7 +240,7 @@ export async function runExecution(
       iteration: 0,
       aiCallCount: 0,
       startedAt: Date.now(),
-      acceptedPatches: [],
+      acceptedFileWrites: [],
       acceptedNewFiles: [],
       executionScope: { plannedFiles, addedViaPropagation: [] },
       errorHistory: new Map(),
@@ -356,7 +317,7 @@ export async function runExecution(
     // Per-file type-check errors from failed iterations — fed back into the prompt on retry
     const newFileTypeErrors = new Map<string, string>()
 
-    let pendingTasks = sortedTasks.filter(t => t.status === 'pending')
+    let pendingTasks = allTasks.filter(t => t.status === 'pending')
     let fullSuccess = false
     // Delta tracking for the final summary
     let firstIterationErrorSigs: string[] = []
@@ -380,150 +341,116 @@ export async function runExecution(
         pct,
       }).catch(err => console.warn('[dashboard] progress event failed:', err))
 
-      await executor.resetIteration(env, state.acceptedPatches)
+      await executor.resetIteration(env, state.acceptedFileWrites)
       for (const nf of state.acceptedNewFiles) {
         await executor.createFile(env, nf.path, nf.content)
       }
 
-      const iterationPatches: FilePatch[] = []
+      const iterationFileWrites: { path: string; content: string }[] = []
       const iterationNewFiles: NewFileCreation[] = []
-      // processedTaskIds: tasks touched this iteration (used to filter pendingTasks after success)
+      // processedTaskIds: tasks that completed this iteration (used to filter pendingTasks after success)
       const processedTaskIds: string[] = []
+      // patchedThisIteration: current on-disk content for files written this iteration.
+      // Each task sees the most recent content from earlier tasks in the same iteration.
+      const patchedThisIteration = new Map<string, string>()
+
+      await insertEvent(db, {
+        runId, changeId, seq: seq(), iteration: state.iteration,
+        eventType: 'iteration.started',
+        payload: { pendingTaskCount: pendingTasks.length },
+      })
 
       for (const task of pendingTasks) {
         if (state.aiCallCount >= limits.maxAiCalls) break
 
         await log('verbose', `Task: ${task.description}`)
-        const filePaths = componentFileMap[task.component_id ?? ''] ?? []
 
-        // No files to modify — mark done immediately (or create new file if specified)
-        if (filePaths.length === 0) {
-          if (task.new_file_path && state.aiCallCount < limits.maxAiCalls) {
-            const prompt = buildNewFilePrompt(
-              { description: task.description, intent: (change as { intent: string }).intent },
-              task.new_file_path,
-              newFileTypeErrors.get(task.new_file_path),
-              availablePackages
-            )
-            state.aiCallCount++
-            const aiResult = await ai.complete(prompt, { maxTokens: 4096 })
-            let parsed: { newFileContent?: string; confidence?: number } = {}
-            try { parsed = parseAiJson(aiResult.content) } catch { /* skip */ }
-            const newContent = parsed.newFileContent ?? ''
-            const confidence = parsed.confidence ?? 0
-            if (newContent && confidence >= limits.confidenceThreshold) {
-              const result = await executor.createFile(env, task.new_file_path, newContent)
-              if (result.success) {
-                iterationNewFiles.push({ path: task.new_file_path, content: newContent })
-                await log('success', `Created ${task.new_file_path}`)
-              } else {
-                await log('error', `Failed to create ${task.new_file_path}: ${result.error}`)
-              }
-            }
-            const created = iterationNewFiles.some(f => f.path === task.new_file_path)
-            if (!created) {
-              await log('verbose', `Skipped new file — confidence below threshold or AI error`)
-              continue  // leave task pending so the next iteration retries it
-            }
-          }
+        // Claim task with run-scoped lock so a crash-restart doesn't re-process in_progress tasks
+        await db.from('change_plan_tasks')
+          .update({ status: 'in_progress', locked_by_run_id: runId })
+          .eq('id', task.id)
+
+        const taskFiles = task.files.filter(isPathAllowed).slice(0, TASK_FILE_CAP)
+
+        // No files listed — nothing for the AI to implement; mark done and continue
+        if (taskFiles.length === 0) {
           processedTaskIds.push(task.id)
-          await db.from('change_plan_tasks').update({ status: 'done' }).eq('id', task.id).eq('plan_id', plan.id)
-          await log('verbose', `Done`)
+          await db.from('change_plan_tasks').update({ status: 'done' }).eq('id', task.id)
+          await log('verbose', `Done (no files)`)
           continue
         }
 
-        // Process each file in the component
-        for (const filePath of filePaths) {
-          const localFilePath = join(env.localWorkDir, filePath)
-          let fileContent: string
-          try {
-            fileContent = await readFile(localFilePath, 'utf8')
-          } catch {
-            continue
+        // ── Select file context within token budget ────────────────────────
+        const fileContexts: TaskFileContext[] = []
+        let charBudget = TASK_FILE_CHAR_CAP
+
+        for (const filePath of taskFiles) {
+          // Use in-iteration written content first (idempotency anchor)
+          const inMemory = patchedThisIteration.get(filePath)
+          if (inMemory !== undefined) {
+            const chars = Math.min(inMemory.length, charBudget)
+            fileContexts.push({ path: filePath, content: inMemory.slice(0, chars), isNew: false })
+            charBudget -= chars
+          } else {
+            try {
+              const raw = await readFile(join(env.localWorkDir, filePath), 'utf8')
+              const chars = Math.min(raw.length, charBudget)
+              fileContexts.push({ path: filePath, content: raw.slice(0, chars), isNew: false })
+              charBudget -= chars
+            } catch {
+              // File doesn't exist yet — treat as new
+              fileContexts.push({ path: filePath, content: '', isNew: true })
+            }
           }
+          if (charBudget <= 0) break
+        }
 
-          // Extract first function as target (heuristic)
-          const tsProject = new Project({ useInMemoryFileSystem: true, skipAddingFilesFromTsConfig: true })
-          const sf = tsProject.createSourceFile(filePath, fileContent, { overwrite: true })
-          const functions = sf.getFunctions()
-          if (functions.length === 0) {
-            continue
+        const previousErrors = taskFiles
+          .map(f => newFileTypeErrors.get(f))
+          .filter(Boolean)
+          .join('\n')
+
+        const prompt = buildTaskImplementationPrompt(
+          { description: task.description, intent: (change as { intent: string }).intent },
+          fileContexts,
+          previousErrors || undefined,
+        )
+
+        state.aiCallCount++
+        const aiResult = await ai.complete(prompt, { maxTokens: 8192 })
+
+        let parsed: { files?: { path: string; content: string }[]; confidence?: number } = {}
+        try { parsed = parseAiJson(aiResult.content) } catch { /* leave empty */ }
+
+        const confidence = parsed.confidence ?? 0
+        const writtenPaths: string[] = []
+
+        for (const fw of (parsed.files ?? []).filter(f => isPathAllowed(f.path)).slice(0, TASK_FILE_CAP)) {
+          if (!fw.content) continue
+          const result = await executor.createFile(env, fw.path, fw.content)
+          if (result.success) {
+            iterationFileWrites.push({ path: fw.path, content: fw.content })
+            patchedThisIteration.set(fw.path, fw.content)
+            writtenPaths.push(fw.path)
           }
+        }
 
-          const targetFn = functions[0]!
-          const fnName = (targetFn as unknown as { getName(): string | undefined }).getName() ?? 'unknown'
-          const ctx = extractSymbol(filePath, fileContent, fnName, [])
-          if (!ctx) {
-            continue
-          }
-
-          const contextMode = chooseContextMode(ctx, limits)
-          const inputHash = hashInput(ctx, task.description)
-
-          // Build prompt
-          const prompt = contextMode === 'file'
-            ? buildFilePatchPrompt({ description: task.description, intent: (change as { intent: string }).intent }, fileContent, filePath)
-            : buildSymbolPatchPrompt({ description: task.description, intent: (change as { intent: string }).intent }, ctx)
-
-          state.aiCallCount++
-          const aiResult = await ai.complete(prompt, { maxTokens: 4096 })
-
-          let parsed: { newContent?: string; newFileContent?: string; confidence?: number; requiresPropagation?: boolean } = {}
-          try { parsed = parseAiJson(aiResult.content) } catch { continue }
-
-          const newContent = parsed.newContent ?? parsed.newFileContent ?? ''
-          if (!newContent) {
-            continue
-          }
-
-          const confidence = parsed.confidence ?? 0
-          if (confidence < limits.confidenceThreshold) continue
-
-          const patch: FilePatch = {
-            path: filePath,
-            locator: ctx.locator,
-            originalContent: ctx.code,
-            newContent,
-            confidence,
-            requiresPropagation: parsed.requiresPropagation ?? false,
-            allowedChanges: { symbols: [ctx.symbolName], intent: task.description },
-          }
-
-          // Validate
-          const validateProject = new Project({ useInMemoryFileSystem: true, skipAddingFilesFromTsConfig: true })
-          const validateSf = validateProject.createSourceFile(filePath, fileContent, { overwrite: true })
-          const validation = validatePatch(validateSf, patch)
-          if (!validation.valid) {
-            await recordTrace(db, {
-              changeId, iteration: state.iteration, taskId: task.id,
-              contextMode, inputHash, outputHash: null,
-              strategyUsed: 'initial', failureType: 'syntax', confidence,
-            })
-            continue
-          }
-
-          const patchResult = await executor.applyPatch(env, patch)
-          if (!patchResult.success) continue
-
-          await recordTrace(db, {
-            changeId, iteration: state.iteration, taskId: task.id,
-            contextMode, inputHash, outputHash: hashOutput(patch),
-            strategyUsed: 'initial', failureType: null, confidence,
-          })
-
-          iterationPatches.push(patch)
+        if (writtenPaths.length === 0) {
+          await log('verbose', `Task skipped — AI returned no applicable file writes (confidence ${confidence.toFixed(2)})`)
+          // Leave in_progress / locked — next iteration will retry
+          continue
         }
 
         processedTaskIds.push(task.id)
-        // Mark done immediately so the UI shows live task-by-task progress.
-        // pendingTasks is tracked in-memory, so failed iterations still retry these tasks.
-        await db.from('change_plan_tasks').update({ status: 'done' }).eq('id', task.id).eq('plan_id', plan.id)
-        await log('verbose', `Done`)
+        await db.from('change_plan_tasks')
+          .update({ status: 'done', locked_by_run_id: null })
+          .eq('id', task.id)
+        await log('verbose', `Done · wrote ${writtenPaths.join(', ')} (confidence ${confidence.toFixed(2)})`)
       }
 
       // ── Re-install if package.json changed ────────────────────────────────
-      const pkgChanged = [...iterationPatches, ...iterationNewFiles].some(
-        f => (f as { path: string }).path === 'package.json'
+      const pkgChanged = [...iterationFileWrites, ...iterationNewFiles].some(
+        f => f.path === 'package.json'
       )
       if (pkgChanged) {
         await log('info', 'package.json changed — running npm install…')
@@ -633,10 +560,14 @@ export async function runExecution(
           break
         }
         iterationHistory.push(currRecord)
-        // Record TSC errors on newly-created files so the next iteration's prompt
-        // includes them as `previousError` — the AI can learn from its own mistakes.
+        // Record TSC errors on files written this iteration so the next iteration's prompt
+        // includes them as `previousErrors` — the AI can learn from its own mistakes.
+        const writtenThisIteration = new Set([
+          ...iterationFileWrites.map(fw => fw.path),
+          ...iterationNewFiles.map(f => f.path),
+        ])
         for (const err of newTypeErrors) {
-          if (iterationNewFiles.some(f => f.path === err.file)) {
+          if (writtenThisIteration.has(err.file)) {
             const prev = newFileTypeErrors.get(err.file)
             newFileTypeErrors.set(
               err.file,
@@ -837,8 +768,10 @@ export async function runExecution(
 
       // ── Behavioral checks ─────────────────────────────────────────────────
       const behavioralScope: BehavioralScope = {
-        patches: iterationPatches,
-        criticalComponentTouched: Object.values(componentTypeMap).some(t => ['auth', 'db'].includes(t)),
+        patches: [],
+        criticalComponentTouched: iterationFileWrites.some(fw =>
+          /migration|auth|supabase/.test(fw.path)
+        ),
       }
       const behavResult = await executor.runBehavioralChecks(env, behavioralScope)
       if (!behavResult.passed) {
@@ -850,9 +783,9 @@ export async function runExecution(
       }
 
       // All checks passed for this iteration
-      state.acceptedPatches.push(...iterationPatches)
+      state.acceptedFileWrites.push(...iterationFileWrites)
       state.acceptedNewFiles.push(...iterationNewFiles)
-      allFilesChanged = [...new Set([...allFilesChanged, ...iterationPatches.map(p => p.path), ...iterationNewFiles.map(f => f.path)])]
+      allFilesChanged = [...new Set([...allFilesChanged, ...iterationFileWrites.map(fw => fw.path), ...iterationNewFiles.map(f => f.path)])]
 
       await writeSnapshot(
         db, changeId, state, 'passed', false,
@@ -1106,7 +1039,7 @@ export async function runExecution(
     enrichSnapshotWithRetry(db, projectId, changeId, {
       stagesCompleted: [`iteration_${state.iteration}`],
       filesModified,
-      componentsAffected: Object.keys(componentTypeMap),
+      componentsAffected: [],
       durationMs: Date.now() - state.startedAt,
     }).catch(() => {})
 
