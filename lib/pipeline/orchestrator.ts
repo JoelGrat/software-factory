@@ -153,7 +153,8 @@ export async function runPipeline(
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle()
-        const driftRatio = (impactRow as any)?.drift_ratio ?? 0
+        const impactData = impactRow as { drift_ratio?: number; direct_seeds?: number } | null
+        const driftRatio = impactData?.drift_ratio ?? 0
         const riskScore = scoreFromPlan(currentPlanJson, driftRatio)
         await db.from('change_requests').update({
           risk_level: riskScore.riskLevel,
@@ -169,7 +170,8 @@ export async function runPipeline(
       .select('plan_quality_score')
       .eq('id', planId)
       .single()
-    const qualityScore = (planMeta as any)?.plan_quality_score ?? 1.0
+    const planData = planMeta as { plan_quality_score?: number } | null
+    const qualityScore = planData?.plan_quality_score ?? 1.0
     if (planId && currentPlanJson) {
       await finalizePlan(db, planId, currentPlanJson, qualityScore)
       await applyExecutionPolicy(changeId, planId, qualityScore, db, ai)
@@ -201,16 +203,20 @@ async function applyExecutionPolicy(
     .single()
   if (!change) return
 
+  const changeData = change as { project_id: string; risk_level?: string }
+
   const { data: projectRow } = await db
     .from('projects')
     .select('project_settings')
-    .eq('id', (change as any).project_id)
+    .eq('id', changeData.project_id)
     .single()
 
-  const riskPolicy = (projectRow?.project_settings as any)?.riskPolicy ?? {
+  const projectData = projectRow as { project_settings?: { riskPolicy?: Record<string, string> } } | null
+
+  const riskPolicy = projectData?.project_settings?.riskPolicy ?? {
     low: 'auto', medium: 'approval', high: 'manual',
   }
-  const riskLevel: string = (change as any).risk_level ?? 'low'
+  const riskLevel: string = changeData.risk_level ?? 'low'
 
   let policy: 'auto' | 'approval' | 'manual' = riskPolicy[riskLevel] ?? 'manual'
   if (policy === 'auto' && qualityScore < 0.5) policy = 'approval'
@@ -233,7 +239,13 @@ async function applyExecutionPolicy(
 }
 
 function buildFailure(err: unknown): PlannerFailure {
-  const e = err as any
+  interface CaughtError {
+    _stage?: PlannerStage
+    _diagnostics?: unknown
+    message?: string
+    diagnostics?: { issues: string[]; summary: string }
+  }
+  const e = err as CaughtError
   const stage: PlannerStage = e?._stage ?? guessStageFromMessage(e?.message)
   const isQualityGate = err instanceof PlanQualityGateError
   const rawMessage: string = e?.message ?? String(err)
