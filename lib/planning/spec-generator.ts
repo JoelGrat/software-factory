@@ -55,15 +55,16 @@ async function loadProjectContext(db: SupabaseClient, projectId: string): Promis
   return project ? `Project: ${project.name}. ${project.description ?? ''}`.trim() : ''
 }
 
-function buildSpecPrompt(
+async function generateCanonicalSpec(
   change: { title: string; intent: string; type: string },
   context: {
     candidateComponents: string[]
     likelyFilePaths: string[]
     assumptions: string[]
     projectContext: string
-  }
-): string {
+  },
+  ai: AIProvider
+): Promise<{ spec: ChangeSpec; markdown: string }> {
   const lines = [
     'You are generating a software specification for a change request.',
     '',
@@ -99,30 +100,7 @@ Be specific and concrete. Avoid vague language.
 
 Respond with JSON.`)
 
-  return lines.join('\n')
-}
-
-export async function generateSpec(
-  changeId: string,
-  db: SupabaseClient,
-  ai: AIProvider
-): Promise<{ spec: ChangeSpec; markdown: string }> {
-  const { data: change } = await db
-    .from('change_requests')
-    .select('id, project_id, title, intent, type')
-    .eq('id', changeId)
-    .single()
-  if (!change) throw new Error(`Change not found: ${changeId}`)
-
-  const [candidateComponents, projectContext] = await Promise.all([
-    inferCandidateComponents(change, db, change.project_id),
-    loadProjectContext(db, change.project_id),
-  ])
-  const likelyFilePaths = inferLikelyFilePaths(change)
-  const assumptions = deriveAssumptions(change)
-
-  const prompt = buildSpecPrompt(change, { candidateComponents, likelyFilePaths, assumptions, projectContext })
-
+  const prompt = lines.join('\n')
   const result = await ai.complete(prompt, {
     responseSchema: {
       type: 'object',
@@ -154,4 +132,26 @@ export async function generateSpec(
     out_of_scope: parsed.out_of_scope,
   }
   return { spec, markdown: parsed.markdown }
+}
+
+export async function generateSpec(
+  changeId: string,
+  db: SupabaseClient,
+  ai: AIProvider
+): Promise<{ spec: ChangeSpec; markdown: string }> {
+  const { data: change } = await db
+    .from('change_requests')
+    .select('id, project_id, title, intent, type')
+    .eq('id', changeId)
+    .single()
+  if (!change) throw new Error(`Change not found: ${changeId}`)
+
+  const [candidateComponents, projectContext] = await Promise.all([
+    inferCandidateComponents(change, db, change.project_id),
+    loadProjectContext(db, change.project_id),
+  ])
+  const likelyFilePaths = inferLikelyFilePaths(change)
+  const assumptions = deriveAssumptions(change)
+
+  return generateCanonicalSpec(change, { candidateComponents, likelyFilePaths, assumptions, projectContext }, ai)
 }
