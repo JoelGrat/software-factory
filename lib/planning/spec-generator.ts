@@ -25,11 +25,12 @@ async function inferCandidateComponents(
   db: SupabaseClient,
   projectId: string
 ): Promise<string[]> {
-  const { data: components } = await db
+  const { data: components, error } = await db
     .from('system_components')
     .select('name')
     .eq('project_id', projectId)
     .is('deleted_at', null)
+  if (error) console.warn(`inferCandidateComponents: failed to load components for project ${projectId}:`, error.message)
   if (!components?.length) return []
 
   const searchTerms = [
@@ -47,11 +48,12 @@ async function inferCandidateComponents(
 }
 
 async function loadProjectContext(db: SupabaseClient, projectId: string): Promise<string> {
-  const { data: project } = await db
+  const { data: project, error } = await db
     .from('projects')
     .select('name, description')
     .eq('id', projectId)
     .single()
+  if (error) console.warn(`loadProjectContext: failed to load project ${projectId}:`, error.message)
   return project ? `Project: ${project.name}. ${project.description ?? ''}`.trim() : ''
 }
 
@@ -120,7 +122,13 @@ Respond with JSON.`)
     maxTokens: 4096,
   })
 
-  const parsed = JSON.parse(result.content)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let parsed: any
+  try {
+    parsed = JSON.parse(result.content)
+  } catch {
+    throw new Error(`Spec generation produced non-JSON response: ${result.content.slice(0, 200)}`)
+  }
   const spec: ChangeSpec = {
     problem:      parsed.problem,
     goals:        parsed.goals,
