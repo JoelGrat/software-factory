@@ -79,34 +79,28 @@ const RISK_COLORS: Record<string, string> = {
 }
 
 const ANALYZING_STATUSES = ['analyzing', 'analyzing_mapping', 'analyzing_propagation', 'analyzing_scoring', 'planning']
-const PIPELINE_IN_PROGRESS_STATUSES = ['validated', 'draft_planning', 'draft_planned', 'impact_analyzing', 'impact_analyzed', 'plan_generating']
-
-const ANALYSIS_STEPS = [
-  { label: 'Mapping intent → components', statuses: ['analyzing', 'analyzing_mapping'] },
-  { label: 'Propagating dependency graph', statuses: ['analyzing_propagation'] },
-  { label: 'Computing risk score', statuses: ['analyzing_scoring'] },
+const PIPELINE_IN_PROGRESS_STATUSES = [
+  'spec_generating', 'spec_generated',
+  'plan_generating', 'plan_generated',
+  'impact_analyzing', 'impact_analyzed',
+  'scoring', 'scored',
 ]
 
-const PLANNING_SUBSTEPS = [
-  'Drafting plan outline',
-  'Mapping tasks to components',
-  'Generating implementation steps',
-  'Estimating scope and files',
-  'Finalising plan',
+const PIPELINE_STEPS = [
+  { label: 'Generating specification', statuses: ['spec_generating', 'spec_generated'] },
+  { label: 'Building execution plan',  statuses: ['plan_generating', 'plan_generated'] },
+  { label: 'Analyzing impact',         statuses: ['impact_analyzing', 'impact_analyzed'] },
+  { label: 'Scoring risk',             statuses: ['scoring', 'scored'] },
 ]
 
-/** Map pipeline_status → the substep index the pipeline is currently at.
- *  Used to seed the animation from the correct position when the user re-enters the page. */
+/** Map pipeline_status → which pipeline step is currently active (0-indexed). */
 function stepFromPipelineStatus(pipelineStatus: string | null): number {
-  switch (pipelineStatus) {
-    case 'validated':
-    case 'draft_planning':   return 0
-    case 'draft_planned':    return 1
-    case 'impact_analyzing': return 2
-    case 'impact_analyzed':  return 3
-    case 'plan_generating':  return 4
-    default:                 return 0
-  }
+  if (!pipelineStatus) return 0
+  if (['spec_generating', 'spec_generated'].includes(pipelineStatus))   return 0
+  if (['plan_generating', 'plan_generated'].includes(pipelineStatus))   return 1
+  if (['impact_analyzing', 'impact_analyzed'].includes(pipelineStatus)) return 2
+  if (['scoring', 'scored'].includes(pipelineStatus))                   return 3
+  return 0
 }
 
 function ComponentImpactRow({ ic }: { ic: ImpactComponent }) {
@@ -178,7 +172,7 @@ export function ChangeDetailView({
   const [generatingSpec, setGeneratingSpec] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [deleting, setDeleting] = useState(false)
-  const [planningStep, setPlanningStep] = useState(() => stepFromPipelineStatus(initial.pipeline_status))
+  const [pipelineStep, setPipelineStep] = useState(() => stepFromPipelineStatus(initial.pipeline_status))
   const isAnalyzing = ANALYZING_STATUSES.includes(change.status) || PIPELINE_IN_PROGRESS_STATUSES.includes(change.pipeline_status ?? '')
   const canDelete = change.status !== 'done'
 
@@ -416,20 +410,10 @@ export function ChangeDetailView({
     return () => clearInterval(id)
   }, [change.id, isAnalyzing, router])
 
-  // When pipeline_status advances (via polling), jump the substep display forward.
-  // For the legacy status='planning' path (no pipeline_status granularity) use a timer.
+  // When pipeline_status advances (via polling), move the step indicator forward.
   useEffect(() => {
-    if (PIPELINE_IN_PROGRESS_STATUSES.includes(change.pipeline_status ?? '')) {
-      setPlanningStep(stepFromPipelineStatus(change.pipeline_status))
-      return
-    }
-    if (change.status !== 'planning') return
-    // Legacy path: no pipeline_status signal — advance on a timer
-    const id = setInterval(() => {
-      setPlanningStep(s => Math.min(s + 1, PLANNING_SUBSTEPS.length - 1))
-    }, 7000)
-    return () => clearInterval(id)
-  }, [change.status, change.pipeline_status])
+    setPipelineStep(stepFromPipelineStatus(change.pipeline_status))
+  }, [change.pipeline_status])
 
   useEffect(() => {
     if (!toast) return
@@ -500,105 +484,35 @@ export function ChangeDetailView({
               <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap">{change.intent}</p>
             </div>
 
-            {/* Analysis state */}
+            {/* Pipeline in-progress state */}
             {isAnalyzing ? (
               <div className="rounded-xl bg-[#131b2e] border border-white/5 overflow-hidden">
                 <p className="text-xs font-bold uppercase tracking-widest text-slate-400 font-headline px-6 pt-5 pb-4">
-                  {change.status === 'planning' ? 'Generating Plan' : 'Impact Analysis'}
+                  Planning
                 </p>
-
-                {change.status === 'planning' ? (
-                  <div className="px-6 pb-5 space-y-5">
-                    {/* Animated substeps */}
-                    <div className="space-y-2.5">
-                      {PLANNING_SUBSTEPS.map((label, i) => {
-                        const isActive = i === planningStep
-                        const isDone = i < planningStep
-                        return (
-                          <div key={label} className="flex items-center gap-3">
-                            {isActive ? (
-                              <span className="relative flex h-2 w-2 flex-shrink-0">
-                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
-                                <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-400" />
-                              </span>
-                            ) : isDone ? (
-                              <span className="h-2 w-2 rounded-full bg-green-400 flex-shrink-0" />
-                            ) : (
-                              <span className="h-2 w-2 rounded-full bg-slate-700 flex-shrink-0" />
-                            )}
-                            <span className={`text-sm ${isActive ? 'text-slate-200' : isDone ? 'text-slate-500' : 'text-slate-600'}`}>
-                              {label}
-                            </span>
-                          </div>
-                        )
-                      })}
-                    </div>
-
-                    {/* Scope context derived from impact analysis */}
-                    {(impactComponents.length > 0 || impact) && (
-                      <div className="border-t border-white/5 pt-4 space-y-3">
-                        {impact && (
-                          <div className="flex items-center gap-4 text-[11px] font-mono text-slate-500">
-                            {impact.blast_radius !== null && (
-                              <span>{impact.blast_radius} component{impact.blast_radius !== 1 ? 's' : ''} in scope</span>
-                            )}
-                            {change.risk_level && (
-                              <span className={`px-1.5 py-0.5 rounded uppercase tracking-wider text-[10px] ${RISK_COLORS[change.risk_level] ?? 'text-slate-400 bg-slate-700'}`}>
-                                {change.risk_level} risk
-                              </span>
-                            )}
-                            {impact.requires_migration && (
-                              <span className="text-amber-400/70">migration required</span>
-                            )}
-                          </div>
+                <div className="px-6 pb-5 space-y-2.5">
+                  {PIPELINE_STEPS.map((step, i) => {
+                    const isActive = i === pipelineStep
+                    const isDone = i < pipelineStep
+                    return (
+                      <div key={step.label} className="flex items-center gap-3">
+                        {isActive ? (
+                          <span className="relative flex h-2 w-2 flex-shrink-0">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-400" />
+                          </span>
+                        ) : isDone ? (
+                          <span className="h-2 w-2 rounded-full bg-green-400 flex-shrink-0" />
+                        ) : (
+                          <span className="h-2 w-2 rounded-full bg-slate-700 flex-shrink-0" />
                         )}
-                        {impactComponents.length > 0 && (
-                          <div>
-                            <p className="text-[10px] uppercase tracking-widest text-slate-600 font-headline mb-2">Planning coverage for</p>
-                            <div className="flex flex-wrap gap-1.5">
-                              {impactComponents.slice(0, 8).map(ic => (
-                                <span key={ic.component_id} className="flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded bg-indigo-400/8 text-indigo-300/70 border border-indigo-400/10">
-                                  <span className="text-[9px] text-indigo-400/50 uppercase">{ic.system_components?.type ?? '?'}</span>
-                                  <span>{ic.system_components?.name ?? ic.component_id}</span>
-                                </span>
-                              ))}
-                              {impactComponents.length > 8 && (
-                                <span className="text-[11px] font-mono text-slate-600 px-2 py-0.5">+{impactComponents.length - 8} more</span>
-                              )}
-                            </div>
-                          </div>
-                        )}
+                        <span className={`text-sm ${isActive ? 'text-slate-200' : isDone ? 'text-slate-500' : 'text-slate-600'}`}>
+                          {step.label}
+                        </span>
                       </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="px-6 pb-5 space-y-3">
-                    {(() => {
-                      const currentStepIndex = ANALYSIS_STEPS.findIndex(s => s.statuses.includes(change.status))
-                      return ANALYSIS_STEPS.map((step, i) => {
-                        const isActive = step.statuses.includes(change.status)
-                        const isDone = i < currentStepIndex
-                        return (
-                          <div key={step.label} className="flex items-center gap-3">
-                            {isActive ? (
-                              <span className="relative flex h-2 w-2 flex-shrink-0">
-                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
-                                <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-400" />
-                              </span>
-                            ) : isDone ? (
-                              <span className="h-2 w-2 rounded-full bg-green-400 flex-shrink-0" />
-                            ) : (
-                              <span className="h-2 w-2 rounded-full bg-slate-700 flex-shrink-0" />
-                            )}
-                            <span className={`text-sm ${isActive ? 'text-slate-200' : isDone ? 'text-slate-500' : 'text-slate-600'}`}>
-                              {step.label}
-                            </span>
-                          </div>
-                        )
-                      })
-                    })()}
-                  </div>
-                )}
+                    )
+                  })}
+                </div>
               </div>
             ) : change.status === 'open' ? (
               <div className="rounded-xl p-6 bg-[#131b2e] border border-white/5 text-center">
@@ -608,7 +522,7 @@ export function ChangeDetailView({
                   onClick={async () => {
                     const res = await fetch(`/api/change-requests/${change.id}/analyze`, { method: 'POST' })
                     if (res.ok) {
-                      setChange(c => ({ ...c, status: 'analyzing_mapping' }))
+                      setChange(c => ({ ...c, status: 'planning', pipeline_status: 'spec_generating' }))
                     }
                   }}
                   className="px-4 py-2 rounded-lg bg-indigo-500 hover:bg-indigo-400 text-white text-sm font-bold font-headline transition-colors"

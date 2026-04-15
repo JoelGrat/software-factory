@@ -84,13 +84,14 @@ const ANALYZING_STAGE_LABELS: Record<string, string> = {
 }
 
 const PIPELINE_STATUS_LABELS: Record<string, string> = {
-  validated:        'Starting…',
-  draft_planning:   'Drafting plan…',
-  draft_planned:    'Draft ready…',
+  spec_generating:  'Generating specification…',
+  spec_generated:   'Specification ready…',
+  plan_generating:  'Building execution plan…',
+  plan_generated:   'Plan generated…',
   impact_analyzing: 'Analyzing impact…',
   impact_analyzed:  'Impact analyzed…',
-  plan_generating:  'Generating implementation plan…',
-  plan_generated:   'Plan ready',
+  scoring:          'Scoring risk…',
+  scored:           'Risk scored…',
 }
 
 const EXEC_STAGE_LABELS: Record<string, string> = {
@@ -141,9 +142,8 @@ function getCardState(change: ChangeCard, events: DashboardEvent[]): CardState {
 
   // Pipeline in-progress statuses (no events yet — new pipeline path)
   if (!latest && PIPELINE_STATUS_LABELS[change.pipelineStatus]) {
-    const isPlanning = ['plan_generating', 'plan_generated'].includes(change.pipelineStatus)
     return {
-      phase: isPlanning ? 'analyzing' : 'analyzing',
+      phase: 'analyzing',
       statusLine: PIPELINE_STATUS_LABELS[change.pipelineStatus],
       subLine: null,
       pct: null,
