@@ -4,6 +4,7 @@ import type { CodeExecutor } from './executors/code-executor'
 import type { ExecutionEnvironment } from './types'
 import type { DiagnosticSet } from './execution-types-v2'
 import { insertEvent } from './event-emitter'
+import { selectTests } from './test-selector'
 
 export interface TaskValidationResult {
   passed: boolean
@@ -36,6 +37,7 @@ export async function runTaskValidation(
   env: ExecutionEnvironment,
   opts: TaskValidatorOptions,
 ): Promise<TaskValidationResult> {
+  const startMs = Date.now()
   const { taskId, taskIndex, taskFiles, baselineTypeErrorSigs, runId, changeId, seq } = opts
 
   await insertEvent(db, {
@@ -83,7 +85,6 @@ export async function runTaskValidation(
   }
 
   // ── Layer 2: Scoped tests ─────────────────────────────────────────────────
-  const { selectTests } = await import('./test-selector')
   const testScope = await selectTests(db, taskFiles, 'low')
   const testResult = await executor.runTests(env, testScope)
 
@@ -107,7 +108,7 @@ export async function runTaskValidation(
   await insertEvent(db, {
     runId, changeId, seq: seq(), iteration: taskIndex,
     eventType: 'task.validation_passed',
-    payload: { taskId, durationMs: 0 },
+    payload: { taskId, durationMs: Date.now() - startMs },
   })
 
   return { passed: true, typeErrors: null, testFailures: null, expandedFiles: [] }
