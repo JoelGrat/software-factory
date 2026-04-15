@@ -19,6 +19,9 @@ export const EVENT_TYPES = [
   'commit.green', 'commit.wip', 'commit.skipped', 'commit.failed',
   'infra.retrying',
   'log.info', 'log.success', 'log.error',
+  'task.started', 'task.validation_started', 'task.validation_passed', 'task.validation_failed',
+  'task.repair_started', 'task.repair_completed',
+  'task.completed', 'task.failed', 'task.blocked',
 ] as const
 
 export type EventType = typeof EVENT_TYPES[number]
@@ -122,6 +125,28 @@ export interface ExecutionSummary {
   unresolvedErrors: string[]
   /** Per-dimension confidence breakdown */
   confidence: ConfidenceDimensions
+}
+
+// ── Task-based execution summary ───────────────────────────────────────────────
+
+export interface TaskRunSummary {
+  completedTasks: string[]   // task IDs
+  failedTasks: string[]
+  blockedTasks: string[]
+  skippedTasks: string[]
+  totalTasks: number
+  durationMs: number
+  finalStatus: 'success' | 'partial' | 'failed'
+}
+
+export interface TaskBudget {
+  maxInlineRepairs: number
+  maxRepairPhaseAttempts: number
+}
+
+export const DEFAULT_TASK_BUDGET: TaskBudget = {
+  maxInlineRepairs: 3,
+  maxRepairPhaseAttempts: 2,
 }
 
 // ── Stuck detector ─────────────────────────────────────────────────────────────
