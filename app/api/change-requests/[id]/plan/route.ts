@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getProvider } from '@/lib/ai/registry'
-import { runPlanGenerationPhase } from '@/lib/pipeline/phases/plan-generation'
+import { runPipeline } from '@/lib/pipeline/orchestrator'
 
 export async function POST(
   _req: Request,
@@ -30,16 +30,10 @@ export async function POST(
     )
   }
 
-  // Ensure pipeline_status is set correctly for the phase precondition check
-  // and reset change status to 'planning' so the polling loop engages
   const adminDb = createAdminClient()
-  await adminDb.from('change_requests')
-    .update({ status: 'planning', pipeline_status: 'impact_analyzed' })
-    .eq('id', id)
-
   const ai = getProvider()
-  runPlanGenerationPhase(id, adminDb, ai).catch(err =>
-    console.error(`[plan-generation-phase] change ${id} failed:`, err)
+  runPipeline(id, adminDb, ai).catch((err: unknown) =>
+    console.error(`[pipeline] change ${id} failed:`, err)
   )
 
   return NextResponse.json({ status: 'planning' }, { status: 202 })

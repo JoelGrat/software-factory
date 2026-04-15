@@ -2,7 +2,6 @@
 // Appends a single task to the latest plan for a change request.
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { insertPlanTask } from '@/lib/planning/add-task'
 
 export async function POST(
   req: Request,
@@ -43,6 +42,21 @@ export async function POST(
     .select('order_index')
     .eq('plan_id', plan.id)
 
-  const task = await insertPlanTask(db, plan.id, description, existingTasks ?? [])
+  const maxIndex = (existingTasks ?? []).reduce(
+    (max: number, t: { order_index: number }) => Math.max(max, t.order_index),
+    -1
+  )
+  const { data: task, error } = await db
+    .from('change_plan_tasks')
+    .insert({
+      plan_id: plan.id,
+      component_id: null,
+      description,
+      order_index: maxIndex + 1,
+      status: 'pending',
+    })
+    .select()
+    .single()
+  if (error) throw error
   return NextResponse.json(task, { status: 201 })
 }
