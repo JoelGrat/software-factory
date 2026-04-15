@@ -109,6 +109,18 @@ export async function finalizePlan(
   if (error) throw new Error(`Failed to finalize plan: ${error.message}`)
 }
 
+export async function setPlanJson(
+  db: SupabaseClient,
+  planId: string,
+  planJson: DetailedPlan
+): Promise<void> {
+  const { error } = await db
+    .from('change_plans')
+    .update({ plan_json: planJson })
+    .eq('id', planId)
+  if (error) throw new Error(`Failed to set plan JSON: ${error.message}`)
+}
+
 export async function loadPlanForChange(
   db: SupabaseClient,
   changeId: string
