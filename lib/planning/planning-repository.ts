@@ -11,30 +11,40 @@ export async function createSpec(
   db: SupabaseClient,
   changeId: string,
   spec: ChangeSpec,
-  markdown: string,
-  version: number
+  markdown: string
 ): Promise<{ id: string }> {
+  const { data: existing, error: versionError } = await db
+    .from('change_specs')
+    .select('version')
+    .eq('change_id', changeId)
+    .order('version', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (versionError) throw new Error(`Failed to resolve spec version: ${versionError.message}`)
+  const version = ((existing as { version: number } | null)?.version ?? 0) + 1
+
   const { data, error } = await db
     .from('change_specs')
     .insert({ change_id: changeId, version, structured: spec, markdown })
     .select('id')
     .single()
   if (error || !data) throw new Error(`Failed to create spec: ${error?.message}`)
-  return data
+  return data as { id: string }
 }
 
 export async function loadSpecForChange(
   db: SupabaseClient,
   changeId: string
 ): Promise<{ id: string; structured: ChangeSpec; markdown: string } | null> {
-  const { data } = await db
+  const { data, error } = await db
     .from('change_specs')
     .select('id, structured, markdown')
     .eq('change_id', changeId)
     .order('version', { ascending: false })
     .limit(1)
     .maybeSingle()
-  return (data as any) ?? null
+  if (error) throw new Error(`Failed to load spec: ${error.message}`)
+  return data as { id: string; structured: ChangeSpec; markdown: string } | null
 }
 
 // ---- Plan ----
@@ -43,7 +53,6 @@ export async function createPlan(
   db: SupabaseClient,
   changeId: string,
   branchName: string,
-  planJson: DetailedPlan,
   plannerVersion: number
 ): Promise<{ id: string }> {
   const { data, error } = await db
@@ -52,40 +61,52 @@ export async function createPlan(
       change_id: changeId,
       status: 'draft',
       branch_name: branchName,
-      plan_json: planJson,
       version: 1,
       planner_version: plannerVersion,
       started_at: new Date().toISOString(),
-      current_stage: 'plan',
+      current_stage: 'spec',
     })
     .select('id')
     .single()
   if (error || !data) throw new Error(`Failed to create plan: ${error?.message}`)
-  return data
+  return data as { id: string }
 }
 
 export async function updatePlanStage(
   db: SupabaseClient,
   planId: string,
   stage: PlannerStage,
-  stageDurations: Record<string, number>
+  durationMs: number
 ): Promise<void> {
-  await db.from('change_plans').update({
-    current_stage: stage,
-    stage_durations: stageDurations,
-  }).eq('id', planId)
+  const { data: current, error: readError } = await db
+    .from('change_plans')
+    .select('stage_durations')
+    .eq('id', planId)
+    .single()
+  if (readError) throw new Error(`Failed to read plan stage durations: ${readError.message}`)
+  const existing = (current as { stage_durations: Record<string, number> | null } | null)?.stage_durations ?? {}
+  const merged = { ...existing, [stage]: durationMs }
+
+  const { error } = await db
+    .from('change_plans')
+    .update({ current_stage: stage, stage_durations: merged })
+    .eq('id', planId)
+  if (error) throw new Error(`Failed to update plan stage: ${error.message}`)
 }
 
 export async function finalizePlan(
   db: SupabaseClient,
   planId: string,
+  planJson: DetailedPlan,
   qualityScore: number
 ): Promise<void> {
-  await db.from('change_plans').update({
+  const { error } = await db.from('change_plans').update({
+    plan_json: planJson,
     current_stage: 'policy',
     plan_quality_score: qualityScore,
     ended_at: new Date().toISOString(),
   }).eq('id', planId)
+  if (error) throw new Error(`Failed to finalize plan: ${error.message}`)
 }
 
 export async function loadPlanForChange(
@@ -98,14 +119,21 @@ export async function loadPlanForChange(
   planner_version: number
   stage_durations: Record<string, number>
 } | null> {
-  const { data } = await db
+  const { data, error } = await db
     .from('change_plans')
     .select('id, plan_json, branch_name, planner_version, stage_durations')
     .eq('change_id', changeId)
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle()
-  return (data as any) ?? null
+  if (error) throw new Error(`Failed to load plan: ${error.message}`)
+  return data as {
+    id: string
+    plan_json: DetailedPlan
+    branch_name: string
+    planner_version: number
+    stage_durations: Record<string, number>
+  } | null
 }
 
 // ---- Task projection ----
@@ -120,7 +148,11 @@ export async function rebuildTaskProjection(
   planVersion: number,
   tasks: ProjectedTask[]
 ): Promise<void> {
-  await db.from('change_plan_tasks').delete().eq('plan_id', planId)
+  const { error: deleteError } = await db
+    .from('change_plan_tasks')
+    .delete()
+    .eq('plan_id', planId)
+  if (deleteError) throw new Error(`Failed to delete task projection: ${deleteError.message}`)
 
   if (tasks.length === 0) return
 
@@ -145,17 +177,19 @@ export async function recordPlanFailure(
   planId: string | null,
   failure: PlannerFailure
 ): Promise<void> {
-  await db.from('change_requests').update({
+  const { error } = await db.from('change_requests').update({
     pipeline_status: 'failed',
     failed_stage: failure.stage,
     retryable: failure.retryable,
     failure_diagnostics: failure,
   }).eq('id', changeId)
+  if (error) throw new Error(`Failed to record plan failure on change: ${error.message}`)
   if (planId) {
-    await db.from('change_plans').update({
+    const { error: planError } = await db.from('change_plans').update({
       failed_stage: failure.stage,
       ended_at: new Date().toISOString(),
     }).eq('id', planId)
+    if (planError) throw new Error(`Failed to record plan failure on plan: ${planError.message}`)
   }
 }
 
@@ -167,10 +201,11 @@ export async function updatePipelineStatus(
   status: string,
   extraFields?: Record<string, unknown>
 ): Promise<void> {
-  await db.from('change_requests').update({
+  const { error } = await db.from('change_requests').update({
     pipeline_status: status,
     ...extraFields,
   }).eq('id', changeId)
+  if (error) throw new Error(`Failed to update pipeline status: ${error.message}`)
 }
 
 export async function guardedStatusTransition(
@@ -179,11 +214,12 @@ export async function guardedStatusTransition(
   fromStatus: string,
   toStatus: string
 ): Promise<boolean> {
-  const { data } = await db
+  const { data, error } = await db
     .from('change_requests')
     .update({ pipeline_status: toStatus })
     .eq('id', changeId)
     .eq('pipeline_status', fromStatus)
     .select('id')
+  if (error) throw new Error(`Failed to transition pipeline status: ${error.message}`)
   return (data?.length ?? 0) > 0
 }
