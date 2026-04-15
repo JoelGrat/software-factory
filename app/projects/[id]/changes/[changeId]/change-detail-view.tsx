@@ -242,7 +242,7 @@ export function ChangeDetailView({
   )
   const [planView, setPlanView] = useState<'structured' | 'json'>('structured')
   const [visibleTaskCount, setVisibleTaskCount] = useState(() => getAllPlanTasks(initialPlan?.plan_json).length)
-  const prevPlanJsonRef = useRef(initialPlan?.plan_json ?? null)
+  const prevPlanIdRef = useRef(initialPlan?.id ?? null)
   const [approving, setApproving] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [addingTestTask, setAddingTestTask] = useState<string | null>(null)
@@ -514,10 +514,11 @@ export function ChangeDetailView({
     if (auto) setPlanTab(auto)
   }, [pipelineStatus, isAnalyzing])
 
-  // Stagger tasks in when plan_json first arrives
+  // Stagger tasks in when a new plan's plan_json first arrives
   useEffect(() => {
-    if (!plan?.plan_json || plan.plan_json === prevPlanJsonRef.current) return
-    prevPlanJsonRef.current = plan.plan_json
+    if (!plan?.id || !plan?.plan_json) return
+    if (plan.id === prevPlanIdRef.current) return   // same plan — already staggered or loaded on mount
+    prevPlanIdRef.current = plan.id
     const allTasks = getAllPlanTasks(plan.plan_json)
     if (allTasks.length === 0) return
     setVisibleTaskCount(0)
@@ -532,7 +533,7 @@ export function ChangeDetailView({
     }, 120)
     return () => clearInterval(timer)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [plan?.plan_json])
+  }, [plan?.id, plan?.plan_json])
 
   return (
     <div className="flex flex-col h-screen bg-[#0b1326] text-on-surface overflow-hidden">
@@ -1393,7 +1394,7 @@ export function ChangeDetailView({
                     </button>
                     {change.status === 'awaiting_approval' ? (
                       <button
-                        disabled={approving}
+                        disabled={approving || isAnalyzing}
                         onClick={async () => {
                           setApproving(true)
                           setActionError(null)
@@ -1417,7 +1418,7 @@ export function ChangeDetailView({
                       </button>
                     ) : (
                       <button
-                        disabled={approving}
+                        disabled={approving || isAnalyzing}
                         onClick={async () => {
                           setApproving(true)
                           setActionError(null)
