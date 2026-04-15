@@ -35,7 +35,6 @@ export interface TaskRunnerOptions {
   preExistingFailedTests: Set<string>
   budget: TaskBudget
   seq: () => number
-  availablePackages: string[]
 }
 
 export interface TaskRunResult {
@@ -45,8 +44,10 @@ export interface TaskRunResult {
 }
 
 function parseAiJson(content: string): Record<string, unknown> {
-  const stripped = content.replace(/^```(?:json)?\s*/m, '').replace(/\s*```$/m, '').trim()
-  return JSON.parse(stripped)
+  // Handle fenced code blocks: capture content between ``` fences (if present)
+  const fenced = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/)
+  const text = fenced ? fenced[1] : content
+  return JSON.parse(text.trim())
 }
 
 /**
@@ -72,132 +73,140 @@ export async function runTask(
     return { success: false, filesWritten: [], newFiles: [] }
   }
 
-  await insertEvent(db, {
-    runId, changeId, seq: seq(), iteration: taskIndex,
-    eventType: 'task.started',
-    payload: { taskId: task.id, taskIndex, title: task.description.slice(0, 80) },
-  })
-
-  // No files to implement
-  const taskFiles = task.files.filter(isPathAllowed).slice(0, TASK_FILE_CAP)
-  if (taskFiles.length === 0) {
-    await releaseTaskDone(db, task.id)
+  // From here: task is in_progress. Any unhandled exception must release the lock.
+  try {
     await insertEvent(db, {
       runId, changeId, seq: seq(), iteration: taskIndex,
-      eventType: 'task.completed',
-      payload: { taskId: task.id, durationMs: Date.now() - taskStartMs },
+      eventType: 'task.started',
+      payload: { taskId: task.id, taskIndex, title: task.description.slice(0, 80) },
     })
-    return { success: true, filesWritten: [], newFiles: [] }
-  }
 
-  // ── Implement ────────────────────────────────────────────────────────────
-  const fileContexts: TaskFileContext[] = []
-  let charBudget = TASK_FILE_CHAR_CAP
-
-  for (const filePath of taskFiles) {
-    try {
-      const raw = await readFile(join(env.localWorkDir, filePath), 'utf8')
-      const chars = Math.min(raw.length, charBudget)
-      fileContexts.push({ path: filePath, content: raw.slice(0, chars), isNew: false })
-      charBudget -= chars
-    } catch {
-      fileContexts.push({ path: filePath, content: '', isNew: true })
+    // No files to implement
+    const taskFiles = task.files.filter(isPathAllowed).slice(0, TASK_FILE_CAP)
+    if (taskFiles.length === 0) {
+      await releaseTaskDone(db, task.id)
+      await insertEvent(db, {
+        runId, changeId, seq: seq(), iteration: taskIndex,
+        eventType: 'task.completed',
+        payload: { taskId: task.id, durationMs: Date.now() - taskStartMs },
+      })
+      return { success: true, filesWritten: [], newFiles: [] }
     }
-    if (charBudget <= 0) break
-  }
 
-  const prompt = buildTaskImplementationPrompt(
-    { description: task.description, intent: changeIntent },
-    fileContexts,
-  )
+    // ── Implement ────────────────────────────────────────────────────────────
+    const fileContexts: TaskFileContext[] = []
+    let charBudget = TASK_FILE_CHAR_CAP
 
-  const aiResult = await ai.complete(prompt, { maxTokens: 8192 })
-  let parsed: { files?: { path: string; content: string }[]; confidence?: number } = {}
-  try { parsed = parseAiJson(aiResult.content) } catch { /* leave empty */ }
+    for (const filePath of taskFiles) {
+      try {
+        const raw = await readFile(join(env.localWorkDir, filePath), 'utf8')
+        const chars = Math.min(raw.length, charBudget)
+        fileContexts.push({ path: filePath, content: raw.slice(0, chars), isNew: false })
+        charBudget -= chars
+      } catch {
+        fileContexts.push({ path: filePath, content: '', isNew: true })
+      }
+      if (charBudget <= 0) break
+    }
 
-  const filesWritten: string[] = []
-  const newFiles: NewFileCreation[] = []
+    const prompt = buildTaskImplementationPrompt(
+      { description: task.description, intent: changeIntent },
+      fileContexts,
+    )
 
-  for (const fw of (parsed.files ?? []).filter(f => isPathAllowed(f.path)).slice(0, TASK_FILE_CAP)) {
-    if (!fw.content) continue
-    const result = await executor.createFile(env, fw.path, fw.content)
-    if (result.success) {
-      filesWritten.push(fw.path)
-      // Track whether it's a new file (for acceptedNewFiles in orchestrator)
-      if (fileContexts.find(fc => fc.path === fw.path)?.isNew) {
-        newFiles.push({ path: fw.path, content: fw.content })
+    const aiResult = await ai.complete(prompt, { maxTokens: 8192 })
+    let parsed: { files?: { path: string; content: string }[]; confidence?: number } = {}
+    try { parsed = parseAiJson(aiResult.content) } catch { /* AI returned unparseable content — zero files written */ }
+
+    const filesWritten: string[] = []
+    const newFiles: NewFileCreation[] = []
+
+    for (const fw of (parsed.files ?? []).filter(f => isPathAllowed(f.path)).slice(0, TASK_FILE_CAP)) {
+      if (!fw.content) continue
+      const result = await executor.createFile(env, fw.path, fw.content)
+      if (result.success) {
+        filesWritten.push(fw.path)
+        // Track whether it's a new file (for acceptedNewFiles in orchestrator)
+        if (fileContexts.find(fc => fc.path === fw.path)?.isNew) {
+          newFiles.push({ path: fw.path, content: fw.content })
+        }
       }
     }
-  }
 
-  if (filesWritten.length === 0) {
-    await releaseTaskFailed(db, task.id, 'AI returned no applicable file writes')
+    if (filesWritten.length === 0) {
+      await releaseTaskFailed(db, task.id, 'AI returned no applicable file writes')
+      await insertEvent(db, {
+        runId, changeId, seq: seq(), iteration: taskIndex,
+        eventType: 'task.failed',
+        payload: { taskId: task.id, reason: 'no_files_written', stuckReason: null },
+      })
+      return { success: false, filesWritten: [], newFiles: [] }
+    }
+
+    // ── Validate ─────────────────────────────────────────────────────────────
+    const validation = await runTaskValidation(db, executor, env, {
+      taskId: task.id,
+      taskIndex,
+      taskFiles,
+      baselineTypeErrorSigs,
+      runId,
+      changeId,
+      seq,
+    })
+
+    if (validation.passed) {
+      await releaseTaskDone(db, task.id)
+      await insertEvent(db, {
+        runId, changeId, seq: seq(), iteration: taskIndex,
+        eventType: 'task.completed',
+        payload: { taskId: task.id, durationMs: Date.now() - taskStartMs },
+      })
+      return { success: true, filesWritten, newFiles }
+    }
+
+    // ── Repair ───────────────────────────────────────────────────────────────
+    const repair = await runTaskRepair(db, ai, executor, env,
+      validation.typeErrors,
+      validation.testFailures,
+      {
+        taskId: task.id,
+        taskIndex,
+        runId,
+        changeId,
+        changeIntent,
+        seq,
+        budget,
+        preExistingFailedTests,
+      },
+    )
+
+    if (repair.success) {
+      await releaseTaskDone(db, task.id)
+      await insertEvent(db, {
+        runId, changeId, seq: seq(), iteration: taskIndex,
+        eventType: 'task.completed',
+        payload: { taskId: task.id, durationMs: Date.now() - taskStartMs },
+      })
+      return {
+        success: true,
+        filesWritten: [...new Set([...filesWritten, ...repair.filesPatched])],
+        newFiles,
+      }
+    }
+
+    const failureReason = repair.stuckReason
+      ?? (validation.typeErrors ? `tsc: ${validation.typeErrors.totalCount} errors` : 'tests failed')
+    await releaseTaskFailed(db, task.id, failureReason)
     await insertEvent(db, {
       runId, changeId, seq: seq(), iteration: taskIndex,
       eventType: 'task.failed',
-      payload: { taskId: task.id, reason: 'no_files_written', stuckReason: null },
+      payload: { taskId: task.id, reason: failureReason, stuckReason: repair.stuckReason ?? null },
     })
     return { success: false, filesWritten: [], newFiles: [] }
+
+  } catch (err) {
+    // Release lock on unexpected error so crash recovery doesn't have to wait 10min
+    await releaseTaskFailed(db, task.id, err instanceof Error ? err.message.slice(0, 500) : String(err).slice(0, 500))
+    throw err
   }
-
-  // ── Validate ─────────────────────────────────────────────────────────────
-  const validation = await runTaskValidation(db, executor, env, {
-    taskId: task.id,
-    taskIndex,
-    taskFiles,
-    baselineTypeErrorSigs,
-    runId,
-    changeId,
-    seq,
-  })
-
-  if (validation.passed) {
-    await releaseTaskDone(db, task.id)
-    await insertEvent(db, {
-      runId, changeId, seq: seq(), iteration: taskIndex,
-      eventType: 'task.completed',
-      payload: { taskId: task.id, durationMs: Date.now() - taskStartMs },
-    })
-    return { success: true, filesWritten, newFiles }
-  }
-
-  // ── Repair ───────────────────────────────────────────────────────────────
-  const repair = await runTaskRepair(db, ai, executor, env,
-    validation.typeErrors,
-    validation.testFailures,
-    {
-      taskId: task.id,
-      taskIndex,
-      runId,
-      changeId,
-      changeIntent,
-      seq,
-      budget,
-      preExistingFailedTests,
-    },
-  )
-
-  if (repair.success) {
-    await releaseTaskDone(db, task.id)
-    await insertEvent(db, {
-      runId, changeId, seq: seq(), iteration: taskIndex,
-      eventType: 'task.completed',
-      payload: { taskId: task.id, durationMs: Date.now() - taskStartMs },
-    })
-    return {
-      success: true,
-      filesWritten: [...new Set([...filesWritten, ...repair.filesPatched])],
-      newFiles,
-    }
-  }
-
-  const failureReason = repair.stuckReason
-    ?? (validation.typeErrors ? `tsc: ${validation.typeErrors.totalCount} errors` : 'tests failed')
-  await releaseTaskFailed(db, task.id, failureReason)
-  await insertEvent(db, {
-    runId, changeId, seq: seq(), iteration: taskIndex,
-    eventType: 'task.failed',
-    payload: { taskId: task.id, reason: failureReason, stuckReason: repair.stuckReason ?? null },
-  })
-  return { success: false, filesWritten: [], newFiles: [] }
 }
