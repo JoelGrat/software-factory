@@ -176,6 +176,7 @@ export async function rebuildTaskProjection(
     order_index: t.orderIndex,
     status: t.status,
     plan_version: planVersion,
+    files: t.files,
   }))
   const { error } = await db.from('change_plan_tasks').insert(rows)
   if (error) throw new Error(`Failed to rebuild task projection: ${error.message}`)
@@ -190,6 +191,7 @@ export async function recordPlanFailure(
   failure: PlannerFailure
 ): Promise<void> {
   const { error } = await db.from('change_requests').update({
+    status: 'failed',
     pipeline_status: 'failed',
     failed_stage: failure.stage,
     retryable: failure.retryable,

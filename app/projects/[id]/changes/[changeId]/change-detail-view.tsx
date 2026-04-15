@@ -80,6 +80,7 @@ const RISK_COLORS: Record<string, string> = {
 
 const ANALYZING_STATUSES = ['analyzing', 'analyzing_mapping', 'analyzing_propagation', 'analyzing_scoring', 'planning']
 const PIPELINE_IN_PROGRESS_STATUSES = [
+  'validated', 'planning',
   'spec_generating', 'spec_generated',
   'plan_generating', 'plan_generated',
   'impact_analyzing', 'impact_analyzed',

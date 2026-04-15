@@ -58,8 +58,10 @@ export async function runPipeline(
   if (!isRetry) {
     const ok = await guardedStatusTransition(db, changeId, 'validated', 'planning')
     if (!ok) throw new Error(`Cannot start planning: change must be in 'validated' status`)
+    await updatePipelineStatus(db, changeId, 'planning', { status: 'planning' })
   } else {
     await updatePipelineStatus(db, changeId, 'planning', {
+      status: 'planning',
       failed_stage: null,
       retryable: null,
       failure_diagnostics: null,
@@ -218,13 +220,20 @@ async function applyExecutionPolicy(
   }
   const riskLevel: string = changeData.risk_level ?? 'low'
 
-  let policy: 'auto' | 'approval' | 'manual' = riskPolicy[riskLevel] ?? 'manual'
+  const VALID_POLICIES = ['auto', 'approval', 'manual'] as const
+  const rawPolicy = riskPolicy[riskLevel] ?? 'manual'
+  let policy: 'auto' | 'approval' | 'manual' = VALID_POLICIES.includes(rawPolicy as typeof VALID_POLICIES[number])
+    ? (rawPolicy as 'auto' | 'approval' | 'manual')
+    : 'manual'
   if (policy === 'auto' && qualityScore < 0.5) policy = 'approval'
 
   if (policy === 'auto') {
     await db.from('change_plans')
       .update({ status: 'approved', approved_at: new Date().toISOString() })
       .eq('id', planId)
+    await db.from('change_requests')
+      .update({ status: 'ready', pipeline_status: 'ready' })
+      .eq('id', changeId)
     const { DockerExecutor } = await import('@/lib/execution/executors/docker-executor')
     const { runExecution } = await import('@/lib/execution/execution-orchestrator')
     runExecution(changeId, db, ai, new DockerExecutor()).catch(err =>
@@ -234,8 +243,12 @@ async function applyExecutionPolicy(
     await db.from('change_requests')
       .update({ status: 'awaiting_approval', pipeline_status: 'awaiting_approval' })
       .eq('id', changeId)
+  } else {
+    // manual → mark ready, user initiates execution manually
+    await db.from('change_requests')
+      .update({ status: 'ready', pipeline_status: 'ready' })
+      .eq('id', changeId)
   }
-  // manual → stays at 'scored', user navigates to detail page
 }
 
 function buildFailure(err: unknown): PlannerFailure {
@@ -249,7 +262,7 @@ function buildFailure(err: unknown): PlannerFailure {
   const stage: PlannerStage = e?._stage ?? guessStageFromMessage(e?.message)
   const isQualityGate = err instanceof PlanQualityGateError
   const rawMessage: string = e?.message ?? String(err)
-  const rawIssues: string[] = isQualityGate ? e.diagnostics.issues : [rawMessage]
+  const rawIssues: string[] = isQualityGate ? (e.diagnostics?.issues ?? [rawMessage]) : [rawMessage]
   const truncated = rawIssues.length > 10
 
   return {
@@ -257,7 +270,7 @@ function buildFailure(err: unknown): PlannerFailure {
     retryable: !isQualityGate,
     reason: isQualityGate ? 'quality_gate' : rawMessage.slice(0, 200),
     diagnostics: {
-      summary: isQualityGate ? e.diagnostics.summary : rawMessage.slice(0, 200),
+      summary: isQualityGate ? (e.diagnostics?.summary ?? rawMessage.slice(0, 200)) : rawMessage.slice(0, 200),
       issues: rawIssues.slice(0, 10),
       truncated,
     },
