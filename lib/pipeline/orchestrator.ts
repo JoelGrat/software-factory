@@ -39,12 +39,12 @@ export async function runPipeline(
   ai: AIProvider,
   opts: { forceReset?: boolean } = {}
 ): Promise<void> {
-  const { data: change } = await db
+  const { data: change, error: changeError } = await db
     .from('change_requests')
     .select('id, pipeline_status, failed_stage, title, intent, type')
     .eq('id', changeId)
     .single()
-  if (!change) throw new Error(`Change not found: ${changeId}`)
+  if (!change) throw new Error(`Change not found: ${changeId}${changeError ? ` (${changeError.message})` : ''}`)
 
   const isRetry =
     change.pipeline_status === 'failed' &&
@@ -55,25 +55,39 @@ export async function runPipeline(
     ? ((change.failed_stage as PlannerStage) ?? 'spec')
     : 'spec'
 
-  if (!isRetry) {
-    const ok = await guardedStatusTransition(db, changeId, 'validated', 'planning')
-    if (!ok) throw new Error(`Cannot start planning: change must be in 'validated' status`)
-    await updatePipelineStatus(db, changeId, 'planning', { status: 'planning' })
-  } else {
-    await updatePipelineStatus(db, changeId, 'planning', {
-      status: 'planning',
-      failed_stage: null,
-      retryable: null,
-      failure_diagnostics: null,
-    })
-  }
-
   let planRow = await loadPlanForChange(db, changeId)
   let planId: string | null = planRow?.id ?? null
   const plannerVersion = isRetry ? ((planRow?.planner_version ?? 1) + 1) : 1
   let currentPlanJson: DetailedPlan | null = planRow?.plan_json ?? null
 
   try {
+    // Transition to planning state — inside try so failures are recorded
+    if (!isRetry) {
+      if (opts.forceReset) {
+        // forceReset: allow regeneration from any recoverable state (ready, awaiting_approval, etc.)
+        await db.from('change_requests').update({
+          status: 'planning',
+          pipeline_status: 'planning',
+          failed_stage: null,
+          retryable: null,
+          failure_diagnostics: null,
+        }).eq('id', changeId)
+      } else {
+        const ok = await guardedStatusTransition(db, changeId, 'validated', 'planning')
+        if (!ok) throw Object.assign(
+          new Error(`Cannot start planning: change must be in 'validated' status (current: ${change.pipeline_status})`),
+          { _stage: 'spec' as PlannerStage }
+        )
+        await updatePipelineStatus(db, changeId, 'planning', { status: 'planning' })
+      }
+    } else {
+      await updatePipelineStatus(db, changeId, 'planning', {
+        status: 'planning',
+        failed_stage: null,
+        retryable: null,
+        failure_diagnostics: null,
+      })
+    }
     // Stage 1: Generate Spec
     if (shouldRunStage(startStage, 'spec')) {
       const t = Date.now()

@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { LeftNav } from '@/components/app/left-nav'
@@ -31,12 +31,32 @@ interface ImpactComponent {
   system_components: { name: string; type: string } | null
 }
 
+interface PlanPhaseTask {
+  id: string
+  title: string
+  type: string
+  files: string[]
+  expected_result: string
+}
+
+interface PlanPhase {
+  id: string
+  title: string
+  tasks: PlanPhaseTask[]
+}
+
+interface PlanJson {
+  goal: string
+  phases: PlanPhase[]
+}
+
 interface PlanData {
   id: string
   status: string
-  spec_markdown: string | null
   estimated_tasks: number | null
-  estimated_files: number | null
+  branch_name: string | null
+  plan_quality_score: number | null
+  plan_json: PlanJson | null
   approved_at: string | null
 }
 
@@ -61,6 +81,9 @@ interface Change {
   risk_level: string | null
   confidence_score: number | null
   analysis_quality: string | null
+  failed_stage: string | null
+  retryable: boolean | null
+  failure_diagnostics: { summary: string; issues: string[] } | null
   tags: string[]
   created_at: string
   updated_at: string
@@ -76,6 +99,23 @@ const RISK_COLORS: Record<string, string> = {
   low: 'text-green-400 bg-green-400/10',
   medium: 'text-amber-400 bg-amber-400/10',
   high: 'text-red-400 bg-red-400/10',
+}
+
+/** Map pipeline_status → which tab should be auto-active during pipeline execution. */
+function getPipelineAutoTab(status: string | null): 'spec' | 'plan' | 'tasks' | 'review' | null {
+  if (!status) return null
+  if (['validated', 'planning', 'spec_loading_context', 'spec_inferring_components',
+       'spec_inferring_files', 'spec_generating_canonical', 'spec_validating'].includes(status)) return 'spec'
+  if (['spec_generated', 'plan_generating', 'plan_creating_phases',
+       'plan_validating', 'plan_finalizing'].includes(status)) return 'plan'
+  if (['plan_generated', 'impact_analyzing', 'impact_analyzed', 'scoring'].includes(status)) return 'tasks'
+  if (status === 'scored') return 'review'
+  return null
+}
+
+function getAllPlanTasks(planJson: PlanJson | null | undefined): PlanPhaseTask[] {
+  if (!planJson) return []
+  return planJson.phases.flatMap(p => p.tasks)
 }
 
 const ANALYZING_STATUSES = ['analyzing', 'analyzing_mapping', 'analyzing_propagation', 'analyzing_scoring', 'planning']
@@ -147,55 +187,17 @@ const PIPELINE_STAGES: PipelineStageConfig[] = [
   },
 ]
 
-/** Returns the index of the currently active stage, or -1 if none are active. */
-function activeStageIndex(pipelineStatus: string | null): number {
-  if (!pipelineStatus) return -1
-  return PIPELINE_STAGES.findIndex(
-    s => s.activeStatuses.includes(pipelineStatus) || s.doneStatus === pipelineStatus
-  )
-}
-
-/** Returns true if the stage at `index` is fully completed given the current status. */
-function isStageCompleted(index: number, pipelineStatus: string | null): boolean {
-  if (!pipelineStatus) return false
-  const active = activeStageIndex(pipelineStatus)
-  if (active === -1) return false
-  // If a later stage is active (or done), this stage is completed
-  if (active > index) return true
-  // If this is the active stage, it's completed only if the doneStatus matches
-  if (active === index && pipelineStatus === PIPELINE_STAGES[index].doneStatus) return true
-  return false
-}
-
-/** Within an active stage, return the index of the currently running substep. */
+/**
+ * Within an active stage, return the index of the currently running substep.
+ * Returns -1 if the stage is active but no specific substep has been reached yet.
+ */
 function activeSubstepIndex(stageIndex: number, pipelineStatus: string | null): number {
-  if (!pipelineStatus) return 0
+  if (!pipelineStatus) return -1
   const stage = PIPELINE_STAGES[stageIndex]
-  if (!stage) return 0
-  const idx = stage.substeps.findIndex(s => s.status === pipelineStatus)
-  return idx === -1 ? 0 : idx
+  if (!stage) return -1
+  return stage.substeps.findIndex(s => s.status === pipelineStatus)
 }
 
-function ComponentImpactRow({ ic }: { ic: ImpactComponent }) {
-  const weight = Math.round(ic.impact_weight * 100)
-  const barColor = weight >= 70 ? 'bg-red-500/50' : weight >= 40 ? 'bg-amber-500/50' : 'bg-indigo-500/40'
-  return (
-    <div className="flex items-center justify-between gap-3">
-      <div className="flex items-center gap-2 min-w-0">
-        <span className="text-[10px] font-mono px-1 py-0.5 rounded bg-indigo-400/10 text-indigo-300 uppercase flex-shrink-0">
-          {ic.system_components?.type ?? '?'}
-        </span>
-        <span className="text-sm text-slate-300 truncate">{ic.system_components?.name ?? ic.component_id}</span>
-      </div>
-      <div className="flex items-center gap-2 flex-shrink-0">
-        <div className="w-24 h-1.5 bg-slate-700 rounded-full overflow-hidden">
-          <div className={`h-full rounded-full ${barColor}`} style={{ width: `${weight}%` }} />
-        </div>
-        <span className="text-[10px] font-mono text-slate-500 w-8 text-right">{weight}%</span>
-      </div>
-    </div>
-  )
-}
 
 function Badge({ label, colorClass }: { label: string; colorClass: string }) {
   return (
@@ -214,6 +216,7 @@ export function ChangeDetailView({
   plan: initialPlan,
   planTasks: initialPlanTasks,
   componentFileMap: initialComponentFileMap = {},
+  specMarkdown: initialSpecMarkdown = null,
 }: {
   project: Project
   change: Change
@@ -223,6 +226,7 @@ export function ChangeDetailView({
   plan: PlanData | null
   planTasks: PlanTask[]
   componentFileMap?: Record<string, string[]>
+  specMarkdown?: string | null
 }) {
   const router = useRouter()
   const [change, setChange] = useState(initial)
@@ -232,9 +236,13 @@ export function ChangeDetailView({
   const [plan, setPlan] = useState(initialPlan)
   const [planTasks, setPlanTasks] = useState(initialPlanTasks)
   const [componentFileMap] = useState(initialComponentFileMap)
-  const [planTab, setPlanTab] = useState<'review' | 'tasks' | 'files' | 'spec'>(
-    initialPlan && initialPlan.status !== 'approved' ? 'review' : 'tasks'
+  const [specMarkdown, setSpecMarkdown] = useState<string | null>(initialSpecMarkdown)
+  const [planTab, setPlanTab] = useState<'spec' | 'plan' | 'tasks' | 'review'>(
+    () => getPipelineAutoTab(initial.pipeline_status) ?? 'spec'
   )
+  const [planView, setPlanView] = useState<'structured' | 'json'>('structured')
+  const [visibleTaskCount, setVisibleTaskCount] = useState(() => getAllPlanTasks(initialPlan?.plan_json).length)
+  const prevPlanJsonRef = useRef(initialPlan?.plan_json ?? null)
   const [approving, setApproving] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [addingTestTask, setAddingTestTask] = useState<string | null>(null)
@@ -250,7 +258,9 @@ export function ChangeDetailView({
   const canDelete = change.status !== 'done'
 
   // Impact analysis derived display values
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const RISK_MAX = 40
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const impactScore = impact?.risk_score ?? 0
   const confidence = change.confidence_score ?? 0
   const aiUsed = impact?.analysis_quality === 'medium'
@@ -261,8 +271,10 @@ export function ChangeDetailView({
   if (unknownDepsFactor) confidenceReasons.push(`${unknownDepsFactor.weight / 2} component(s) with unresolved dependencies`)
   if (lowConfFactor) confidenceReasons.push('Low-confidence component matches detected')
   if (confidenceReasons.length === 0) confidenceReasons.push('All components matched by keyword search')
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const confBarColor = confidence >= 80 ? 'bg-green-500' : confidence >= 60 ? 'bg-amber-500' : 'bg-red-500'
   const confTextColor = confidence >= 80 ? 'text-green-400' : confidence >= 60 ? 'text-amber-400' : 'text-red-400'
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const FACTOR_META: Record<string, { label: string; desc: string }> = {
     blast_radius: { label: 'Blast radius', desc: 'Significantly impacted components (weight > 30%)' },
     unknown_deps: { label: 'Unknown dependencies', desc: 'Components with unresolved import chains' },
@@ -351,7 +363,7 @@ export function ChangeDetailView({
 
   // ── Post-plan review derived data ─────────────────────────────────────────
   const reviewAllFiles = [...new Set(planTasks.flatMap(t => componentFileMap[t.component_id ?? ''] ?? []))]
-  const reviewNewFileCount = Math.max(0, (plan?.estimated_files ?? reviewAllFiles.length) - reviewAllFiles.length)
+  const reviewNewFileCount = Math.max(0, (null ?? reviewAllFiles.length) - reviewAllFiles.length)
 
   // Reverse map: file → ImpactComponent
   const fileToImpact = new Map<string, ImpactComponent>()
@@ -471,6 +483,11 @@ export function ChangeDetailView({
       const updated = await res.json()
       setChange(updated)
       setPipelineStatus(updated.pipeline_status ?? null)
+      // Pick up spec_markdown as soon as it arrives
+      if (updated.spec_markdown) setSpecMarkdown(updated.spec_markdown)
+      // Pick up plan_json for stagger animation even before pipeline finishes
+      if (updated.plan) setPlan(updated.plan)
+
       if (!ANALYZING_STATUSES.includes(updated.status) && !PIPELINE_IN_PROGRESS_STATUSES.includes(updated.pipeline_status ?? '')) {
         clearInterval(id)
         setImpact(updated.impact ?? null)
@@ -489,6 +506,33 @@ export function ChangeDetailView({
     const t = setTimeout(() => setToast(null), 3000)
     return () => clearTimeout(t)
   }, [toast])
+
+  // Auto-switch tab to match current pipeline stage
+  useEffect(() => {
+    if (!isAnalyzing) return
+    const auto = getPipelineAutoTab(pipelineStatus)
+    if (auto) setPlanTab(auto)
+  }, [pipelineStatus, isAnalyzing])
+
+  // Stagger tasks in when plan_json first arrives
+  useEffect(() => {
+    if (!plan?.plan_json || plan.plan_json === prevPlanJsonRef.current) return
+    prevPlanJsonRef.current = plan.plan_json
+    const allTasks = getAllPlanTasks(plan.plan_json)
+    if (allTasks.length === 0) return
+    setVisibleTaskCount(0)
+    let count = 0
+    const timer = setInterval(() => {
+      count++
+      setVisibleTaskCount(count)
+      if (count >= allTasks.length) {
+        clearInterval(timer)
+        setTimeout(() => setPlanTab('review'), 800)
+      }
+    }, 120)
+    return () => clearInterval(timer)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plan?.plan_json])
 
   return (
     <div className="flex flex-col h-screen bg-[#0b1326] text-on-surface overflow-hidden">
@@ -553,65 +597,46 @@ export function ChangeDetailView({
               <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap">{change.intent}</p>
             </div>
 
-            {/* Pipeline in-progress state */}
-            {isAnalyzing ? (
-              <div className="rounded-xl bg-[#131b2e] border border-white/5 overflow-hidden">
-                <p className="text-xs font-bold uppercase tracking-widest text-slate-400 font-headline px-6 pt-5 pb-4">
-                  Planning
-                </p>
-                <div className="px-6 pb-5 space-y-1">
-                  {PIPELINE_STAGES.map((stage, i) => {
-                    const active = activeStageIndex(pipelineStatus)
-                    const isActive = i === active && pipelineStatus !== stage.doneStatus
-                    const isDone = isStageCompleted(i, pipelineStatus)
-                    const substepIdx = isActive ? activeSubstepIndex(i, pipelineStatus) : 0
-
-                    if (isActive) {
-                      // Expanded: show stage header + substeps
-                      return (
-                        <div key={stage.label} className="py-1">
-                          <div className="flex items-center gap-3 mb-2">
-                            <span className="relative flex h-2 w-2 flex-shrink-0">
-                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
-                              <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-400" />
-                            </span>
-                            <span className="text-sm font-medium text-slate-200">{stage.label}</span>
-                          </div>
-                          <div className="ml-5 pl-3 border-l border-white/5 space-y-1.5">
-                            {stage.substeps.map((sub, si) => {
-                              const subDone = si < substepIdx
-                              const subActive = si === substepIdx
-                              return (
-                                <div key={sub.status} className="flex items-center gap-2">
-                                  <span className={`text-xs w-3 flex-shrink-0 font-mono ${subDone ? 'text-green-400' : subActive ? 'text-indigo-300' : 'text-slate-700'}`}>
-                                    {subDone ? '✓' : subActive ? '•' : '○'}
-                                  </span>
-                                  <span className={`text-xs ${subDone ? 'text-slate-500' : subActive ? 'text-slate-300' : 'text-slate-600'}`}>
-                                    {sub.label}
-                                  </span>
-                                </div>
-                              )
-                            })}
-                          </div>
-                        </div>
-                      )
-                    }
-
-                    // Collapsed: single line
-                    return (
-                      <div key={stage.label} className="flex items-center gap-3 py-1">
-                        {isDone ? (
-                          <span className="h-2 w-2 rounded-full bg-green-400 flex-shrink-0" />
-                        ) : (
-                          <span className="h-2 w-2 rounded-full bg-slate-700 flex-shrink-0" />
-                        )}
-                        <span className={`text-sm ${isDone ? 'text-slate-500' : 'text-slate-600'}`}>
-                          {stage.label}
-                        </span>
-                      </div>
-                    )
-                  })}
+            {/* Pipeline block */}
+            {change.status === 'failed' ? (
+              <div className="rounded-xl bg-[#131b2e] border border-red-500/20 overflow-hidden">
+                <div className="flex items-center justify-between px-5 py-4 border-b border-white/5">
+                  <div className="flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full bg-red-400 flex-shrink-0" />
+                    <p className="text-xs font-bold uppercase tracking-widest text-red-400 font-headline">
+                      Planning failed{change.failed_stage ? ` · ${change.failed_stage}` : ''}
+                    </p>
+                  </div>
+                  {change.retryable !== false && (
+                    <button
+                      onClick={async () => {
+                        const res = await fetch(`/api/change-requests/${change.id}/analyze`, { method: 'POST' })
+                        if (res.ok) {
+                          setChange(c => ({ ...c, status: 'planning', pipeline_status: 'planning', failed_stage: null, retryable: null, failure_diagnostics: null }))
+                          setPipelineStatus('planning')
+                        } else {
+                          const body = await res.json().catch(() => ({}))
+                          setActionError(body.error ?? `Retry failed (${res.status})`)
+                        }
+                      }}
+                      className="text-xs font-semibold text-indigo-400 hover:text-indigo-300 transition-colors"
+                    >
+                      Retry planning
+                    </button>
+                  )}
                 </div>
+                {change.failure_diagnostics && (
+                  <div className="px-5 py-4 space-y-1">
+                    <p className="text-xs text-slate-400">{change.failure_diagnostics.summary}</p>
+                    {change.failure_diagnostics.issues.length > 0 && (
+                      <ul className="mt-2 space-y-0.5">
+                        {change.failure_diagnostics.issues.slice(0, 5).map((issue, i) => (
+                          <li key={i} className="text-xs text-slate-500 font-mono before:content-['·_'] before:text-slate-700">{issue}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
               </div>
             ) : change.status === 'open' ? (
               <div className="rounded-xl p-6 bg-[#131b2e] border border-white/5 text-center">
@@ -800,13 +825,13 @@ export function ChangeDetailView({
                       </div>
                     </div>
               </div>
-            ) : (['awaiting_approval', 'planned', 'executing', 'failed', 'review', 'done'].includes(change.status)) && plan ? (
+            ) : (isAnalyzing || plan) ? (
               <div className="rounded-xl bg-[#131b2e] border border-white/5 overflow-hidden">
                 {/* Plan header */}
-                {(() => {
+                {plan ? (() => {
                   const allFiles = [...new Set(planTasks.flatMap(t => componentFileMap[t.component_id ?? ''] ?? []))]
                   const mappedFileCount = allFiles.length
-                  const estimatedFileCount = plan.estimated_files ?? mappedFileCount
+                  const estimatedFileCount = null ?? mappedFileCount
                   const newFileCount = Math.max(0, estimatedFileCount - mappedFileCount)
                   return (
                     <div className="flex items-center justify-between px-5 py-4 border-b border-white/5">
@@ -831,11 +856,19 @@ export function ChangeDetailView({
                       </div>
                     </div>
                   )
-                })()}
+                })() : (
+                  <div className="flex items-center gap-3 px-5 py-4 border-b border-white/5">
+                    <span className="relative flex h-2 w-2 flex-shrink-0">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-400" />
+                    </span>
+                    <p className="text-xs font-bold uppercase tracking-widest text-slate-400 font-headline">Planning</p>
+                  </div>
+                )}
 
                 {/* Tab bar */}
                 <div className="flex border-b border-white/5">
-                  {(['review', 'tasks', 'files', 'spec'] as const).map(tab => (
+                  {(['spec', 'plan', 'tasks', 'review'] as const).map(tab => (
                     <button
                       key={tab}
                       onClick={() => setPlanTab(tab)}
@@ -851,7 +884,10 @@ export function ChangeDetailView({
                 </div>
 
                 {/* Review tab */}
-                {planTab === 'review' && (
+                {planTab === 'review' && !plan && isAnalyzing && (
+                  <p className="px-5 py-6 text-sm text-slate-600 text-center">Review will be available once planning is complete.</p>
+                )}
+                {planTab === 'review' && plan && (
                   <div className="divide-y divide-white/5">
 
                     {/* 1. Recommended Decision */}
@@ -1096,64 +1132,46 @@ export function ChangeDetailView({
                 )}
 
                 {/* Tasks tab */}
-                {planTab === 'tasks' && (
-                  <div className="divide-y divide-white/5">
-                    {planTasks.length === 0 ? (
-                      <p className="px-5 py-6 text-sm text-slate-500 text-center">No tasks generated.</p>
-                    ) : (
-                      planTasks.map((task) => {
-                        const files = componentFileMap[task.component_id ?? ''] ?? []
-                        return (
-                          <div key={task.id} className="px-5 py-3 flex items-start gap-3">
-                            <span className={`mt-0.5 h-2 w-2 rounded-full flex-shrink-0 ${
-                              task.status === 'done' ? 'bg-green-400' : 'bg-slate-600'
-                            }`} />
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm text-slate-300">{task.description}</p>
-                              {task.system_components?.name && (
-                                <span className="text-[10px] font-mono text-slate-600 mt-0.5 block">
-                                  {task.system_components.name}
-                                </span>
-                              )}
-                              {files.length > 0 && (
-                                <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
-                                  {files.map(f => (
-                                    <span key={f} className="text-[10px] font-mono text-indigo-400/60">{f}</span>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                            <span className="text-[10px] font-mono text-slate-600 flex-shrink-0">
-                              #{task.order_index + 1}
-                            </span>
-                          </div>
-                        )
-                      })
-                    )}
-                  </div>
-                )}
-
-                {/* Files tab */}
-                {planTab === 'files' && (() => {
-                  const allFiles = [...new Set(planTasks.flatMap(t => componentFileMap[t.component_id ?? ''] ?? []))]
-                  const estimatedTotal = plan.estimated_files ?? allFiles.length
-                  const newFileCount = Math.max(0, estimatedTotal - allFiles.length)
+                {planTab === 'tasks' && (() => {
+                  const allTasks = getAllPlanTasks(plan?.plan_json)
+                  const visibleTasks = allTasks.slice(0, visibleTaskCount)
                   return (
                     <div className="divide-y divide-white/5">
-                      {allFiles.length === 0 && newFileCount === 0 ? (
-                        <p className="px-5 py-6 text-sm text-slate-500 text-center">No file mappings available.</p>
+                      {allTasks.length === 0 ? (
+                        isAnalyzing ? (
+                          <p className="px-5 py-6 text-sm text-slate-600 text-center">Tasks will appear here once the plan is generated.</p>
+                        ) : (
+                          <p className="px-5 py-6 text-sm text-slate-500 text-center">No tasks generated.</p>
+                        )
                       ) : (
                         <>
-                          {allFiles.map(file => (
-                            <div key={file} className="px-5 py-2.5 flex items-center gap-2.5">
-                              <span className="material-symbols-outlined text-slate-600 flex-shrink-0" style={{ fontSize: '14px' }}>draft</span>
-                              <span className="text-xs font-mono text-slate-300">{file}</span>
+                          {visibleTasks.map((task, idx) => (
+                            <div
+                              key={task.id}
+                              className="px-5 py-3 flex items-start gap-3 animate-in fade-in slide-in-from-bottom-1 duration-200"
+                              style={{ animationDelay: `${idx * 20}ms` }}
+                            >
+                              <span className="mt-1 h-2 w-2 rounded-full flex-shrink-0 bg-slate-600" />
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm text-slate-300 font-medium leading-snug">{task.title}</p>
+                                {task.files.length > 0 && (
+                                  <div className="flex flex-wrap gap-x-2 gap-y-0.5 mt-1.5">
+                                    {task.files.map(f => (
+                                      <span key={f} className="text-[10px] font-mono text-indigo-400/60">{f}</span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-500 uppercase flex-shrink-0">{task.type}</span>
                             </div>
                           ))}
-                          {newFileCount > 0 && (
-                            <div className="px-5 py-3 flex items-center gap-2.5">
-                              <span className="material-symbols-outlined text-indigo-400/60 flex-shrink-0" style={{ fontSize: '14px' }}>add_circle</span>
-                              <span className="text-xs font-mono text-indigo-400/70">+{newFileCount} new file{newFileCount !== 1 ? 's' : ''} (estimated)</span>
+                          {visibleTaskCount < allTasks.length && (
+                            <div className="px-5 py-3 flex items-center gap-3">
+                              <span className="relative flex h-2 w-2 flex-shrink-0">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
+                                <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-400" />
+                              </span>
+                              <span className="text-xs text-slate-600 font-mono">{allTasks.length - visibleTaskCount} more…</span>
                             </div>
                           )}
                         </>
@@ -1162,41 +1180,173 @@ export function ChangeDetailView({
                   )
                 })()}
 
-                {/* Spec tab */}
-                {planTab === 'spec' && (
-                  <div className="px-5 py-4">
-                    {plan.spec_markdown ? (
-                      <pre className="text-xs text-slate-400 font-mono whitespace-pre-wrap leading-relaxed">
-                        {plan.spec_markdown}
-                      </pre>
-                    ) : (
-                      <div className="text-center py-8">
-                        <p className="text-sm text-slate-500 mb-4">Spec was not generated.</p>
-                        <button
-                          disabled={generatingSpec}
-                          onClick={async () => {
-                            setGeneratingSpec(true)
-                            try {
-                              const res = await fetch(`/api/change-requests/${change.id}/spec`, { method: 'POST' })
-                              if (res.ok) {
-                                const data = await res.json()
-                                setPlan(p => p ? { ...p, spec_markdown: data.spec_markdown } : p)
-                              }
-                            } finally {
-                              setGeneratingSpec(false)
-                            }
-                          }}
-                          className="px-4 py-2 rounded-lg bg-indigo-500 hover:bg-indigo-400 disabled:opacity-50 text-white text-sm font-bold font-headline transition-colors"
-                        >
-                          {generatingSpec ? 'Generating…' : 'Generate Spec'}
-                        </button>
+                {/* Plan tab */}
+                {planTab === 'plan' && (() => {
+                  const planStage = PIPELINE_STAGES[1]
+                  const isPlanActive = planStage.activeStatuses.includes(pipelineStatus ?? '') ||
+                    pipelineStatus === 'spec_generated'
+                  const planSubstepIdx = activeSubstepIndex(1, pipelineStatus)
+                  const hasPlanJson = !!plan?.plan_json
+                  return (
+                    <div>
+                      {/* View toggle — only when plan data exists */}
+                      {hasPlanJson && (
+                        <div className="flex items-center gap-1 px-5 py-2.5 border-b border-white/5">
+                          <button
+                            onClick={() => setPlanView('structured')}
+                            className={`text-[10px] font-mono px-2 py-1 rounded transition-colors ${planView === 'structured' ? 'bg-slate-700 text-slate-200' : 'text-slate-600 hover:text-slate-400'}`}
+                          >
+                            structured
+                          </button>
+                          <button
+                            onClick={() => setPlanView('json')}
+                            className={`text-[10px] font-mono px-2 py-1 rounded transition-colors ${planView === 'json' ? 'bg-slate-700 text-slate-200' : 'text-slate-600 hover:text-slate-400'}`}
+                          >
+                            json
+                          </button>
+                        </div>
+                      )}
+                      <div className="divide-y divide-white/5">
+                        {isPlanActive ? (
+                          <div className="px-5 py-4 space-y-2">
+                            <div className="flex items-center gap-3 mb-4">
+                              <span className="relative flex h-2 w-2 flex-shrink-0">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
+                                <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-400" />
+                              </span>
+                              <p className="text-sm font-medium text-slate-300">Building execution plan…</p>
+                            </div>
+                            <div className="ml-5 pl-3 border-l border-white/5 space-y-1.5">
+                              {planStage.substeps.map((sub, si) => {
+                                const subDone = planSubstepIdx !== -1 && si < planSubstepIdx
+                                const subActive = planSubstepIdx !== -1 && si === planSubstepIdx
+                                return (
+                                  <div key={sub.status} className="flex items-center gap-2">
+                                    <span className={`text-xs w-3 flex-shrink-0 font-mono ${subDone ? 'text-green-400' : subActive ? 'text-indigo-300' : 'text-slate-700'}`}>
+                                      {subDone ? '✓' : subActive ? '•' : '○'}
+                                    </span>
+                                    <span className={`text-xs ${subDone ? 'text-slate-500' : subActive ? 'text-slate-300' : 'text-slate-600'}`}>
+                                      {sub.label}
+                                    </span>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        ) : plan?.plan_json ? (
+                          planView === 'json' ? (
+                            <div className="px-5 py-4">
+                              <pre className="text-[11px] text-slate-400 font-mono whitespace-pre-wrap leading-relaxed overflow-x-auto">
+                                {JSON.stringify(plan.plan_json, null, 2)}
+                              </pre>
+                            </div>
+                          ) : (
+                            plan.plan_json.phases.map((phase, pi) => (
+                              <div key={phase.id} className="px-5 py-4">
+                                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 font-headline mb-3">
+                                  Phase {pi + 1} — {phase.title}
+                                </p>
+                                <div className="space-y-3">
+                                  {phase.tasks.map((task) => (
+                                    <div key={task.id} className="rounded-lg bg-[#0f172a] border border-white/5 p-3">
+                                      <div className="flex items-start justify-between gap-3 mb-1.5">
+                                        <span className="text-sm text-slate-200 font-medium leading-snug">{task.title}</span>
+                                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-500 uppercase flex-shrink-0">{task.type}</span>
+                                      </div>
+                                      {task.files.length > 0 && (
+                                        <div className="flex flex-wrap gap-1.5 mt-2">
+                                          {task.files.map(f => (
+                                            <span key={f} className="text-[10px] font-mono text-indigo-400/70 bg-indigo-400/5 px-1.5 py-0.5 rounded">{f}</span>
+                                          ))}
+                                        </div>
+                                      )}
+                                      {task.expected_result && (
+                                        <p className="text-xs text-slate-500 mt-2 leading-relaxed">{task.expected_result}</p>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ))
+                          )
+                        ) : isAnalyzing ? (
+                          <p className="px-5 py-6 text-sm text-slate-600 text-center">Plan will appear here once generated.</p>
+                        ) : (
+                          <p className="px-5 py-6 text-sm text-slate-500 text-center">No plan data available.</p>
+                        )}
                       </div>
-                    )}
-                  </div>
-                )}
+                    </div>
+                  )
+                })()}
+
+                {/* Spec tab */}
+                {planTab === 'spec' && (() => {
+                  const specStage = PIPELINE_STAGES[0]
+                  const isSpecActive = specStage.activeStatuses.includes(pipelineStatus ?? '')
+                  const specSubstepIdx = activeSubstepIndex(0, pipelineStatus)
+                  return (
+                    <div className="px-5 py-4">
+                      {isSpecActive ? (
+                        <div className="space-y-2 py-2">
+                          <div className="flex items-center gap-3 mb-4">
+                            <span className="relative flex h-2 w-2 flex-shrink-0">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
+                              <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-400" />
+                            </span>
+                            <p className="text-sm font-medium text-slate-300">Generating specification…</p>
+                          </div>
+                          <div className="ml-5 pl-3 border-l border-white/5 space-y-1.5">
+                            {specStage.substeps.map((sub, si) => {
+                              const subDone = specSubstepIdx !== -1 && si < specSubstepIdx
+                              const subActive = specSubstepIdx !== -1 && si === specSubstepIdx
+                              return (
+                                <div key={sub.status} className="flex items-center gap-2">
+                                  <span className={`text-xs w-3 flex-shrink-0 font-mono ${subDone ? 'text-green-400' : subActive ? 'text-indigo-300' : 'text-slate-700'}`}>
+                                    {subDone ? '✓' : subActive ? '•' : '○'}
+                                  </span>
+                                  <span className={`text-xs ${subDone ? 'text-slate-500' : subActive ? 'text-slate-300' : 'text-slate-600'}`}>
+                                    {sub.label}
+                                  </span>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      ) : specMarkdown ? (
+                        <pre className="text-xs text-slate-400 font-mono whitespace-pre-wrap leading-relaxed">
+                          {specMarkdown}
+                        </pre>
+                      ) : isAnalyzing ? (
+                        <p className="text-sm text-slate-600 text-center py-8">Spec will appear here once generated.</p>
+                      ) : (
+                        <div className="text-center py-8">
+                          <p className="text-sm text-slate-500 mb-4">Spec was not generated.</p>
+                          <button
+                            disabled={generatingSpec}
+                            onClick={async () => {
+                              setGeneratingSpec(true)
+                              try {
+                                const res = await fetch(`/api/change-requests/${change.id}/spec`, { method: 'POST' })
+                                if (res.ok) {
+                                  const data = await res.json()
+                                  setSpecMarkdown(data.spec_markdown ?? null)
+                                }
+                              } finally {
+                                setGeneratingSpec(false)
+                              }
+                            }}
+                            className="px-4 py-2 rounded-lg bg-indigo-500 hover:bg-indigo-400 disabled:opacity-50 text-white text-sm font-bold font-headline transition-colors"
+                          >
+                            {generatingSpec ? 'Generating…' : 'Generate Spec'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })()}
 
                 {/* Execute footer (approved) */}
-                {plan.status === 'approved' && (
+                {plan?.status === 'approved' && (
                   <div className="px-5 py-4 border-t border-white/5 flex items-center justify-between">
                     <p className="text-xs text-slate-500">
                       {change.status === 'failed' ? 'Previous execution failed — retry when ready'
@@ -1213,7 +1363,7 @@ export function ChangeDetailView({
                 )}
 
                 {/* Approve footer */}
-                {plan.status !== 'approved' && (
+                {plan && plan.status !== 'approved' && (
                   <div className="px-5 py-4 border-t border-white/5 space-y-3">
                   {actionError && (
                     <div className="flex items-start gap-2 rounded-lg bg-red-950/40 border border-red-500/30 px-3 py-2">

@@ -32,7 +32,8 @@ export async function POST(
 
   const adminDb = createAdminClient()
   const ai = getProvider()
-  runPipeline(id, adminDb, ai).catch((err: unknown) =>
+  // forceReset: allow regeneration from any recoverable state (ready, awaiting_approval, planned)
+  runPipeline(id, adminDb, ai, { forceReset: true }).catch((err: unknown) =>
     console.error(`[pipeline] change ${id} failed:`, err)
   )
 

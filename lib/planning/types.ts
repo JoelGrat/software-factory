@@ -46,18 +46,37 @@ export type TaskType =
   | 'api'
   | 'refactor'
 
+export interface CodeSnippet {
+  file: string
+  language: string
+  purpose: string
+  content: string
+}
+
+export interface Playbook {
+  implementation_notes: string[]
+  commands: string[]
+  expected_outputs: string[]
+  code_snippets: CodeSnippet[]
+  temporary_failures_allowed: string[]
+  commit: string
+  rollback: string[]
+  methodology?: 'test_first' | 'standard'
+}
+
 export interface Task {
   id: string
   title: string
-  description?: string   // optional long-form for UI and human review
+  description?: string
   type: TaskType
   files: string[]
-  depends_on: string[]   // task ids within the plan
-  substeps: Substep[]    // execute in array order; future scheduler may override
+  depends_on: string[]
+  substeps: Substep[]
   validation: ValidationCheck[]
   expected_result: string
+  playbook: Playbook
   retryable?: boolean
-  parallelizable?: boolean  // task may run alongside others; does NOT affect substep ordering
+  parallelizable?: boolean
 }
 
 export interface Phase {
@@ -67,10 +86,24 @@ export interface Phase {
   tasks: Task[]
 }
 
+export interface PlanSummary {
+  architecture: string
+  tech_stack: string[]
+  spec_ref: string
+}
+
+export interface PlanFileMap {
+  create: string[]
+  rewrite: string[]
+  delete: string[]
+}
+
 export interface DetailedPlan {
-  schema_version: 1
+  schema_version: 2
   planner_version: number
   goal: string
+  summary: PlanSummary
+  file_map: PlanFileMap
   // branch_name lives as a top-level column on change_plans — not stored here
   phases: Phase[]
 }

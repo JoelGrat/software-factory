@@ -23,7 +23,7 @@ export default async function ChangeDetailPage({
 
   const { data: change } = await db
     .from('change_requests')
-    .select('id, project_id, title, intent, type, priority, status, pipeline_status, failed_phase, risk_level, confidence_score, analysis_quality, tags, created_at, updated_at')
+    .select('id, project_id, title, intent, type, priority, status, pipeline_status, failed_stage, retryable, failure_diagnostics, risk_level, confidence_score, analysis_quality, tags, created_at, updated_at')
     .eq('id', changeId)
     .eq('project_id', id)
     .single()
@@ -54,10 +54,19 @@ export default async function ChangeDetailPage({
         .limit(10)
     : { data: [] }
 
+  // Fetch latest spec markdown
+  const { data: specRow } = await db
+    .from('change_specs')
+    .select('markdown')
+    .eq('change_id', changeId)
+    .order('version', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
   // Fetch plan if exists
   const { data: plan } = await db
     .from('change_plans')
-    .select('id, status, spec_markdown, estimated_tasks, estimated_files, approved_at')
+    .select('id, status, estimated_tasks, branch_name, plan_quality_score, plan_json, approved_at')
     .eq('change_id', changeId)
     .order('created_at', { ascending: false })
     .limit(1)
@@ -104,6 +113,7 @@ export default async function ChangeDetailPage({
       plan={plan ?? null}
       planTasks={(planTasks ?? []) as any[]}
       componentFileMap={componentFileMap}
+      specMarkdown={specRow?.markdown ?? null}
     />
   )
 }

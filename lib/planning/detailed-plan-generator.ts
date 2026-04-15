@@ -10,6 +10,12 @@ export class PlanQualityGateError extends Error {
   }
 }
 
+function stripCodeFence(s: string): string {
+  const trimmed = s.trim()
+  const m = trimmed.match(/^```(?:json)?\s*\n([\s\S]*?)\n?```\s*$/)
+  return m ? m[1] : trimmed
+}
+
 function buildDetailedPlanPrompt(
   change: { title: string; intent: string },
   spec: ChangeSpec,
@@ -45,6 +51,8 @@ Rules — every task MUST have:
 3. At least one validation check
 4. A non-empty expected_result
 5. depends_on references that exist within this plan
+6. A playbook object with commit, implementation_notes, commands, expected_outputs, code_snippets, temporary_failures_allowed, and rollback
+7. database/backend/refactor tasks MUST include at least one code_snippet with real content
 
 Task types: backend, frontend, database, testing, infra, api, refactor
 Substep actions: write_file, modify_file, run_command, verify_schema, run_test, insert_row
@@ -56,9 +64,19 @@ Validation types:
 
 Respond with JSON:
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "planner_version": ${plannerVersion},
   "goal": "...",
+  "summary": {
+    "architecture": "2-3 sentence description of the implementation approach",
+    "tech_stack": ["Next.js", "Supabase", "TypeScript"],
+    "spec_ref": ""
+  },
+  "file_map": {
+    "create": ["list of new files"],
+    "rewrite": ["list of files being substantially changed"],
+    "delete": ["list of files being removed"]
+  },
   "phases": [
     {
       "id": "phase_1",
@@ -77,7 +95,23 @@ Respond with JSON:
             { "id": "step_2", "action": "run_command", "command": "supabase db push", "expected": ["Done"] }
           ],
           "validation": [{ "type": "command", "command": "supabase db push", "success_contains": "Done" }],
-          "expected_result": "Migration applied successfully"
+          "expected_result": "Migration applied successfully",
+          "playbook": {
+            "implementation_notes": ["Specific notes about what to watch out for"],
+            "commands": ["supabase db push"],
+            "expected_outputs": ["Migration applied successfully"],
+            "code_snippets": [
+              {
+                "file": "supabase/migrations/025_foo.sql",
+                "language": "sql",
+                "purpose": "Create table",
+                "content": "create table foo (id uuid primary key default gen_random_uuid());"
+              }
+            ],
+            "temporary_failures_allowed": [],
+            "commit": "feat: add foo migration",
+            "rollback": ["supabase db reset"]
+          }
         }
       ]
     }
@@ -101,7 +135,7 @@ export async function generateDetailedPlan(
 
   let plan: DetailedPlan
   try {
-    plan = JSON.parse(result.content)
+    plan = JSON.parse(stripCodeFence(result.content))
   } catch {
     throw new Error(`Plan generation produced non-JSON response: ${result.content.slice(0, 200)}`)
   }
@@ -120,7 +154,7 @@ export async function generateDetailedPlan(
 
   let retryPlan: DetailedPlan
   try {
-    retryPlan = JSON.parse(retryResult.content)
+    retryPlan = JSON.parse(stripCodeFence(retryResult.content))
   } catch {
     throw new Error(`Plan generation retry produced non-JSON response: ${retryResult.content.slice(0, 200)}`)
   }

@@ -50,11 +50,17 @@ async function inferCandidateComponents(
 async function loadProjectContext(db: SupabaseClient, projectId: string): Promise<string> {
   const { data: project, error } = await db
     .from('projects')
-    .select('name, description')
+    .select('name')
     .eq('id', projectId)
     .single()
   if (error) console.warn(`loadProjectContext: failed to load project ${projectId}:`, error.message)
-  return project ? `Project: ${project.name}. ${project.description ?? ''}`.trim() : ''
+  return project ? `Project: ${project.name}` : ''
+}
+
+function stripCodeFence(s: string): string {
+  const trimmed = s.trim()
+  const m = trimmed.match(/^```(?:json)?\s*\n([\s\S]*?)\n?```\s*$/)
+  return m ? m[1] : trimmed
 }
 
 async function generateCanonicalSpec(
@@ -125,7 +131,7 @@ Respond with JSON.`)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let parsed: any
   try {
-    parsed = JSON.parse(result.content)
+    parsed = JSON.parse(stripCodeFence(result.content))
   } catch {
     throw new Error(`Spec generation produced non-JSON response: ${result.content.slice(0, 200)}`)
   }

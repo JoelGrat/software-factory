@@ -13,6 +13,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     .select(`
       id, project_id, title, intent, type, priority, status, pipeline_status,
       risk_level, confidence_score, confidence_breakdown, analysis_quality,
+      failed_stage, retryable, failure_diagnostics,
       lock_version, execution_group, triggered_by, tags, created_at, updated_at,
       projects!inner(owner_id)
     `)
@@ -49,7 +50,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   // Fetch plan if exists
   const { data: plan } = await db
     .from('change_plans')
-    .select('id, status, spec_markdown, estimated_tasks, estimated_files, approved_at')
+    .select('id, status, estimated_tasks, branch_name, plan_quality_score, plan_json, approved_at')
     .eq('change_id', id)
     .order('created_at', { ascending: false })
     .limit(1)
@@ -63,6 +64,15 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
         .order('order_index', { ascending: true })
     : { data: [] }
 
+  // Fetch latest spec markdown
+  const { data: specRow } = await db
+    .from('change_specs')
+    .select('markdown')
+    .eq('change_id', id)
+    .order('version', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
   return NextResponse.json({
     ...change,
     impact: impact ?? null,
@@ -70,6 +80,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     impact_components: impactComponents ?? [],
     plan: plan ?? null,
     plan_tasks: planTasks ?? [],
+    spec_markdown: specRow?.markdown ?? null,
   })
 }
 
