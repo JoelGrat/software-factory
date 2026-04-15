@@ -64,6 +64,7 @@ export async function runTask(
   opts: TaskRunnerOptions,
 ): Promise<TaskRunResult> {
   const { runId, changeId, changeIntent, taskIndex, baselineTypeErrorSigs, preExistingFailedTests, budget, seq } = opts
+  const taskStartMs = Date.now()
 
   // Acquire lock (conditional — prevents double-execution)
   const locked = await acquireTaskLock(db, task.id, runId)
@@ -84,7 +85,7 @@ export async function runTask(
     await insertEvent(db, {
       runId, changeId, seq: seq(), iteration: taskIndex,
       eventType: 'task.completed',
-      payload: { taskId: task.id, durationMs: 0 },
+      payload: { taskId: task.id, durationMs: Date.now() - taskStartMs },
     })
     return { success: true, filesWritten: [], newFiles: [] }
   }
@@ -155,7 +156,7 @@ export async function runTask(
     await insertEvent(db, {
       runId, changeId, seq: seq(), iteration: taskIndex,
       eventType: 'task.completed',
-      payload: { taskId: task.id, durationMs: 0 },
+      payload: { taskId: task.id, durationMs: Date.now() - taskStartMs },
     })
     return { success: true, filesWritten, newFiles }
   }
@@ -181,7 +182,7 @@ export async function runTask(
     await insertEvent(db, {
       runId, changeId, seq: seq(), iteration: taskIndex,
       eventType: 'task.completed',
-      payload: { taskId: task.id, durationMs: 0 },
+      payload: { taskId: task.id, durationMs: Date.now() - taskStartMs },
     })
     return {
       success: true,
