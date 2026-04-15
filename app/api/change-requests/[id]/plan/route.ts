@@ -22,10 +22,10 @@ export async function POST(
 
   if (!change) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  const ALLOWED = ['analyzed', 'planned', 'awaiting_approval']
-  if (!ALLOWED.includes(change.status)) {
+  const BLOCKED = ['planning', 'executing', 'review']
+  if (BLOCKED.includes(change.status)) {
     return NextResponse.json(
-      { error: `Cannot generate plan from status '${change.status}'. Must be 'analyzed', 'planned', or 'awaiting_approval'.` },
+      { error: `Cannot trigger planning while change is in progress (status: '${change.status}').` },
       { status: 409 }
     )
   }
@@ -59,7 +59,7 @@ export async function GET(
 
   const { data: plan } = await db
     .from('change_plans')
-    .select('id, status, spec_markdown, estimated_tasks, estimated_files, created_at, approved_at')
+    .select('id, status, branch_name, plan_json, plan_quality_score, version, current_stage, created_at, approved_at')
     .eq('change_id', id)
     .order('created_at', { ascending: false })
     .limit(1)
