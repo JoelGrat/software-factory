@@ -1,32 +1,103 @@
 // lib/planning/types.ts
 
-export interface DraftPlan {
-  new_file_paths: string[]
-  component_names: string[]
-  assumptions: string[]       // AI-inferred assumptions about the change context
-  confidence: number          // 0.0–1.0, clamped; defaults to 0.5 if AI omits it
+// ---- Spec ----
+
+export interface ChangeSpec {
+  problem: string
+  goals: string[]
+  architecture: string
+  constraints: string[]
+  data_model?: string
+  ui_behavior?: string
+  policies?: string[]
+  out_of_scope: string[]
 }
 
-export interface ImpactedComponent {
-  componentId: string
-  name: string
-  type: string
-  impactWeight: number
+// ---- Plan ----
+
+export type ValidationCheck =
+  | { type: 'command'; command: string; success_contains?: string }
+  | { type: 'file_exists'; target: string }
+  | { type: 'schema'; table: string; expected_columns?: string[] }
+  | { type: 'test_pass'; pattern?: string }
+
+export type SubstepAction =
+  | 'write_file'
+  | 'modify_file'
+  | 'run_command'
+  | 'verify_schema'
+  | 'run_test'
+  | 'insert_row'
+
+export interface Substep {
+  id: string
+  action: SubstepAction
+  target?: string    // file path or schema name
+  command?: string
+  expected?: string[]
 }
 
-export interface PlannerArchitecture {
-  approach: string
-  branchName: string
-  testApproach: string
-  estimatedFiles: number
-  componentApproaches: Record<string, string>  // componentName → approach
-  newFilePaths: string[]  // new files the plan requires creating
+export type TaskType =
+  | 'backend'
+  | 'frontend'
+  | 'database'
+  | 'testing'
+  | 'infra'
+  | 'api'
+  | 'refactor'
+
+export interface Task {
+  id: string
+  title: string
+  description?: string   // optional long-form for UI and human review
+  type: TaskType
+  files: string[]
+  depends_on: string[]   // task ids within the plan
+  substeps: Substep[]    // execute in array order; future scheduler may override
+  validation: ValidationCheck[]
+  expected_result: string
+  retryable?: boolean
+  parallelizable?: boolean  // task may run alongside others; does NOT affect substep ordering
 }
 
-export interface PlannerTask {
-  description: string
-  componentId: string | null
-  componentName: string
-  orderIndex: number
-  newFilePath?: string  // set when task creates a new file rather than modifying an existing one
+export interface Phase {
+  id: string
+  title: string
+  depends_on: string[]   // phase ids
+  tasks: Task[]
+}
+
+export interface DetailedPlan {
+  schema_version: 1
+  planner_version: number
+  goal: string
+  // branch_name lives as a top-level column on change_plans — not stored here
+  phases: Phase[]
+}
+
+// ---- Failure ----
+
+export interface PlannerDiagnostics {
+  summary: string
+  issues: string[]   // first 10 only
+  truncated: boolean
+}
+
+export type PlannerStage = 'spec' | 'plan' | 'projection' | 'impact' | 'risk' | 'policy'
+
+export interface PlannerFailure {
+  stage: PlannerStage
+  retryable: boolean
+  reason: string
+  diagnostics: PlannerDiagnostics
+  failed_at: string   // ISO timestamp
+}
+
+// ---- Impact seeding ----
+
+export interface PlanSeeds {
+  filePaths: string[]
+  componentHints: string[]
+  hasMigration: boolean
+  commands: string[]
 }
