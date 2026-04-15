@@ -13,7 +13,7 @@ export async function acquireTaskLock(
   taskId: string,
   runId: string,
 ): Promise<boolean> {
-  const { data } = await db
+  const { data, error } = await db
     .from('change_plan_tasks')
     .update({
       status: 'in_progress',
@@ -23,6 +23,7 @@ export async function acquireTaskLock(
     .eq('id', taskId)
     .eq('status', 'pending')
     .select('id')
+  if (error) throw new Error(`acquireTaskLock failed: ${error.message}`)
   return (data?.length ?? 0) > 0
 }
 
@@ -31,12 +32,13 @@ export async function releaseTaskDone(
   db: SupabaseClient,
   taskId: string,
 ): Promise<void> {
-  await db.from('change_plan_tasks').update({
+  const { error } = await db.from('change_plan_tasks').update({
     status: 'done',
     completed_at: new Date().toISOString(),
     locked_by_run_id: null,
     locked_at: null,
   }).eq('id', taskId)
+  if (error) throw new Error(`releaseTaskDone failed: ${error.message}`)
 }
 
 /** Mark a task as failed with a reason. */
@@ -45,12 +47,13 @@ export async function releaseTaskFailed(
   taskId: string,
   reason: string,
 ): Promise<void> {
-  await db.from('change_plan_tasks').update({
+  const { error } = await db.from('change_plan_tasks').update({
     status: 'failed',
     failure_reason: reason.slice(0, 500),
     locked_by_run_id: null,
     locked_at: null,
   }).eq('id', taskId)
+  if (error) throw new Error(`releaseTaskFailed failed: ${error.message}`)
 }
 
 /** Mark a task as blocked by a dependency. */
@@ -59,10 +62,11 @@ export async function markTaskBlocked(
   taskId: string,
   blockedByTaskId: string,
 ): Promise<void> {
-  await db.from('change_plan_tasks').update({
+  const { error } = await db.from('change_plan_tasks').update({
     status: 'blocked',
     blocked_by_task_id: blockedByTaskId,
   }).eq('id', taskId)
+  if (error) throw new Error(`markTaskBlocked failed: ${error.message}`)
 }
 
 /**
@@ -71,8 +75,9 @@ export async function markTaskBlocked(
  */
 export async function crashRecoveryCleanup(db: SupabaseClient): Promise<void> {
   const cutoff = new Date(Date.now() - LOCK_TIMEOUT_MS).toISOString()
-  await db.from('change_plan_tasks')
+  const { error } = await db.from('change_plan_tasks')
     .update({ status: 'pending', locked_by_run_id: null, locked_at: null })
     .eq('status', 'in_progress')
     .lt('locked_at', cutoff)
+  if (error) console.warn('[task-locker] crashRecoveryCleanup failed:', error.message)
 }
