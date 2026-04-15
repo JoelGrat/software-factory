@@ -6,7 +6,6 @@ import { LeftNav } from '@/components/app/left-nav'
 import { ProfileAvatar } from '@/components/app/profile-avatar'
 import { ChangeStepBar } from '@/components/app/change-step-bar'
 import { ExecutionLiveStrip } from '@/components/app/execution-live-strip'
-import { ExecutionIterationCard } from '@/components/app/execution-iteration-card'
 
 function str(v: unknown, fallback = ''): string {
   return v != null ? String(v) : fallback
@@ -72,6 +71,16 @@ interface RunData {
   cancellationRequested: boolean
 }
 
+interface TaskRow {
+  id: string
+  description: string
+  order_index: number
+  status: string
+  failure_reason: string | null
+  blocked_by_task_id: string | null
+  completed_at: string | null
+}
+
 interface Change {
   id: string
   title: string
@@ -86,6 +95,7 @@ export default function ExecutionView({ change, project }: { change: Change; pro
   const [changeStatus, setChangeStatus] = useState(change.status)
   const [run, setRun] = useState<RunData | null>(null)
   const [events, setEvents] = useState<LiveEvent[]>([])
+  const [tasks, setTasks] = useState<TaskRow[]>([])
   const [starting, setStarting] = useState(false)
   const [startError, setStartError] = useState<string | null>(null)
   const [cancelState, setCancelState] = useState<'idle' | 'requesting' | 'cancelled' | 'committing' | 'force_failed'>('idle')
@@ -101,6 +111,7 @@ export default function ExecutionView({ change, project }: { change: Change; pro
     setChangeStatus(data.changeStatus ?? change.status)
     setRun(data.run ?? null)
     setEvents(data.events ?? [])
+    if (data.tasks) setTasks(data.tasks)
     // Restore cancel state from server — handles page refresh while cancellation is in flight
     if (data.run?.cancellationRequested) {
       setCancelState(prev => prev === 'idle' ? 'cancelled' : prev)
@@ -177,22 +188,26 @@ export default function ExecutionView({ change, project }: { change: Change; pro
     }
   }
 
-  // Group events by iteration
-  const iterationMap = new Map<number, LiveEvent[]>()
-  for (const e of events) {
-    const arr = iterationMap.get(e.iteration) ?? []
-    arr.push(e)
-    iterationMap.set(e.iteration, arr)
-  }
-  const iterations = [...iterationMap.entries()]
-    .filter(([n]) => n > 0)
-    .sort(([a], [b]) => a - b)
-
   const runActive = run?.status === 'running'
   const runDone = run && run.status !== 'running'
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const summary = run?.summary as any
+
+  function getTaskUiState(
+    task: TaskRow,
+    taskEvents: LiveEvent[],
+  ): 'queued' | 'running' | 'repairing' | 'done' | 'failed' | 'blocked' {
+    if (task.status === 'done') return 'done'
+    if (task.status === 'failed') return 'failed'
+    if (task.status === 'blocked') return 'blocked'
+
+    const lastEvent = taskEvents[taskEvents.length - 1]
+    if (!lastEvent) return 'queued'
+    if (lastEvent.event_type === 'task.repair_started') return 'repairing'
+    if (lastEvent.event_type === 'task.started' || lastEvent.event_type === 'task.validation_started') return 'running'
+    return 'queued'
+  }
 
   return (
     <div className="flex flex-col h-screen bg-[#0b1326] text-on-surface overflow-hidden">
@@ -316,19 +331,108 @@ export default function ExecutionView({ change, project }: { change: Change; pro
               </div>
             )}
 
-            {/* Iteration cards */}
-            {iterations.length > 0 && (
-              <div className="space-y-3">
-                {iterations.map(([n, evs], i) => (
-                  <ExecutionIterationCard
-                    key={n}
-                    iteration={n}
-                    events={evs}
-                    defaultExpanded={i === iterations.length - 1}
-                    isFinal={i === iterations.length - 1}
-                    runActive={runActive}
-                  />
-                ))}
+            {/* Task list */}
+            {tasks.length > 0 && (
+              <div className="rounded-xl bg-[#131b2e] border border-white/5 overflow-hidden">
+                <div className="divide-y divide-white/5">
+                  {tasks.map(task => {
+                    const taskEvents = events.filter(e =>
+                      (e.payload as { taskId?: string } | undefined)?.taskId === task.id
+                    )
+                    const uiState = getTaskUiState(task, taskEvents)
+
+                    const statusColors: Record<string, string> = {
+                      done:      'text-green-400 bg-green-400/10',
+                      failed:    'text-red-400 bg-red-400/10',
+                      blocked:   'text-slate-500 bg-slate-500/10',
+                      running:   'text-indigo-400 bg-indigo-400/10',
+                      repairing: 'text-amber-400 bg-amber-400/10',
+                      queued:    'text-slate-600 bg-slate-700/30',
+                    }
+
+                    const blockedByIndex = task.blocked_by_task_id
+                      ? tasks.findIndex(t => t.id === task.blocked_by_task_id) + 1
+                      : null
+
+                    return (
+                      <div key={task.id} className="px-5 py-4">
+                        <div className="flex items-start gap-3">
+                          <span className={`mt-0.5 flex-shrink-0 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${statusColors[uiState] ?? statusColors['queued']}`}>
+                            {uiState}
+                          </span>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm text-slate-200 leading-snug">{task.description}</p>
+
+                            {/* Blocked reason */}
+                            {uiState === 'blocked' && blockedByIndex && (
+                              <p className="mt-1 text-xs text-slate-500">
+                                Blocked by task {blockedByIndex}
+                              </p>
+                            )}
+
+                            {/* Failure reason + retrigger */}
+                            {uiState === 'failed' && (
+                              <div className="mt-2 flex items-start gap-3 flex-wrap">
+                                {task.failure_reason && (
+                                  <p className="text-xs text-red-400 font-mono leading-snug break-all">{task.failure_reason}</p>
+                                )}
+                                <button
+                                  onClick={async () => {
+                                    await fetch(`/api/change-requests/${change.id}/execute`, {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ fromTaskId: task.id }),
+                                    })
+                                    setChangeStatus('executing')
+                                    await poll()
+                                  }}
+                                  className="flex-shrink-0 px-3 py-1 rounded border border-white/10 text-xs text-slate-400 hover:text-slate-200 hover:border-white/20 font-bold transition-colors"
+                                >
+                                  Retrigger
+                                </button>
+                              </div>
+                            )}
+
+                            {/* Live events for active task */}
+                            {(uiState === 'running' || uiState === 'repairing') && taskEvents.length > 0 && (
+                              <div className="mt-2 space-y-0.5">
+                                {taskEvents.slice(-3).map(e => (
+                                  <p key={`${e.id}`} className="text-[11px] text-slate-600 font-mono">
+                                    {e.event_type}
+                                  </p>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+
+                {/* Run summary footer */}
+                {run?.summary && (() => {
+                  const trs = (run.summary as { taskRunSummary?: { finalStatus: string; completedTasks: string[]; failedTasks: string[]; blockedTasks: string[]; totalTasks: number } }).taskRunSummary
+                  if (!trs) return null
+                  return (
+                    <div className="px-5 py-4 border-t border-white/5 flex items-center gap-4 text-xs text-slate-500">
+                      <span className={`font-bold ${
+                        trs.finalStatus === 'success' ? 'text-green-400' :
+                        trs.finalStatus === 'partial' ? 'text-amber-400' :
+                        'text-red-400'
+                      }`}>
+                        {trs.finalStatus.toUpperCase()}
+                      </span>
+                      <span>{trs.completedTasks.length}/{trs.totalTasks} tasks completed</span>
+                      {trs.failedTasks.length > 0 && (
+                        <span className="text-red-400">{trs.failedTasks.length} failed</span>
+                      )}
+                      {trs.blockedTasks.length > 0 && (
+                        <span>{trs.blockedTasks.length} blocked</span>
+                      )}
+                    </div>
+                  )
+                })()}
               </div>
             )}
 
