@@ -122,11 +122,15 @@ export async function runPipeline(
     // Stage 3: Project Human Task View
     if (shouldRunStage(startStage, 'projection')) {
       const t = Date.now()
-      if (currentPlanJson) {
-        const tasks = projectToTasks(currentPlanJson)
-        const version = planRow?.planner_version ?? plannerVersion
-        await rebuildTaskProjection(db, planId, version, tasks)
+      if (!currentPlanJson) {
+        throw Object.assign(
+          new Error('No plan_json — cannot rebuild task projection'),
+          { _stage: 'projection' as PlannerStage }
+        )
       }
+      const tasks = projectToTasks(currentPlanJson)
+      const version = planRow?.planner_version ?? plannerVersion
+      await rebuildTaskProjection(db, planId, version, tasks)
       await updatePlanStage(db, planId, 'projection', Date.now() - t)
     }
 
@@ -166,10 +170,15 @@ export async function runPipeline(
       .eq('id', planId)
       .single()
     const qualityScore = (planMeta as any)?.plan_quality_score ?? 1.0
-    if (currentPlanJson) {
+    if (planId && currentPlanJson) {
       await finalizePlan(db, planId, currentPlanJson, qualityScore)
+      await applyExecutionPolicy(changeId, planId, qualityScore, db, ai)
+    } else {
+      throw Object.assign(
+        new Error('Cannot finalize: missing plan row or plan JSON'),
+        { _stage: 'policy' as PlannerStage }
+      )
     }
-    await applyExecutionPolicy(changeId, planId, qualityScore, db, ai)
 
   } catch (err) {
     const failure = buildFailure(err)
@@ -247,8 +256,8 @@ function buildFailure(err: unknown): PlannerFailure {
 function guessStageFromMessage(msg: unknown): PlannerStage {
   const m = String(msg ?? '').toLowerCase()
   if (m.includes('spec')) return 'spec'
-  if (m.includes('plan')) return 'plan'
   if (m.includes('projection')) return 'projection'
+  if (m.includes('plan')) return 'plan'
   if (m.includes('impact')) return 'impact'
   if (m.includes('risk')) return 'risk'
   return 'policy'
