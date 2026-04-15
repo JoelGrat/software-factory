@@ -24,7 +24,7 @@ import { writeStub, enrichSnapshot, markEnrichmentFailed } from '@/lib/dashboard
 import type { DashboardEvent } from '@/lib/dashboard/event-types'
 import { runDashboardJobs } from '@/lib/dashboard/jobs/runner'
 import { DEFAULT_BUDGET } from './execution-types-v2'
-import type { ExecutionBudget, IterationRecord } from './execution-types-v2'
+import type { ExecutionBudget, IterationRecord, OutcomeCategory } from './execution-types-v2'
 import { insertEvent, clearSeq } from './event-emitter'
 import { detectStuck } from './stuck-detector'
 import { determineCommitOutcome } from './commit-policy'
@@ -33,7 +33,7 @@ import { runRepairPhase } from './repair-phase'
 import { runBaselineRepair, createBaselineBlockedSuggestion } from './baseline-repair'
 import type { TestabilityStatus } from './execution-types-v2'
 import { createExecutionRun, startHeartbeat, isCancellationRequested, finalizeRun } from './execution-run-manager'
-import type { DiagnosticSet, CommitOutcome, ExecutionSummary } from './execution-types-v2'
+import type { DiagnosticSet, CommitOutcome, ExecutionSummary, ConfidenceDimensions, ConfidenceLabel } from './execution-types-v2'
 
 async function emitAndRecord(
   db: SupabaseClient,
@@ -336,11 +336,31 @@ export async function runExecution(
       baselineResult.status === 'repaired'   ? 'full_repaired' :
       baselineResult.status === 'pre_existing' ? 'partial' : 'full'
 
+    // ── Baseline typecheck snapshot ───────────────────────────────────────────
+    // Run tsc on the clean branch (before any patches) to fingerprint errors that
+    // already exist in the repo. The repair loop will only act on errors introduced
+    // by this change — not on pre-existing repo issues.
+    const baselineTscResult = await executor.runTypeCheck(env)
+    const baselineTypeErrorSigs = new Set(
+      baselineTscResult.errors.map(e => `${e.file}:${e.line}:${e.message}`)
+    )
+    if (baselineTypeErrorSigs.size > 0) {
+      await log('verbose', `Baseline typecheck: ${baselineTypeErrorSigs.size} pre-existing error${baselineTypeErrorSigs.size !== 1 ? 's' : ''} — will be filtered from repair loop`)
+      await insertEvent(db, {
+        runId, changeId, seq: seq(), iteration: 0,
+        eventType: 'baseline.tsc_pre_existing',
+        payload: { count: baselineTypeErrorSigs.size },
+      })
+    }
+
     // Per-file type-check errors from failed iterations — fed back into the prompt on retry
     const newFileTypeErrors = new Map<string, string>()
 
     let pendingTasks = sortedTasks.filter(t => t.status === 'pending')
     let fullSuccess = false
+    // Delta tracking for the final summary
+    let firstIterationErrorSigs: string[] = []
+    let lastIterationErrorSigs: string[] = []
 
     while (state.iteration < limits.maxIterations && pendingTasks.length > 0) {
       if (Date.now() - state.startedAt > limits.maxDurationMs) break
@@ -538,9 +558,21 @@ export async function runExecution(
         }
       }
 
-      while (!typeCheck.passed && inlineRepairCount < budget.perIteration.maxInlineRepairs) {
-        // Build diagnostic set (first 20, truncated flag)
-        const allDiags = typeCheck.errors.map(e => ({ file: e.file, line: e.line, message: e.message, code: 'TS' }))
+      // Filter out errors that existed in the repo before this change was applied.
+      // Only errors introduced by this change should drive the repair loop.
+      const filterNewErrors = (errors: typeof typeCheck.errors) =>
+        errors.filter(e => !baselineTypeErrorSigs.has(`${e.file}:${e.line}:${e.message}`))
+
+      let newTypeErrors = filterNewErrors(typeCheck.errors)
+
+      if (!typeCheck.passed && newTypeErrors.length === 0) {
+        await log('verbose', `Type check: all ${typeCheck.errors.length} error${typeCheck.errors.length !== 1 ? 's' : ''} are pre-existing — not introduced by this change`)
+      }
+
+      while (newTypeErrors.length > 0 && inlineRepairCount < budget.perIteration.maxInlineRepairs) {
+        const errorCountBefore = newTypeErrors.length
+        // Build diagnostic set from new errors only (first 20, truncated flag)
+        const allDiags = newTypeErrors.map(e => ({ file: e.file, line: e.line, message: e.message, code: 'TS' }))
         const diagnostics: DiagnosticSet = {
           diagnostics: allDiags.slice(0, 20),
           totalCount: allDiags.length,
@@ -548,16 +580,23 @@ export async function runExecution(
         }
         const errorPreview = allDiags.slice(0, 5).map(d => `  ${d.file}:${d.line} — ${d.message}`).join('\n')
         await log('error', `Type check failed · ${allDiags.length} error${allDiags.length !== 1 ? 's' : ''}\n${errorPreview}`)
-        const attempt = await runInlineRepair(db, ai, executor, env, runId, changeId, state.iteration, diagnostics, seq)
+        const attempt = await runInlineRepair(db, ai, executor, env, runId, changeId, state.iteration, diagnostics, seq, inlineRepairCount)
         repairsAttempted++
         allFilesChanged = [...new Set([...allFilesChanged, ...attempt.filesPatched])]
         inlineRepairCount++
         typeCheck = await executor.runTypeCheck(env)
+        newTypeErrors = filterNewErrors(typeCheck.errors)
+        // Regression guard: if the repair introduced new errors, stop immediately.
+        // Continuing would compound the damage rather than converge.
+        if (newTypeErrors.length > errorCountBefore) {
+          await log('error', `Inline repair introduced ${newTypeErrors.length - errorCountBefore} new error${newTypeErrors.length - errorCountBefore !== 1 ? 's' : ''} (${errorCountBefore} → ${newTypeErrors.length}) — stopping repair loop`)
+          break
+        }
       }
 
       const svDurationMs = Date.now() - svStart
-      if (!typeCheck.passed) {
-        const allDiags = typeCheck.errors.map(e => ({ file: e.file, line: e.line, message: e.message, code: 'TS' }))
+      if (newTypeErrors.length > 0) {
+        const allDiags = newTypeErrors.map(e => ({ file: e.file, line: e.line, message: e.message, code: 'TS' }))
         const diagnosticSigs = allDiags.map(d => `${d.file}:${d.line}:${d.message.slice(0, 40)}`)
         finalFailureType = `tsc: ${allDiags.length} error${allDiags.length !== 1 ? 's' : ''}`
         const finalErrorPreview = allDiags.slice(0, 5).map(d => `  ${d.file}:${d.line} — ${d.message}`).join('\n')
@@ -574,7 +613,19 @@ export async function runExecution(
           },
         })
 
-        const currRecord: IterationRecord = { iteration: state.iteration, diagnosticSigs, errorCount: allDiags.length, repairedFiles: [] }
+        // Budget exhausted with errors still remaining — stop before burning another outer iteration.
+        if (inlineRepairCount >= budget.perIteration.maxInlineRepairs && newTypeErrors.length > 0) {
+          await insertEvent(db, { runId, changeId, seq: seq(), iteration: state.iteration, eventType: 'iteration.stuck', payload: { reason: 'max_attempts_reached' } })
+          await log('error', `Inline repair budget exhausted (${inlineRepairCount}/${budget.perIteration.maxInlineRepairs} attempts) — ${newTypeErrors.length} error${newTypeErrors.length !== 1 ? 's' : ''} unresolved`)
+          break
+        }
+
+        const prevSigs = new Set(iterationHistory[iterationHistory.length - 1]?.diagnosticSigs ?? [])
+        const resolvedCount = [...prevSigs].filter(s => !diagnosticSigs.includes(s)).length
+        const newCount = diagnosticSigs.filter(s => !prevSigs.has(s)).length
+        if (iterationHistory.length === 0) firstIterationErrorSigs = diagnosticSigs
+        lastIterationErrorSigs = diagnosticSigs
+        const currRecord: IterationRecord = { iteration: state.iteration, diagnosticSigs, errorCount: allDiags.length, resolvedCount, newCount, repairedFiles: [] }
         const stuck = detectStuck(iterationHistory, currRecord, budget.perIteration)
         if (stuck.stuck) {
           await insertEvent(db, { runId, changeId, seq: seq(), iteration: state.iteration, eventType: 'iteration.stuck', payload: { reason: stuck.reason } })
@@ -582,11 +633,22 @@ export async function runExecution(
           break
         }
         iterationHistory.push(currRecord)
+        // Record TSC errors on newly-created files so the next iteration's prompt
+        // includes them as `previousError` — the AI can learn from its own mistakes.
+        for (const err of newTypeErrors) {
+          if (iterationNewFiles.some(f => f.path === err.file)) {
+            const prev = newFileTypeErrors.get(err.file)
+            newFileTypeErrors.set(
+              err.file,
+              (prev ? prev + '\n' : '') + `${err.file}:${err.line} — ${err.message}`,
+            )
+          }
+        }
         await insertEvent(db, { runId, changeId, seq: seq(), iteration: state.iteration, eventType: 'iteration.completed', payload: { durationMs: Date.now() - svStart } })
         continue
       }
 
-      await log('success', `Static validation passed`)
+      await log('success', `Static validation passed${typeCheck.errors.length > 0 ? ` (${typeCheck.errors.length} pre-existing error${typeCheck.errors.length !== 1 ? 's' : ''} in repo, not introduced by this change)` : ''}`)
       await insertEvent(db, { runId, changeId, seq: seq(), iteration: state.iteration, eventType: 'phase.static_validation.passed', payload: { durationMs: svDurationMs } })
 
       // ── Test phases ─────────────────────────────────────────────────────
@@ -648,6 +710,27 @@ export async function runExecution(
           }
         }
 
+        // For TEST_TIMEOUT with 0 failures: tests hung before producing output (missing mocks,
+        // async I/O that never resolves, etc.). Synthesize a diagnostic for each in-scope test
+        // file so the repair phase can add vi.mock() and other guards.
+        if (filteredResult.failureType === 'TEST_TIMEOUT' && failureDiags.length === 0) {
+          const progressNote = filteredResult.raw?.progressNote
+          const timeoutPrefix = progressNote
+            ? `Timed out after 120s. ${progressNote}.`
+            : 'Timed out after 120s.'
+          const timeoutFiles = [...testScope.directTests, ...testScope.dependentTests].slice(0, 5)
+          for (const tf of timeoutFiles) {
+            failureDiags.push({
+              file: tf,
+              line: 1,
+              message: `${timeoutPrefix} Likely missing vi.mock() for external I/O. Mock all async external dependencies (Supabase client, fetch, network calls, database).`,
+              code: 'TIMEOUT',
+            })
+          }
+          failureSet.diagnostics = failureDiags.slice(0, 20)
+          failureSet.totalCount = failureDiags.length
+        }
+
         const hasActionableEvidence = failureDiags.length > 0 && !NO_EVIDENCE_TYPES.has(filteredResult.failureType ?? '')
 
         const failureLabel = filteredResult.failureType
@@ -682,7 +765,7 @@ export async function runExecution(
 
         while (!testsPassed && repairPhaseCount < budget.perIteration.maxRepairPhaseAttempts) {
           await log('error', `Tests failed · ${failureLabel}`)
-          const attempt = await runRepairPhase(db, ai, executor, env, runId, changeId, state.iteration, failureSet, (change as { intent: string | null }).intent ?? '', seq)
+          const attempt = await runRepairPhase(db, ai, executor, env, runId, changeId, state.iteration, failureSet, (change as { intent: string | null }).intent ?? '', seq, repairPhaseCount, filteredResult.failureType)
           repairsAttempted++
           allFilesChanged = [...new Set([...allFilesChanged, ...attempt.filesPatched])]
           testRepairFiles.push(...attempt.filesPatched)
@@ -701,8 +784,20 @@ export async function runExecution(
           // If all repair attempts produced zero patches the AI cannot generate a fix —
           // escalate to stuck immediately rather than burning more iterations.
           if (repairPhaseCount > 0 && testRepairFiles.length === 0) {
-            await insertEvent(db, { runId, changeId, seq: seq(), iteration: state.iteration, eventType: 'iteration.stuck', payload: { reason: 'no_repair_progress' } })
+            await insertEvent(db, { runId, changeId, seq: seq(), iteration: state.iteration, eventType: 'iteration.stuck', payload: { reason: 'no_diff_after_repair' } })
             await log('error', 'Stuck: repair phase produced no patches — AI cannot fix this failure')
+            break
+          }
+
+          // Repair produced patches but tests still time out after all attempts — we've exhausted
+          // the evidence available. Further iteration cannot converge.
+          if (
+            repairPhaseCount >= budget.perIteration.maxRepairPhaseAttempts &&
+            testRepairFiles.length > 0 &&
+            filteredResult.failureType === 'TEST_TIMEOUT'
+          ) {
+            await insertEvent(db, { runId, changeId, seq: seq(), iteration: state.iteration, eventType: 'iteration.stuck', payload: { reason: 'timeout_no_evidence' } })
+            await log('error', `Stuck: tests still timing out after ${repairPhaseCount} repair attempt${repairPhaseCount !== 1 ? 's' : ''} — no further evidence available`)
             break
           }
 
@@ -710,10 +805,17 @@ export async function runExecution(
           const testDiagSigs = newFailures.map(
             (f: { testName: string; error: string }) => `test:${f.testName}:${f.error.slice(0, 60)}`
           )
+          const testPrevSigs = new Set(iterationHistory[iterationHistory.length - 1]?.diagnosticSigs ?? [])
+          const testResolvedCount = [...testPrevSigs].filter(s => !testDiagSigs.includes(s)).length
+          const testNewCount = testDiagSigs.filter(s => !testPrevSigs.has(s)).length
+          if (iterationHistory.length === 0) firstIterationErrorSigs = testDiagSigs
+          lastIterationErrorSigs = testDiagSigs
           const currRecord: IterationRecord = {
             iteration: state.iteration,
             diagnosticSigs: testDiagSigs,
             errorCount: newFailures.length,
+            resolvedCount: testResolvedCount,
+            newCount: testNewCount,
             repairedFiles: [...new Set(testRepairFiles)],
           }
           const stuck = detectStuck(iterationHistory, currRecord, budget.perIteration)
@@ -842,25 +944,115 @@ export async function runExecution(
       else runStatus = 'budget_exceeded'
     }
 
-    // ── Confidence surface ────────────────────────────────────────────────────
+    // ── Outcome category — more nuanced than pass/fail ────────────────────────
+    // partial_success: files were generated and some errors resolved, but validation still failing
+    const resolvedErrors = firstIterationErrorSigs.filter(s => !lastIterationErrorSigs.includes(s))
+    const unresolvedErrors = lastIterationErrorSigs
+    const hadPartialProgress = allFilesChanged.length > 0 && resolvedErrors.length > 0 && unresolvedErrors.length > 0
+    const outcomeCategory: OutcomeCategory =
+      cancelled          ? 'cancelled'
+      : fullSuccess      ? 'success'
+      : hadPartialProgress ? 'partial_success'
+      : 'failure'
+
+    // ── Iteration delta table (for logs) ─────────────────────────────────────
+    const deltaRows = iterationHistory.map(r =>
+      `  Iter ${r.iteration}   resolved=${r.resolvedCount}   new=${r.newCount}   remaining=${r.errorCount}`
+    ).join('\n')
+
+    // ── Confidence dimensions ─────────────────────────────────────────────────
+    // Classify files: test files have .test. or .spec. in the name
+    const isTestFile = (f: string) => /\.test\.|\.spec\./.test(f)
+    const featureFilesChanged = allFilesChanged.filter(f => !isTestFile(f))
+    const unresolvedOnFeatureFiles = unresolvedErrors.filter(s => !isTestFile(s.split(':')[0] ?? ''))
+    const unresolvedOnTestFiles    = unresolvedErrors.filter(s =>  isTestFile(s.split(':')[0] ?? ''))
+
+    // Feature generation: did the agent produce feature files and are they type-clean?
+    const featureGeneration: ConfidenceLabel =
+      featureFilesChanged.length > 0 && unresolvedOnFeatureFiles.length === 0 ? 'high'
+      : featureFilesChanged.length > 0 ? 'medium'
+      : 'low'
+
+    // Type safety: clean if no unresolved errors; medium if only test files have errors
+    const typeSafety: ConfidenceLabel =
+      unresolvedErrors.length === 0 ? 'high'
+      : unresolvedOnFeatureFiles.length === 0 ? 'medium'  // only test-file errors remain
+      : 'low'
+
+    // Test validity: did tests pass or at least run cleanly?
+    const testValidity: ConfidenceLabel =
+      fullSuccess ? 'high'
+      : testabilityStatus === 'partial' ? 'medium'
+      : 'low'
+
+    const confidenceCounts = [featureGeneration, typeSafety, testValidity]
+    const highCount = confidenceCounts.filter(c => c === 'high').length
+    const lowCount  = confidenceCounts.filter(c => c === 'low').length
+    const overall: ConfidenceLabel =
+      highCount >= 3 ? 'high' : lowCount >= 2 ? 'low' : 'medium'
+
+    const confidence: ConfidenceDimensions = {
+      featureGeneration, typeSafety, testValidity, overall,
+    }
+
     const testabilityLabel =
-      testabilityStatus === 'full'          ? 'FULL'                             :
-      testabilityStatus === 'full_repaired' ? 'FULL (baseline was repaired)'     :
-      testabilityStatus === 'partial'       ? 'PARTIAL (pre-existing failures filtered)' :
-                                              'NOT EXECUTED (test infrastructure blocked)'
+      testabilityStatus === 'full'          ? 'full'                             :
+      testabilityStatus === 'full_repaired' ? 'full (baseline was repaired)'     :
+      testabilityStatus === 'partial'       ? 'partial (pre-existing failures filtered)' :
+                                              'blocked (test infrastructure unresolvable)'
 
     await log('verbose', [
-      `Type Safety:         ${fullSuccess || finalFailureType?.startsWith('tsc') === false ? 'PASS' : 'FAIL'}`,
-      `Runtime Validation:  ${testabilityLabel}`,
-      `Overall Confidence:  ${testabilityStatus === 'full' && fullSuccess ? 'HIGH' : 'LOW'}`,
+      `Feature generation:  ${featureGeneration.toUpperCase()}`,
+      `Type safety:         ${typeSafety.toUpperCase()}`,
+      `Test validity:       ${testValidity.toUpperCase()}  [testability: ${testabilityLabel}]`,
+      `Overall confidence:  ${overall.toUpperCase()}`,
+      ...(deltaRows ? [`\nIteration deltas:\n${deltaRows}`] : []),
     ].join('\n'))
 
-    await log(fullSuccess ? 'success' : 'error', fullSuccess ? 'Execution complete — ready for review' : `Execution finished: ${finalFailureType ?? 'budget exceeded'}`)
+    // ── Final summary log ─────────────────────────────────────────────────────
+    if (fullSuccess) {
+      await log('success', [
+        'Execution complete — ready for review',
+        `Confidence: feature generation ${featureGeneration} · type safety ${typeSafety} · test validity ${testValidity}`,
+      ].join('\n'))
+    } else if (outcomeCategory === 'partial_success') {
+      const resolvedLines = resolvedErrors.map(s => `  ✓ ${s.split(':').slice(2).join(':').slice(0, 80)}`).join('\n')
+      const unresolvedLines = unresolvedErrors.map(s => `  ✗ ${s.split(':').slice(2).join(':').slice(0, 80)}`).join('\n')
+      // Surface what's clean vs broken
+      const featureNote = unresolvedOnFeatureFiles.length === 0 && featureFilesChanged.length > 0
+        ? 'Feature code is type-clean.'
+        : unresolvedOnFeatureFiles.length > 0
+          ? `Feature files still have ${unresolvedOnFeatureFiles.length} type error${unresolvedOnFeatureFiles.length !== 1 ? 's' : ''}.`
+          : ''
+      const testNote = unresolvedOnTestFiles.length > 0
+        ? `Test scaffolding has ${unresolvedOnTestFiles.length} remaining error${unresolvedOnTestFiles.length !== 1 ? 's' : ''}.`
+        : ''
+      await log('error', [
+        `Execution stopped after ${state.iteration} iteration${state.iteration !== 1 ? 's' : ''} — partial progress.`,
+        resolvedErrors.length > 0 ? `\nResolved (${resolvedErrors.length}):\n${resolvedLines}` : '',
+        unresolvedErrors.length > 0 ? `\nUnresolved (${unresolvedErrors.length}):\n${unresolvedLines}` : '',
+        [featureNote, testNote].filter(Boolean).length > 0
+          ? `\nAssessment: ${[featureNote, testNote].filter(Boolean).join(' ')}`
+          : '',
+        `\nConfidence: feature generation ${featureGeneration} · type safety ${typeSafety} · test validity ${testValidity}`,
+      ].filter(Boolean).join(''))
+    } else {
+      // Pure failure — still report how far we got
+      const featureNote = featureFilesChanged.length > 0
+        ? `Generated ${featureFilesChanged.length} feature file${featureFilesChanged.length !== 1 ? 's' : ''}.`
+        : 'No feature files generated.'
+      await log('error', [
+        `Execution failed: ${finalFailureType ?? 'budget exceeded'}`,
+        `${featureNote}`,
+        `Confidence: feature generation ${featureGeneration} · type safety ${typeSafety} · test validity ${testValidity}`,
+      ].join('\n'))
+    }
 
     const executionOutcome: 'success' | 'failure' = fullSuccess ? 'success' : 'failure'
 
     const summary: ExecutionSummary = {
       status: runStatus,
+      outcomeCategory,
       iterationsUsed: state.iteration,
       repairsAttempted,
       filesChanged: allFilesChanged,
@@ -868,6 +1060,9 @@ export async function runExecution(
       commitOutcome,
       durationMs: Date.now() - state.startedAt,
       testabilityStatus,
+      resolvedErrors,
+      unresolvedErrors,
+      confidence,
     }
 
     await insertEvent(db, {
@@ -936,6 +1131,7 @@ export async function runExecution(
     clearSeq(runId)
     await finalizeRun(db, runId, 'blocked', {
       status: 'blocked',
+      outcomeCategory: 'blocked' as const,
       iterationsUsed: 0,
       repairsAttempted: 0,
       filesChanged: [],
@@ -943,6 +1139,9 @@ export async function runExecution(
       commitOutcome: { type: 'no_commit', reason: 'error' },
       durationMs: 0,
       testabilityStatus: 'blocked' as const,
+      resolvedErrors: [],
+      unresolvedErrors: [],
+      confidence: { featureGeneration: 'low', typeSafety: 'low', testValidity: 'low', overall: 'low' },
     }).catch(() => {})
     // Emit failed event if we have projectId (it may not be set if failure was before loading change)
     if (projectId) {

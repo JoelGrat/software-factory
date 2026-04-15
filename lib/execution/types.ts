@@ -121,6 +121,8 @@ export interface TestRawOutput {
   exitCode: number
   stdout: string
   durationMs: number
+  /** Human-readable progress note, populated on TEST_TIMEOUT (e.g. "42/118 tests completed. Last active: auth.test.ts") */
+  progressNote?: string
 }
 
 export interface TestResult {

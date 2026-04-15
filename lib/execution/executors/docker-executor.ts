@@ -157,7 +157,9 @@ export class DockerExecutor implements CodeExecutor {
     const allTests = [...scope.directTests, ...scope.dependentTests]
     const filter = allTests.length > 0 ? allTests.join(' ') : ''
     const baseArgs = filter ? `run ${filter}` : `run`
-    const cmd = `cd ${env.containerWorkDir} && npx vitest ${baseArgs} --reporter=json 2>&1; echo "__EXIT:$?"`
+    // --testTimeout=10000: fail individual hanging tests after 10s instead of blocking forever.
+    // timeout 120: kill the entire vitest process if it never exits (e.g. module-load hang).
+    const cmd = `cd ${env.containerWorkDir} && timeout 120 npx vitest ${baseArgs} --reporter=json --testTimeout=10000 2>&1; echo "__EXIT:$?"`
 
     await env.log('docker', filter ? `npx vitest run ${filter}` : `npx vitest run`)
 
@@ -190,7 +192,7 @@ export class DockerExecutor implements CodeExecutor {
     // → INCONSISTENT_TEST_RESULT → retry with verbose reporter to capture real output
     if (!result.passed && result.testsFailed === 0 && result.failures.length === 0 && exitCode !== 0) {
       await env.log('verbose', `Inconsistent test result (exit=${exitCode}, failures=0) — retrying with verbose reporter`)
-      const verboseCmd = `cd ${env.containerWorkDir} && npx vitest ${baseArgs.replace('--reporter=json', '')} --reporter=verbose 2>&1; echo "__EXIT:$?"`
+      const verboseCmd = `cd ${env.containerWorkDir} && timeout 120 npx vitest ${baseArgs} --reporter=verbose --testTimeout=10000 2>&1; echo "__EXIT:$?"`
       let verboseOut = ''
       try {
         const { stdout: vs } = await dockerExec(env.containerId, verboseCmd)
@@ -206,6 +208,8 @@ export class DockerExecutor implements CodeExecutor {
         exitCode: verboseExitCode,
         stdout: verboseStdout,
         durationMs: Date.now() - tStart,
+        // On process-level timeout (exit 124), capture how far tests got before the hang
+        progressNote: verboseExitCode === 124 ? parseTestProgress(verboseStdout) : undefined,
       }
       // Re-classify using the verbose output — we now have real diagnostic text
       const verboseFailureType = classifyFromVerboseOutput(verboseStdout, verboseExitCode)
@@ -284,6 +288,57 @@ export class DockerExecutor implements CodeExecutor {
       await rm(env.localWorkDir, { recursive: true, force: true })
     } catch { /* best effort */ }
   }
+}
+
+/**
+ * Parse verbose vitest output to produce a human-readable progress note.
+ * Used to enrich TEST_TIMEOUT diagnostics: "42/118 tests completed. Last active: auth.test.ts"
+ */
+function parseTestProgress(output: string): string {
+  // Count completed tests: lines starting with " ✓" or " ×" (passed/failed individual tests)
+  const completedMatches = output.match(/^\s+[✓×✔✗x]\s+/gm)
+  const completed = completedMatches?.length ?? 0
+
+  // Count total discovered tests: vitest prints "Test Files  N passed" or "Tests  N passed | N failed | N todo"
+  // Also look for "collected N tests" in the run preamble
+  let total = 0
+  const collectedMatch = output.match(/collected\s+(\d+)\s+test/i)
+  if (collectedMatch) {
+    total = parseInt(collectedMatch[1]!)
+  } else {
+    // Sum up "X passed", "X failed", "X skipped" from summary line
+    const passedM = output.match(/(\d+)\s+passed/i)
+    const failedM = output.match(/(\d+)\s+failed/i)
+    const skippedM = output.match(/(\d+)\s+skipped/i)
+    total = (passedM ? parseInt(passedM[1]!) : 0)
+          + (failedM ? parseInt(failedM[1]!) : 0)
+          + (skippedM ? parseInt(skippedM[1]!) : 0)
+  }
+
+  // Find the last test file being run: lines like " RUNS  src/..."  or "✓ src/..." with a file path
+  let lastFile: string | null = null
+  const fileLineRe = /(?:RUNS?|✓|×|✔|✗|FAIL|PASS)\s+([\w./\-]+\.test\.[jt]sx?)/g
+  let m: RegExpExecArray | null
+  while ((m = fileLineRe.exec(output)) !== null) {
+    lastFile = m[1]!
+  }
+  // Fallback: last line containing a .test. path
+  if (!lastFile) {
+    const pathMatches = [...output.matchAll(/([\w./\-]+\.test\.[jt]sx?)/g)]
+    if (pathMatches.length > 0) lastFile = pathMatches[pathMatches.length - 1]![1]!
+  }
+  // Strip leading path noise (keep last 2 segments)
+  if (lastFile) {
+    const parts = lastFile.split('/')
+    lastFile = parts.slice(-2).join('/')
+  }
+
+  const parts: string[] = []
+  if (completed > 0 || total > 0) {
+    parts.push(total > 0 ? `${completed}/${total} tests completed` : `${completed} tests completed`)
+  }
+  if (lastFile) parts.push(`Last active: ${lastFile}`)
+  return parts.length > 0 ? parts.join('. ') : 'No test output captured before timeout'
 }
 
 // Classify failure type from verbose/plain-text vitest output (after JSON parse fails or inconsistency retry)
@@ -376,7 +431,7 @@ function parseVitestJson(output: string, raw?: TestRawOutput): TestResult {
     // JSON parse failed — determine if it's a config error or unknown.
     // Trust exit code first: exit 0 means vitest considers everything passed.
     const lowerOut = output.toLowerCase()
-    const failed = exitCode !== 0 || (exitCode === -1 && (lowerOut.includes('fail') || lowerOut.includes('error')))
+    const failed = exitCode > 0 || (exitCode === -1 && (lowerOut.includes('fail') || lowerOut.includes('error')))
     const passed = !failed
 
     let failureType: TestFailureType | undefined

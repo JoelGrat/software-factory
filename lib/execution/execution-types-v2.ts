@@ -11,7 +11,7 @@ export const EVENT_TYPES = [
   'phase.integration.started', 'phase.integration.passed', 'phase.integration.failed',
   'phase.smoke.started', 'phase.smoke.passed', 'phase.smoke.failed',
   'phase.skipped',
-  'baseline.started', 'baseline.clean', 'baseline.pre_existing',
+  'baseline.started', 'baseline.clean', 'baseline.pre_existing', 'baseline.tsc_pre_existing',
   'baseline.repair.started', 'baseline.repaired', 'baseline.blocked',
   'repair.inline.started', 'repair.inline.succeeded', 'repair.inline.failed',
   'repair.phase.started', 'repair.phase.succeeded', 'repair.phase.failed',
@@ -91,8 +91,24 @@ export type TestabilityStatus =
   | 'partial'            // pre-existing assertion failures filtered out; new failures checked
   | 'blocked'            // test infrastructure unresolvable; tests never ran
 
+// Outcome category is more nuanced than status:
+//   partial_success = files generated + some progress + still failing at end
+export type OutcomeCategory = 'success' | 'partial_success' | 'failure' | 'blocked' | 'cancelled'
+
+export interface ConfidenceDimensions {
+  /** Did the agent generate feature files without type errors? */
+  featureGeneration: ConfidenceLabel
+  /** Are feature files type-clean? (ignores test-file errors) */
+  typeSafety: ConfidenceLabel
+  /** Did tests pass (or was testability clean)? */
+  testValidity: ConfidenceLabel
+  /** Aggregate across all three dimensions */
+  overall: ConfidenceLabel
+}
+
 export interface ExecutionSummary {
   status: 'success' | 'wip' | 'budget_exceeded' | 'blocked' | 'cancelled'
+  outcomeCategory: OutcomeCategory
   iterationsUsed: number
   repairsAttempted: number
   filesChanged: string[]
@@ -100,17 +116,25 @@ export interface ExecutionSummary {
   commitOutcome: CommitOutcome
   durationMs: number
   testabilityStatus: TestabilityStatus
+  /** Errors present in iteration 1 that were gone by the final iteration */
+  resolvedErrors: string[]
+  /** Errors still present at the end of the last iteration */
+  unresolvedErrors: string[]
+  /** Per-dimension confidence breakdown */
+  confidence: ConfidenceDimensions
 }
 
 // ── Stuck detector ─────────────────────────────────────────────────────────────
 
 export type StuckReason =
-  | 'repeated_diagnostic'
-  | 'error_count_increased'
-  | 'same_file_repeated'
-  | 'alternating_diagnostic'
-  | 'budget_hit'
-  | 'no_repair_progress'
+  | 'same_errors_repeated'        // identical sigs repeated across iterations
+  | 'new_errors_after_partial_fix' // prev errors resolved but new ones surfaced (net increase)
+  | 'validation_regressed'         // error count increased AND prev errors still present
+  | 'oscillating_errors'           // A→B→A pattern across last 3 iterations
+  | 'same_file_repeated'           // same file patched 3+ times with no improvement
+  | 'no_diff_after_repair'         // repair produced no file changes
+  | 'max_attempts_reached'         // exhausted repair budget
+  | 'timeout_no_evidence'          // tests timed out after repair attempts — no diagnostic evidence
 
 export interface StuckResult {
   stuck: boolean
@@ -129,6 +153,10 @@ export interface IterationRecord {
   diagnosticSigs: string[]
   /** Error count from static validation */
   errorCount: number
+  /** Errors resolved since the previous iteration (sigs that disappeared) */
+  resolvedCount: number
+  /** New errors introduced this iteration (sigs not seen before) */
+  newCount: number
   /** Files patched by any repair in this iteration */
   repairedFiles: string[]
 }
