@@ -19,7 +19,7 @@ import { writeStub, enrichSnapshot, markEnrichmentFailed } from '@/lib/dashboard
 import type { DashboardEvent } from '@/lib/dashboard/event-types'
 import { runDashboardJobs } from '@/lib/dashboard/jobs/runner'
 import { DEFAULT_BUDGET, DEFAULT_TASK_BUDGET } from './execution-types-v2'
-import type { ExecutionBudget, IterationRecord, OutcomeCategory, TaskBudget, TaskRunSummary } from './execution-types-v2'
+import type { ExecutionBudget, IterationRecord, OutcomeCategory, TaskBudget } from './execution-types-v2'
 import { insertEvent, clearSeq } from './event-emitter'
 import { determineCommitOutcome } from './commit-policy'
 import { runBaselineRepair, createBaselineBlockedSuggestion } from './baseline-repair'
@@ -502,7 +502,7 @@ export async function runExecution(
 
     const executionOutcome: 'success' | 'failure' = fullSuccess ? 'success' : 'failure'
 
-    const summary: ExecutionSummary & { taskRunSummary?: TaskRunSummary } = {
+    const summary: ExecutionSummary = {
       status: runStatus,
       outcomeCategory,
       iterationsUsed: allTasks.length,

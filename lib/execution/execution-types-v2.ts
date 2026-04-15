@@ -125,6 +125,8 @@ export interface ExecutionSummary {
   unresolvedErrors: string[]
   /** Per-dimension confidence breakdown */
   confidence: ConfidenceDimensions
+  /** Task-level summary (populated when using task-based execution) */
+  taskRunSummary?: TaskRunSummary
 }
 
 // ── Task-based execution summary ───────────────────────────────────────────────
