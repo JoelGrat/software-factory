@@ -1,0 +1,56 @@
+import { exec as execCb } from 'node:child_process'
+import { promisify } from 'node:util'
+import type { SupabaseClient } from '@supabase/supabase-js'
+
+const exec = promisify(execCb)
+
+export const PORT_MIN = 3100
+export const PORT_MAX = 3999
+
+/** Pure: pick lowest free port. Throws 'port_pool_exhausted' if none available. */
+export function pickPort(usedPorts: Set<number>): number {
+  for (let p = PORT_MIN; p <= PORT_MAX; p++) {
+    if (!usedPorts.has(p)) return p
+  }
+  throw new Error('port_pool_exhausted')
+}
+
+/** Query DB for in-use ports, pick lowest free one. */
+export async function allocatePort(db: SupabaseClient): Promise<number> {
+  const { data } = await (db.from('preview_containers') as any)
+    .select('port')
+    .in('status', ['starting', 'running'])
+  const used = new Set<number>((data ?? []).map((r: any) => r.port as number).filter(Boolean))
+  return pickPort(used)
+}
+
+/**
+ * Sweep stale rows and verify running containers still exist in Docker.
+ * Call this before every allocatePort() to keep the pool self-healing.
+ */
+export async function cleanupOrphans(db: SupabaseClient): Promise<void> {
+  const now = new Date().toISOString()
+  const startingCutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString()
+
+  // Mark stale 'starting' rows as error
+  await (db.from('preview_containers') as any)
+    .update({ status: 'error', error_message: 'startup timeout', stopped_at: now })
+    .eq('status', 'starting')
+    .lt('started_at', startingCutoff)
+
+  // Check 'running' rows against Docker
+  const { data: running } = await (db.from('preview_containers') as any)
+    .select('id, container_id')
+    .eq('status', 'running')
+
+  for (const row of running ?? []) {
+    if (!row.container_id) continue
+    try {
+      await exec(`docker inspect ${row.container_id}`)
+    } catch {
+      await (db.from('preview_containers') as any)
+        .update({ status: 'stopped', stopped_at: now })
+        .eq('id', row.id)
+    }
+  }
+}
