@@ -1,8 +1,8 @@
-import { exec as execCb } from 'node:child_process'
+import { execFile as execFileCb } from 'node:child_process'
 import { promisify } from 'node:util'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
-const exec = promisify(execCb)
+const execFile = promisify(execFileCb)
 
 export const PORT_MIN = 3100
 export const PORT_MAX = 3999
@@ -17,9 +17,10 @@ export function pickPort(usedPorts: Set<number>): number {
 
 /** Query DB for in-use ports, pick lowest free one. */
 export async function allocatePort(db: SupabaseClient): Promise<number> {
-  const { data } = await (db.from('preview_containers') as any)
+  const { data, error } = await (db.from('preview_containers') as any)
     .select('port')
     .in('status', ['starting', 'running'])
+  if (error) throw new Error(`allocatePort: db query failed: ${error.message}`)
   const used = new Set<number>((data ?? []).map((r: any) => r.port as number).filter(Boolean))
   return pickPort(used)
 }
@@ -39,14 +40,16 @@ export async function cleanupOrphans(db: SupabaseClient): Promise<void> {
     .lt('started_at', startingCutoff)
 
   // Check 'running' rows against Docker
-  const { data: running } = await (db.from('preview_containers') as any)
+  const { data: running, error } = await (db.from('preview_containers') as any)
     .select('id, container_id')
     .eq('status', 'running')
+  if (error) return  // best-effort: don't block port allocation on cleanup failure
 
   for (const row of running ?? []) {
     if (!row.container_id) continue
     try {
-      await exec(`docker inspect ${row.container_id}`)
+      // Use execFile (not exec) to avoid shell injection via container_id
+      await execFile('docker', ['inspect', row.container_id])
     } catch {
       await (db.from('preview_containers') as any)
         .update({ status: 'stopped', stopped_at: now })
