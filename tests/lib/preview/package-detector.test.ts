@@ -10,9 +10,13 @@ describe('detectInstallCommand', () => {
     expect(detectInstallCommand(['yarn.lock', 'package.json']))
       .toBe('yarn install --frozen-lockfile')
   })
-  it('detects bun from bun.lockb', () => {
+  it('detects bun from bun.lockb (legacy format)', () => {
     expect(detectInstallCommand(['bun.lockb', 'package.json']))
-      .toBe('bun install')
+      .toBe('bun install --frozen-lockfile')
+  })
+  it('detects bun from bun.lock (v1.1+ format)', () => {
+    expect(detectInstallCommand(['bun.lock', 'package.json']))
+      .toBe('bun install --frozen-lockfile')
   })
   it('detects npm from package-lock.json', () => {
     expect(detectInstallCommand(['package-lock.json', 'package.json']))
