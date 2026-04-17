@@ -122,6 +122,7 @@ export async function runPipeline(
         (s) => updatePipelineStatus(db, changeId, s)
       )
       const branchName = deriveBranchName(plan.goal, changeId)
+      plan.branch_name = branchName
       const { id } = await createPlan(db, changeId, branchName, plannerVersion)
       planId = id
       await setPlanJson(db, planId, plan)

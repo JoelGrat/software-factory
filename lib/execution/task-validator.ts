@@ -19,6 +19,7 @@ export interface TaskValidatorOptions {
   taskIndex: number
   taskFiles: string[]
   baselineTypeErrorSigs: Set<string>
+  preExistingFailedTests: Set<string>
   runId: string
   changeId: string
   seq: () => number
@@ -38,7 +39,7 @@ export async function runTaskValidation(
   opts: TaskValidatorOptions,
 ): Promise<TaskValidationResult> {
   const startMs = Date.now()
-  const { taskId, taskIndex, taskFiles, baselineTypeErrorSigs, runId, changeId, seq } = opts
+  const { taskId, taskIndex, taskFiles, baselineTypeErrorSigs, preExistingFailedTests, runId, changeId, seq } = opts
 
   await insertEvent(db, {
     runId, changeId, seq: seq(), iteration: taskIndex,
@@ -79,7 +80,13 @@ export async function runTaskValidation(
     await insertEvent(db, {
       runId, changeId, seq: seq(), iteration: taskIndex,
       eventType: 'task.validation_failed',
-      payload: { taskId, failureType: 'TSC', summary: `${diags.length} type error(s)`, expandedFiles },
+      payload: {
+        taskId,
+        failureType: 'TSC',
+        summary: `${diags.length} type error(s)`,
+        errors: diags.slice(0, 8).map(d => `${d.file}:${d.line} ${d.message.slice(0, 120)}`),
+        expandedFiles,
+      },
     })
     return { passed: false, typeErrors: typeErrorSet, testFailures: null, expandedFiles }
   }
@@ -89,7 +96,20 @@ export async function runTaskValidation(
   const testResult = await executor.runTests(env, testScope)
 
   if (!testResult.passed) {
-    const failures = testResult.failures.map((f, i) => ({
+    // Filter out failures that were already present before execution started
+    const newFailures = testResult.failures.filter(f => !preExistingFailedTests.has(f.testName))
+
+    if (newFailures.length === 0) {
+      // Only pre-existing failures — treat as pass for this task
+      await insertEvent(db, {
+        runId, changeId, seq: seq(), iteration: taskIndex,
+        eventType: 'task.validation_passed',
+        payload: { taskId, durationMs: Date.now() - startMs, note: 'test failures are all pre-existing' },
+      })
+      return { passed: true, typeErrors: null, testFailures: null, expandedFiles: [] }
+    }
+
+    const failures = newFailures.map((f, i) => ({
       file: f.testName, line: i + 1, message: f.error.slice(0, 200), code: 'TEST',
     }))
     const testFailureSet: DiagnosticSet = {
@@ -100,7 +120,13 @@ export async function runTaskValidation(
     await insertEvent(db, {
       runId, changeId, seq: seq(), iteration: taskIndex,
       eventType: 'task.validation_failed',
-      payload: { taskId, failureType: testResult.failureType ?? 'TEST', summary: `${failures.length} test failure(s)`, expandedFiles: [] },
+      payload: {
+        taskId,
+        failureType: testResult.failureType ?? 'TEST',
+        summary: `${failures.length} new test failure(s)`,
+        errors: failures.slice(0, 5).map(f => `${f.file}: ${f.message.slice(0, 120)}`),
+        expandedFiles: [],
+      },
     })
     return { passed: false, typeErrors: null, testFailures: testFailureSet, expandedFiles: [] }
   }

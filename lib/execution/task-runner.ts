@@ -1,5 +1,5 @@
 // lib/execution/task-runner.ts
-import { readFile } from 'node:fs/promises'
+import { readFile, access } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { AIProvider } from '@/lib/ai/provider'
@@ -78,22 +78,20 @@ export async function runTask(
     await insertEvent(db, {
       runId, changeId, seq: seq(), iteration: taskIndex,
       eventType: 'task.started',
-      payload: { taskId: task.id, taskIndex, title: task.description.slice(0, 80) },
+      payload: {
+        taskId: task.id,
+        taskIndex,
+        title: task.description.slice(0, 100),
+        files: task.files,
+        dependsOn: task.dependencies,
+      },
     })
 
-    // No files to implement
-    const taskFiles = task.files.filter(isPathAllowed).slice(0, TASK_FILE_CAP)
-    if (taskFiles.length === 0) {
-      await releaseTaskDone(db, task.id)
-      await insertEvent(db, {
-        runId, changeId, seq: seq(), iteration: taskIndex,
-        eventType: 'task.completed',
-        payload: { taskId: task.id, durationMs: Date.now() - taskStartMs },
-      })
-      return { success: true, filesWritten: [], newFiles: [] }
-    }
-
     // ── Implement ────────────────────────────────────────────────────────────
+    // taskFiles may be empty when the planner didn't assign explicit file paths
+    // (e.g. tasks driven by substep commands). In that case we pass an empty
+    // context so the AI determines which files to create or modify itself.
+    const taskFiles = task.files.filter(isPathAllowed).slice(0, TASK_FILE_CAP)
     const fileContexts: TaskFileContext[] = []
     let charBudget = TASK_FILE_CHAR_CAP
 
@@ -121,13 +119,28 @@ export async function runTask(
     const filesWritten: string[] = []
     const newFiles: NewFileCreation[] = []
 
-    for (const fw of (parsed.files ?? []).filter(f => isPathAllowed(f.path)).slice(0, TASK_FILE_CAP)) {
+    // Pre-check existence before writing so new-file detection is accurate.
+    // For pre-specified files the isNew flag from fileContexts is authoritative.
+    // For AI-determined files (open-ended mode, empty fileContexts) we probe disk now.
+    const aiFiles = (parsed.files ?? []).filter(f => isPathAllowed(f.path)).slice(0, TASK_FILE_CAP)
+    const preExistenceMap = new Map<string, boolean>()
+    for (const fw of aiFiles) {
+      if (!fw.content) continue
+      const knownCtx = fileContexts.find(fc => fc.path === fw.path)
+      if (knownCtx) {
+        preExistenceMap.set(fw.path, !knownCtx.isNew)
+      } else {
+        const exists = await access(join(env.localWorkDir, fw.path)).then(() => true).catch(() => false)
+        preExistenceMap.set(fw.path, exists)
+      }
+    }
+
+    for (const fw of aiFiles) {
       if (!fw.content) continue
       const result = await executor.createFile(env, fw.path, fw.content)
       if (result.success) {
         filesWritten.push(fw.path)
-        // Track whether it's a new file (for acceptedNewFiles in orchestrator)
-        if (fileContexts.find(fc => fc.path === fw.path)?.isNew) {
+        if (!preExistenceMap.get(fw.path)) {
           newFiles.push({ path: fw.path, content: fw.content })
         }
       }
@@ -143,12 +156,19 @@ export async function runTask(
       return { success: false, filesWritten: [], newFiles: [] }
     }
 
+    await insertEvent(db, {
+      runId, changeId, seq: seq(), iteration: taskIndex,
+      eventType: 'task.files_written',
+      payload: { taskId: task.id, files: filesWritten, newFileCount: newFiles.length },
+    })
+
     // ── Validate ─────────────────────────────────────────────────────────────
     const validation = await runTaskValidation(db, executor, env, {
       taskId: task.id,
       taskIndex,
       taskFiles,
       baselineTypeErrorSigs,
+      preExistingFailedTests,
       runId,
       changeId,
       seq,
@@ -177,6 +197,7 @@ export async function runTask(
         seq,
         budget,
         preExistingFailedTests,
+        baselineTypeErrorSigs,
       },
     )
 

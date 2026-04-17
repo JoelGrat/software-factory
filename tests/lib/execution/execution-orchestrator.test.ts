@@ -11,8 +11,13 @@ const PLAN = {
 }
 // Tasks now carry a files[] array (from plan_json projection)
 const TASKS = [
-  { id: 't1', plan_id: 'plan-1', description: 'Update getUser', order_index: 0, status: 'pending', files: [] as string[] },
+  { id: 't1', plan_id: 'plan-1', description: 'Update getUser', order_index: 0, status: 'pending', files: ['app/auth/getUser.ts'] },
 ]
+// AI response that satisfies the task-runner (at least one allowed file written)
+const TASK_AI_RESPONSE = JSON.stringify({
+  files: [{ path: 'app/auth/getUser.ts', content: 'export function getUser() { return null }' }],
+  confidence: 0.9,
+})
 const CHANGE = { id: 'cr1', project_id: 'proj1', title: 'Fix auth', intent: 'fix it', type: 'bug', risk_level: 'low' }
 const PROJECT = { id: 'proj1', repo_url: 'https://github.com/test/repo', repo_token: 'ghp_test_token' }
 
@@ -225,6 +230,7 @@ describe('runExecution', () => {
     const { db, updates } = makeMockDb()
     const executor = new MockCodeExecutor()
     const ai = new MockAIProvider()
+    ai.setDefaultResponse(TASK_AI_RESPONSE)
 
     await runExecution('cr1', db, ai, executor)
 

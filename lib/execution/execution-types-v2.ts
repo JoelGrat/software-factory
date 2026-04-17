@@ -19,7 +19,8 @@ export const EVENT_TYPES = [
   'commit.green', 'commit.wip', 'commit.skipped', 'commit.failed',
   'infra.retrying',
   'log.info', 'log.success', 'log.error',
-  'task.started', 'task.validation_started', 'task.validation_passed', 'task.validation_failed',
+  'task.started', 'task.files_written',
+  'task.validation_started', 'task.validation_passed', 'task.validation_failed',
   'task.repair_started', 'task.repair_completed',
   'task.completed', 'task.failed', 'task.blocked',
 ] as const

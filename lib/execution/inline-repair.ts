@@ -217,10 +217,16 @@ export async function runInlineRepair(
 ): Promise<RepairAttempt> {
   const startMs = Date.now()
 
+  const strategy = attemptNumber >= 2 ? 'full_rewrite' : attemptNumber === 1 ? 'wider_context' : 'targeted'
   await insertEvent(db, {
     runId, changeId, seq: seq(), iteration,
     eventType: 'repair.inline.started',
-    payload: {},
+    payload: {
+      strategy,
+      attempt: attemptNumber,
+      errorCount: diagnostics.totalCount,
+      files: [...new Set(diagnostics.diagnostics.map(d => d.file))].filter(isPathAllowed).slice(0, 5),
+    },
   })
 
   // Gather file contents for affected files (allowed only, max 3)
@@ -274,7 +280,7 @@ export async function runInlineRepair(
   await insertEvent(db, {
     runId, changeId, seq: seq(), iteration,
     eventType: filesPatched.length > 0 ? 'repair.inline.succeeded' : 'repair.inline.failed',
-    payload: { attempt, durationMs },
+    payload: { filesPatched, rationale, durationMs },
   })
 
   return attempt

@@ -45,9 +45,23 @@ function buildDetailedPlanPrompt(
   }
 
   lines.push(`
+Project layout (Next.js App Router — use these paths EXACTLY):
+  app/                  → pages and API routes (e.g. app/projects/[id]/page.tsx, app/api/foo/route.ts)
+  components/           → shared React components
+  lib/                  → business logic, utilities, Supabase clients
+  tests/                → Vitest tests (mirror lib/ structure, e.g. tests/lib/foo.test.ts)
+  styles/               → CSS / Tailwind
+  supabase/migrations/  → numbered SQL migrations (append-only)
+
+CRITICAL path rules for files[]:
+- Every path in files[] MUST start with one of: app/, components/, lib/, tests/, styles/, supabase/migrations/
+- NEVER use src/, pages/, router/, or any other prefix — this project has NO src/ directory
+- Use Next.js App Router conventions: app/path/to/page.tsx (NOT pages/path/to/page.tsx)
+- Test files go in tests/, not alongside source files
+
 Rules — every task MUST have:
 1. At least one substep
-2. At least one file in files[] OR a substep with command or target
+2. At least one file in files[] — files[] must be non-empty with real paths following the rules above
 3. At least one validation check
 4. A non-empty expected_result
 5. depends_on references that exist within this plan
@@ -67,6 +81,7 @@ Respond with JSON:
   "schema_version": 2,
   "planner_version": ${plannerVersion},
   "goal": "...",
+  "branch_name": "sf/<8-char-id-prefix>-<short-slug>",
   "summary": {
     "architecture": "2-3 sentence description of the implementation approach",
     "tech_stack": ["Next.js", "Supabase", "TypeScript"],
@@ -87,30 +102,30 @@ Respond with JSON:
           "id": "task_1",
           "title": "...",
           "description": "...",
-          "type": "database",
-          "files": ["supabase/migrations/025_foo.sql"],
+          "type": "frontend",
+          "files": ["app/projects/[id]/docs/page.tsx", "components/docs/EmptyState.tsx"],
           "depends_on": [],
           "substeps": [
-            { "id": "step_1", "action": "write_file", "target": "supabase/migrations/025_foo.sql" },
-            { "id": "step_2", "action": "run_command", "command": "supabase db push", "expected": ["Done"] }
+            { "id": "step_1", "action": "write_file", "target": "app/projects/[id]/docs/page.tsx" },
+            { "id": "step_2", "action": "write_file", "target": "components/docs/EmptyState.tsx" }
           ],
-          "validation": [{ "type": "command", "command": "supabase db push", "success_contains": "Done" }],
-          "expected_result": "Migration applied successfully",
+          "validation": [{ "type": "file_exists", "target": "app/projects/[id]/docs/page.tsx" }],
+          "expected_result": "DocsPage renders with empty state",
           "playbook": {
-            "implementation_notes": ["Specific notes about what to watch out for"],
-            "commands": ["supabase db push"],
-            "expected_outputs": ["Migration applied successfully"],
+            "implementation_notes": ["Use Next.js App Router page.tsx convention", "Import from @/components/ using the @ alias"],
+            "commands": ["npm run build"],
+            "expected_outputs": ["Compiled successfully"],
             "code_snippets": [
               {
-                "file": "supabase/migrations/025_foo.sql",
-                "language": "sql",
-                "purpose": "Create table",
-                "content": "create table foo (id uuid primary key default gen_random_uuid());"
+                "file": "app/projects/[id]/docs/page.tsx",
+                "language": "tsx",
+                "purpose": "Docs page",
+                "content": "export default function DocsPage() { return <div>Docs</div> }"
               }
             ],
             "temporary_failures_allowed": [],
-            "commit": "feat: add foo migration",
-            "rollback": ["supabase db reset"]
+            "commit": "feat: add docs page",
+            "rollback": []
           }
         }
       ]

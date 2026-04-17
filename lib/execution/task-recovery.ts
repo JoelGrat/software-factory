@@ -25,6 +25,7 @@ export interface TaskRepairOptions {
   seq: () => number
   budget: TaskBudget
   preExistingFailedTests: Set<string>
+  baselineTypeErrorSigs: Set<string>
 }
 
 /**
@@ -43,7 +44,7 @@ export async function runTaskRepair(
   testFailures: DiagnosticSet | null,
   opts: TaskRepairOptions,
 ): Promise<TaskRepairResult> {
-  const { taskId, taskIndex, runId, changeId, changeIntent, seq, budget } = opts
+  const { taskId, taskIndex, runId, changeId, changeIntent, seq, budget, baselineTypeErrorSigs } = opts
   const allFilesPatched: string[] = []
 
   // ── Type error repair ────────────────────────────────────────────────────
@@ -67,14 +68,15 @@ export async function runTaskRepair(
       inlineRepairCount++
 
       const typeCheck = await executor.runTypeCheck(env)
-      const newErrors = typeCheck.errors.map(e => ({
-        file: e.file, line: e.line, message: e.message, code: 'TS',
-      }))
+      // Filter out baseline errors so repair loop stays focused on task-introduced errors
+      const newErrors = typeCheck.errors
+        .filter(e => !baselineTypeErrorSigs.has(`${e.file}:${e.line}:${e.message}`))
+        .map(e => ({ file: e.file, line: e.line, message: e.message, code: 'TS' }))
 
       await insertEvent(db, {
         runId, changeId, seq: seq(), iteration: taskIndex,
         eventType: 'task.repair_completed',
-        payload: { taskId, attempt: inlineRepairCount - 1, success: newErrors.length === 0 },
+        payload: { taskId, attempt: inlineRepairCount - 1, success: newErrors.length === 0, remainingErrors: newErrors.length },
       })
 
       if (newErrors.length === 0) return { success: true, filesPatched: allFilesPatched }
