@@ -15,11 +15,11 @@ Add a "Launch Preview" button to the change review page that spins up an isolate
 
 Three coupled parts:
 
-1. **Project env vars** — per-project key/value store in FactoryOS settings, supplies secrets to preview containers
+1. **Project env vars + preview config** — per-project settings: env vars, install/start commands, health check, resource limits
 2. **Preview manager** — API routes + backend logic to start/stop Docker containers, allocate ports, enforce idle timeout
-3. **Review page UI** — Launch / Stop / Restart controls, status indicator, missing-vars prompt
+3. **Review page UI** — Launch / Stop / Restart controls, status indicator, startup logs, missing-vars prompt
 
-The port-binding layer is abstracted so that cloud deployment (reverse-proxy / subdomain routing) can replace the `localhost:{PORT}` strategy without changing anything else.
+The port-binding layer is abstracted behind a `PreviewUrlStrategy` so cloud deployment (reverse-proxy / subdomain routing) can replace `localhost:{PORT}` without changing anything else.
 
 ---
 
@@ -40,6 +40,25 @@ updated_at  timestamptz not null default now()
 unique (project_id, key)
 ```
 
+### `project_preview_config`
+
+Per-project preview settings. One row per project (upserted).
+
+```sql
+id               uuid primary key default gen_random_uuid()
+project_id       uuid not null references projects(id) on delete cascade unique
+install_command  text not null default 'auto'   -- 'auto' = detect from lockfile
+start_command    text not null default 'auto'   -- 'auto' = detect from package.json scripts
+work_dir         text not null default '.'      -- relative path for monorepos
+health_path      text not null default '/'      -- URL path to poll for readiness
+health_text      text                           -- optional: response body must contain this string
+port_internal    int  not null default 3000     -- port the app listens on inside container
+expected_keys    text[]  not null default '{}'  -- keys user has declared they intend to set
+max_memory_mb    int  not null default 1024
+max_cpu_shares   int  not null default 512      -- Docker --cpu-shares (1024 = 1 core)
+updated_at       timestamptz not null default now()
+```
+
 ### `preview_containers`
 
 One row per preview attempt (running or recently stopped).
@@ -48,10 +67,11 @@ One row per preview attempt (running or recently stopped).
 id               uuid primary key default gen_random_uuid()
 change_id        uuid not null references change_requests(id) on delete cascade
 project_id       uuid not null references projects(id) on delete cascade
-container_id     text                        -- Docker container ID
+container_id     text                        -- Docker container ID (null until docker run succeeds)
 port             int                         -- allocated host port
 status           text not null default 'starting'
                  check (status in ('starting','running','stopped','error'))
+startup_log      text                        -- last 100 lines of npm output, updated during start
 started_at       timestamptz not null default now()
 last_activity_at timestamptz not null default now()
 stopped_at       timestamptz
@@ -60,11 +80,38 @@ error_message    text
 
 ---
 
+## Package Manager + Start Command Detection
+
+When `install_command = 'auto'` or `start_command = 'auto'`, the server detects from the cloned repo:
+
+**Install command detection** (checked in order):
+1. `pnpm-lock.yaml` → `pnpm install --frozen-lockfile`
+2. `yarn.lock` → `yarn install --frozen-lockfile`
+3. `bun.lockb` → `bun install`
+4. `package-lock.json` → `npm ci`
+5. fallback → `npm install`
+
+**Start command detection** (checked in order):
+1. `package.json` has `scripts.preview` → use it
+2. `package.json` has `scripts.start` → use it
+3. `package.json` has `scripts.dev` → use it
+4. fallback → `npm run dev`
+
+User can override both in project settings. This covers monorepos via `work_dir`.
+
+---
+
 ## Port Management
 
-- Local: allocate from fixed range **3100–3199** (avoids 3000 = FactoryOS dev server)
-- On start: pick lowest port not currently in a `starting` or `running` row
-- On cloud: replace with a `PreviewUrlStrategy` interface that returns the right URL — all other code unchanged
+- Allocate from range **3100–3999** (900 slots, expandable)
+- On start: query `preview_containers` for ports currently `starting` or `running`; pick lowest free port in range
+- If range exhausted: return error `port_pool_exhausted` — user must stop an existing preview
+
+**Orphan cleanup:** On every `start` request, before allocating, sweep `preview_containers` where `status IN ('starting','running')`:
+- If `started_at` older than 30 minutes and status is still `starting` → mark `error`, release port
+- For `running` rows: run `docker inspect {container_id}` — if container no longer exists → mark `stopped`, release port
+
+This keeps the port pool self-healing without an external scheduler.
 
 ---
 
@@ -74,83 +121,136 @@ error_message    text
 |--------|------|---------|
 | `POST` | `/api/change-requests/[id]/preview/start` | Spin up container, return `{ previewId, status }` |
 | `POST` | `/api/change-requests/[id]/preview/stop` | `docker stop`, mark stopped |
-| `GET`  | `/api/change-requests/[id]/preview/status` | `{ status, port, url, lastActivityAt, missingVars }` |
-| `POST` | `/api/change-requests/[id]/preview/keepalive` | Update `last_activity_at` (called every 60 s from open tab) |
+| `GET`  | `/api/change-requests/[id]/preview/status` | `{ status, port, url, lastActivityAt, missingKeys, startupLog }` |
+| `POST` | `/api/change-requests/[id]/preview/keepalive` | Update `last_activity_at` |
 
-All routes require authenticated user who owns the project.
+All routes require authenticated user who owns the project. Each `status` and `keepalive` call also runs the idle expiry check (see below).
 
 ---
 
 ## Container Start Flow
 
 ```
-User clicks "Launch Preview"
+POST /preview/start
   │
   ▼
-GET /preview/status
+Run orphan cleanup (sweep stale starting/running rows)
   │
-  ├─ already running? → open URL in new tab (done)
+  ▼
+Load project_preview_config + project_env_vars (decrypt)
   │
-  └─ not running → POST /preview/start
+  ▼
+Compute missingKeys = expected_keys − keys present in project_env_vars
+  │
+  ├─ missingKeys non-empty?
+  │     → return { status: 'needs_config', missingKeys }
+  │     → UI: modal — "Use saved values" / "Import from .env.local" / "Continue anyway"
+  │       (if user chooses "continue": re-POST with { force: true }, skip this check)
+  │
+  └─ proceed
         │
         ▼
-      Fetch project env vars from DB (decrypt)
-      Check for missing keys declared as required
+      Allocate port (3100–3999, lowest free)
+      INSERT preview_containers row (status='starting', port=allocated)
         │
-        ├─ missing vars? → return { status: 'needs_config', missingVars: [...] }
-        │     UI: modal — "Use saved values" / "Import from .env.local" / "Continue anyway"
+        ▼
+      docker run -d --rm \
+        -p {PORT}:{port_internal} \
+        --memory={max_memory_mb}m \
+        --cpu-shares={max_cpu_shares} \
+        node:20-slim tail -f /dev/null
         │
-        └─ proceed
-              │
-              ▼
-            Allocate port (3100–3199, lowest free)
-            INSERT preview_containers row (status=starting)
-              │
-              ▼
-            docker run -d -p {PORT}:3000 node:20-slim tail -f /dev/null
-            Clone branch into container
-            Write .env file (decrypted vars) into container — never to disk on host
-            npm install && npm run dev &
-              │
-              ▼
-            Poll http://localhost:{PORT} every 2 s (max 90 s)
-            → responds? UPDATE status=running, return { url }
-            → timeout? UPDATE status=error, return error
-              │
-              ▼
-            Frontend opens url in new tab
+        ▼
+      UPDATE container_id in preview_containers
+      Clone branch into container at work_dir
+      Write .env file (decrypted vars) inside container — never touches host disk
+        │
+        ▼
+      Run install_command inside container (stream stdout → startup_log, last 100 lines)
+      Run start_command & in background
+        │
+        ▼
+      Poll GET http://localhost:{PORT}{health_path} every 2 s, max 90 s
+        If health_text set: response body must contain it
+        │
+        ├─ responds correctly → UPDATE status='running' → return { url, previewId }
+        └─ timeout → UPDATE status='error', error_message='startup timeout'
+                     startup_log preserved for display
 ```
 
 ---
 
 ## Idle Timeout
 
-- Browser tab sends `POST /preview/keepalive` every 60 seconds while open
-- Background job (Next.js route handler triggered by a cron or on each keepalive) checks all `running` containers:
-  - `last_activity_at` older than **20 minutes** → `docker stop {container_id}`, mark `stopped`
-- Local machines use a 20-minute default; cloud deployments can configure stricter limits
+- Browser tab sends `POST /preview/keepalive` every 60 seconds while the preview tab is open
+- **No external scheduler required.** On every API call (`status`, `keepalive`, `start`), run:
 
-No preview container is killed solely because the user navigated away from FactoryOS — session signals are a hint only.
+```typescript
+await db.from('preview_containers')
+  .update({ status: 'stopped', stopped_at: now() })
+  .eq('project_id', projectId)
+  .eq('status', 'running')
+  .lt('last_activity_at', new Date(Date.now() - 20 * 60 * 1000).toISOString())
+// then docker stop each returned container_id
+```
+
+- Preview containers are never killed solely because the user navigated away from FactoryOS — the 20-minute window covers normal back-and-forth usage
+- Local machines: 20-minute default. Cloud deployments can lower this via config.
+
+---
+
+## Resource Constraints
+
+Every preview container starts with hard limits:
+
+| Constraint | Default | Config field |
+|-----------|---------|-------------|
+| Memory | 1024 MB | `max_memory_mb` |
+| CPU shares | 512 (½ core) | `max_cpu_shares` |
+| Max concurrent previews per project | 3 | hardcoded constant `MAX_CONCURRENT_PREVIEWS = 3` |
+
+On start, if `COUNT(status IN ('starting','running')) >= MAX_CONCURRENT_PREVIEWS` for the project → return error `max_previews_reached`, tell user to stop an existing one first.
 
 ---
 
 ## Env Var Management
 
 ### Storage
-- Stored in `project_env_vars`, value encrypted with AES-256-GCM using a server-side key (`PREVIEW_SECRET_KEY` env var)
+- Stored in `project_env_vars`, value encrypted with AES-256-GCM using server-side `PREVIEW_SECRET_KEY` env var
 - Never exposed to the browser in plaintext — decryption happens server-side at container start only
 
+### Missing Key Detection
+- `project_preview_config.expected_keys` is a user-maintained list of keys they intend to set (e.g. `["DATABASE_URL", "NEXTAUTH_SECRET"]`)
+- `missingKeys = expected_keys − saved keys` — no "required" flag, no runtime inference
+- If `expected_keys` is empty, missing detection is skipped entirely — no prompt, just launch
+
 ### Project Settings Page
-- New "Environment Variables" section: list, add, edit, delete vars
-- Values masked in the UI (show/hide toggle)
-- "Import from .env.local" button: server-side reads the host `.env.local`, returns key list to the browser — user reviews and saves explicitly. No silent mounting.
+- New **"Preview"** section with two sub-sections:
+  - **Environment Variables**: list, add, edit, delete vars + "Expected keys" field (comma-separated)
+  - **Preview Config**: install command, start command, work dir, health path, health text, internal port, resource limits
+- Values masked in the UI (show/hide toggle per row)
+- **"Import from .env.local"** button: server-side reads the host `.env.local`, returns key/value list to the browser — user reviews the prefilled form and saves explicitly. No silent mounting.
 
-### Missing Vars Prompt
-Triggered at launch if any var stored as `required` is absent. User choices:
+### Missing Vars Prompt (at launch)
+Triggered only when `missingKeys` is non-empty. User choices:
 
-1. **Use saved values** — proceed with what's in the DB (may be partial)
-2. **Import from .env.local** — one-click import, then launch
-3. **Continue with limited preview** — launch anyway; preview UI shows `⚠ Preview running with N missing variables`
+1. **Use saved values** — proceed with what's in the DB; may be partial
+2. **Import from .env.local** — one-click import into project settings, then launch
+3. **Continue with limited preview** — launch anyway; review page shows `⚠ Preview running with N missing variables — [Configure]`
+
+---
+
+## Startup Logs
+
+`startup_log` is updated during container start (install + app boot output, last 100 lines).  
+Exposed on the `status` endpoint and surfaced in the UI whenever status is `error` or `starting`:
+
+- Collapsible **"View startup logs"** panel below the status indicator
+- Monospace, scrollable, max 300px height
+- **"Copy"** button
+- Shown automatically (expanded) when status = `error`
+
+This makes "Retry" actionable — user can see exactly what failed.
 
 ---
 
@@ -161,25 +261,27 @@ Triggered at launch if any var stored as `required` is absent. User choices:
 | State | UI |
 |-------|-----|
 | No preview / stopped | **Launch Preview** button (primary) |
-| Starting | Spinner + "Starting preview…" (disabled) |
+| Starting | Spinner + "Starting preview…" + collapsible startup log |
 | Running | Green dot + URL chip + **Open** link + **Stop** + **Restart** |
-| Error | Red dot + error message + **Retry** |
+| Error | Red dot + error message + expanded startup log + **Retry** |
+| needs_config | Missing vars modal |
+| max_previews_reached | Inline error: "Stop an existing preview first" |
 
 ### Placement
 Sits in the action bar alongside Re-run and Approve. Does not replace either.
 
-### Missing vars warning
-When running with incomplete vars: `⚠ Preview running with 2 missing variables — [Configure]` inline below the URL chip.
+### Missing vars warning (running state)
+`⚠ Preview running with 2 missing variables — [Configure]` — inline below the URL chip, links to project settings.
 
 ---
 
 ## Security Rules
 
 - Env var values never touch the browser in plaintext
-- Containers are ephemeral (`--rm` flag) — filesystem is gone on stop
-- `.env` written inside the container is not persisted anywhere on the host
-- Port range is localhost-only; no external exposure by default
-- Production secrets should not be used — project settings should use test/staging credentials
+- Containers run with `--rm` — filesystem destroyed on stop
+- `.env` written inside the container; never written to host disk
+- Port range is localhost-only; no external binding by default
+- Use test/staging credentials in project settings — not production secrets
 
 ---
 
@@ -188,5 +290,6 @@ When running with incomplete vars: `⚠ Preview running with 2 missing variables
 - E2E test runner (separate feature)
 - Multi-user preview sharing / public URLs
 - Cloud reverse-proxy implementation (abstraction point is ready; implementation deferred)
-- Preview for non-Node / non-Next.js apps
-- Per-var "required" flag UI (ship as all-optional initially)
+- Preview for non-Node apps
+- Per-var "required" enforcement (replaced by `expected_keys` list)
+- Warning banner inside the preview tab itself ("Preview will stop in 2 min")
