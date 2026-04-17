@@ -39,6 +39,7 @@ const validPlan: DetailedPlan = {
   schema_version: 2,
   planner_version: 1,
   goal: 'Build new planner',
+  branch_name: 'sf/abc123-build-new-planner',
   summary: {
     architecture: 'New pipeline with 6 stages using phases and substeps',
     tech_stack: ['Next.js', 'Supabase', 'TypeScript'],

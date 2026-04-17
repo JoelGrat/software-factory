@@ -6,49 +6,172 @@ import { LeftNav } from '@/components/app/left-nav'
 import { ProfileAvatar } from '@/components/app/profile-avatar'
 import { ChangeStepBar } from '@/components/app/change-step-bar'
 import { ExecutionLiveStrip } from '@/components/app/execution-live-strip'
-import { ExecutionIterationCard } from '@/components/app/execution-iteration-card'
 
 function str(v: unknown, fallback = ''): string {
   return v != null ? String(v) : fallback
 }
 
+function lines(...parts: (string | null | undefined)[]): string {
+  return parts.filter(Boolean).join('\n')
+}
+
 function formatEventAsLog(e: { event_type: string; iteration: number; payload?: Record<string, unknown> }): { level: 'success' | 'error' | 'info' | 'dim'; message: string } {
   const t = e.event_type
   const p = e.payload ?? {}
-  const iter = e.iteration > 0 ? ` [iter ${e.iteration}]` : ''
+  const iter = e.iteration > 0 ? ` [task ${e.iteration + 1}]` : ''
 
+  // ── Execution lifecycle ───────────────────────────────────────────────────
   if (t === 'execution.started') return { level: 'info', message: 'Execution started' }
-  if (t === 'execution.completed') return { level: 'success', message: `Execution complete` }
-  if (t === 'execution.blocked') return { level: 'error', message: `Execution blocked — ${str(p.reason, 'unknown')}` }
+  if (t === 'execution.completed') return { level: 'success', message: 'Execution complete' }
+  if (t === 'execution.blocked') return { level: 'error', message: `Blocked — ${str(p.reason, 'unknown')}` }
+  if (t === 'execution.cancelled') return { level: 'dim', message: 'Cancelled' }
 
-  if (t === 'phase.static_validation.started') return { level: 'info', message: `${iter} Running type check…` }
-  if (t === 'phase.static_validation.passed') return { level: 'success', message: `${iter} Type check passed` }
-  if (t === 'phase.static_validation.failed') return { level: 'error', message: `${iter} Type check failed · ${str(p.totalCount, '?')} error${p.totalCount !== 1 ? 's' : ''}` }
+  // ── Task lifecycle ────────────────────────────────────────────────────────
+  if (t === 'task.started') {
+    const title = str(p.title)
+    const files = (p.files as string[] | undefined) ?? []
+    const deps = (p.dependsOn as string[] | undefined) ?? []
+    return {
+      level: 'info',
+      message: lines(
+        `─── Task ${e.iteration + 1}: ${title}`,
+        files.length > 0 ? `    files: ${files.join(', ')}` : null,
+        deps.length > 0  ? `    deps:  ${deps.join(', ')}` : null,
+      ),
+    }
+  }
 
-  if (t === 'phase.unit.started') return { level: 'info', message: `${iter} Running tests…` }
-  if (t === 'phase.unit.passed') return { level: 'success', message: `${iter} Tests passed` }
-  if (t === 'phase.unit.failed') return { level: 'error', message: `${iter} Tests failed · ${str(p.totalCount, '?')} failure${p.totalCount !== 1 ? 's' : ''}` }
+  if (t === 'task.files_written') {
+    const files = (p.files as string[] | undefined) ?? []
+    const newCount = p.newFileCount as number | undefined
+    if (files.length === 0) return { level: 'dim', message: 'No files written' }
+    return {
+      level: 'info',
+      message: lines(
+        `Files written (${files.length}${newCount != null ? `, ${newCount} new` : ''}):`,
+        ...files.map(f => `  + ${f}`),
+      ),
+    }
+  }
 
-  if (t === 'repair.inline.started') return { level: 'info', message: `${iter} Inline repair started…` }
-  if (t === 'repair.inline.succeeded') return { level: 'success', message: `${iter} Inline repair applied` }
-  if (t === 'repair.inline.failed') return { level: 'error', message: `${iter} Inline repair failed` }
+  if (t === 'task.validation_started') {
+    return { level: 'dim', message: `${iter} Validating…` }
+  }
 
-  if (t === 'repair.phase.started') return { level: 'info', message: `${iter} Repair phase started…` }
-  if (t === 'repair.phase.succeeded') return { level: 'success', message: `${iter} Repair phase applied` }
-  if (t === 'repair.phase.failed') return { level: 'error', message: `${iter} Repair phase failed` }
+  if (t === 'task.validation_passed') {
+    return { level: 'success', message: `${iter} Validation passed` }
+  }
 
-  if (t === 'iteration.stuck') return { level: 'error', message: `${iter} Stuck — ${str(p.reason, 'unknown')}` }
-  if (t === 'iteration.completed') return { level: 'dim', message: `${iter} Iteration complete` }
+  if (t === 'task.validation_failed') {
+    const failureType = str(p.failureType, 'unknown')
+    const summary = str(p.summary, 'validation failed')
+    const errors = (p.errors as string[] | undefined) ?? []
+    return {
+      level: 'error',
+      message: lines(
+        `${iter} ${failureType}: ${summary}`,
+        ...errors.map(e => `  ${e}`),
+      ),
+    }
+  }
 
-  if (t === 'commit.green') return { level: 'success', message: 'Green commit pushed' }
-  if (t === 'commit.wip') return { level: 'info', message: `WIP commit — ${str(p.reason)}` }
-  if (t === 'commit.skipped') return { level: 'dim', message: `Commit skipped — ${str(p.reason)}` }
-  if (t === 'commit.failed') return { level: 'error', message: `Commit failed — ${str(p.reason)}` }
+  if (t === 'task.repair_started') {
+    const strategy = str(p.strategy, 'inline')
+    const attempt = typeof p.attempt === 'number' ? p.attempt : null
+    return {
+      level: 'info',
+      message: `${iter} Repair ${attempt != null ? `#${attempt + 1}` : ''} · strategy: ${strategy}`,
+    }
+  }
 
-  // Free-form log lines emitted by makeLogger
-  if (t === 'log.info') return { level: 'info', message: str(p.message) }
+  if (t === 'task.repair_completed') {
+    const success = p.success as boolean | undefined
+    return {
+      level: success ? 'success' : 'dim',
+      message: `${iter} Repair ${success ? 'succeeded' : 'did not resolve errors'}`,
+    }
+  }
+
+  if (t === 'task.completed') {
+    const ms = typeof p.durationMs === 'number' ? ` · ${(p.durationMs / 1000).toFixed(1)}s` : ''
+    return { level: 'success', message: `${iter} Task done${ms}` }
+  }
+
+  if (t === 'task.failed') {
+    const reason = str(p.reason, str(p.stuckReason, 'failed'))
+    return { level: 'error', message: `${iter} Task failed — ${reason}` }
+  }
+
+  if (t === 'task.blocked') {
+    return { level: 'dim', message: `${iter} Task blocked` }
+  }
+
+  // ── Inline repair ─────────────────────────────────────────────────────────
+  if (t === 'repair.inline.started') {
+    const strategy = str(p.strategy, 'targeted')
+    const errorCount = typeof p.errorCount === 'number' ? ` · ${p.errorCount} error${p.errorCount !== 1 ? 's' : ''}` : ''
+    const files = (p.files as string[] | undefined) ?? []
+    return {
+      level: 'info',
+      message: lines(
+        `${iter} Inline repair [${strategy}]${errorCount}`,
+        files.length > 0 ? `    targeting: ${files.join(', ')}` : null,
+      ),
+    }
+  }
+
+  if (t === 'repair.inline.succeeded') {
+    const patched = (p.filesPatched as string[] | undefined) ?? []
+    const rationale = str(p.rationale)
+    return {
+      level: 'success',
+      message: lines(
+        `${iter} Repair applied (${patched.length} file${patched.length !== 1 ? 's' : ''})`,
+        ...patched.map(f => `  ✓ ${f}`),
+        rationale ? `  "${rationale}"` : null,
+      ),
+    }
+  }
+
+  if (t === 'repair.inline.failed') {
+    const rationale = str(p.rationale)
+    return {
+      level: 'error',
+      message: lines(
+        `${iter} Repair produced no fix`,
+        rationale ? `  "${rationale}"` : null,
+      ),
+    }
+  }
+
+  if (t === 'repair.phase.started')   return { level: 'info',    message: `${iter} Test repair started…` }
+  if (t === 'repair.phase.succeeded') return { level: 'success', message: `${iter} Test repair applied` }
+  if (t === 'repair.phase.failed')    return { level: 'error',   message: `${iter} Test repair failed` }
+  if (t === 'repair.escalated')       return { level: 'error',   message: `${iter} Repair escalated — stuck` }
+
+  // ── Baseline ──────────────────────────────────────────────────────────────
+  if (t === 'baseline.started')       return { level: 'dim',  message: 'Baseline check…' }
+  if (t === 'baseline.clean')         return { level: 'dim',  message: 'Baseline clean' }
+  if (t === 'baseline.pre_existing')  return { level: 'dim',  message: `Baseline: ${str(p.count, '?')} pre-existing test failure${p.count !== 1 ? 's' : ''} (filtered)` }
+  if (t === 'baseline.tsc_pre_existing') return { level: 'dim', message: `Baseline: ${str(p.count, '?')} pre-existing TS error${p.count !== 1 ? 's' : ''} (filtered)` }
+  if (t === 'baseline.blocked')       return { level: 'error', message: `Baseline blocked — ${str(p.reason, 'unresolvable')}` }
+  if (t === 'baseline.repaired')      return { level: 'info',  message: 'Baseline repaired' }
+
+  // ── Commit ────────────────────────────────────────────────────────────────
+  if (t === 'commit.green')   return { level: 'success', message: `Green commit — ${str(p.sha, '').slice(0, 8) || 'pushed'}` }
+  if (t === 'commit.wip')     return { level: 'info',    message: `WIP commit — ${str(p.reason)}` }
+  if (t === 'commit.skipped') return { level: 'dim',     message: `Commit skipped — ${str(p.reason)}` }
+  if (t === 'commit.failed')  return { level: 'error',   message: `Commit failed — ${str(p.reason)}` }
+
+  // ── Free-form log lines ───────────────────────────────────────────────────
+  if (t === 'log.info')    return { level: 'info',    message: str(p.message) }
   if (t === 'log.success') return { level: 'success', message: str(p.message) }
-  if (t === 'log.error') return { level: 'error', message: str(p.message) }
+  if (t === 'log.error')   return { level: 'error',   message: str(p.message) }
+
+  // ── Legacy / catch-all ────────────────────────────────────────────────────
+  if (t === 'iteration.stuck')     return { level: 'error', message: `Stuck — ${str(p.reason, 'unknown')}` }
+  if (t === 'iteration.completed') return { level: 'dim',   message: 'Iteration complete' }
+  if (t === 'phase.skipped')       return { level: 'dim',   message: `Phase skipped — ${str(p.reason)}` }
 
   return { level: 'dim', message: t }
 }
@@ -72,6 +195,16 @@ interface RunData {
   cancellationRequested: boolean
 }
 
+interface TaskRow {
+  id: string
+  description: string
+  order_index: number
+  status: string
+  failure_reason: string | null
+  blocked_by_task_id: string | null
+  completed_at: string | null
+}
+
 interface Change {
   id: string
   title: string
@@ -86,6 +219,7 @@ export default function ExecutionView({ change, project }: { change: Change; pro
   const [changeStatus, setChangeStatus] = useState(change.status)
   const [run, setRun] = useState<RunData | null>(null)
   const [events, setEvents] = useState<LiveEvent[]>([])
+  const [tasks, setTasks] = useState<TaskRow[]>([])
   const [starting, setStarting] = useState(false)
   const [startError, setStartError] = useState<string | null>(null)
   const [cancelState, setCancelState] = useState<'idle' | 'requesting' | 'cancelled' | 'committing' | 'force_failed'>('idle')
@@ -101,6 +235,7 @@ export default function ExecutionView({ change, project }: { change: Change; pro
     setChangeStatus(data.changeStatus ?? change.status)
     setRun(data.run ?? null)
     setEvents(data.events ?? [])
+    if (data.tasks) setTasks(data.tasks)
     // Restore cancel state from server — handles page refresh while cancellation is in flight
     if (data.run?.cancellationRequested) {
       setCancelState(prev => prev === 'idle' ? 'cancelled' : prev)
@@ -152,11 +287,14 @@ export default function ExecutionView({ change, project }: { change: Change; pro
     return () => { if (elapsedRef.current) clearInterval(elapsedRef.current) }
   }, [run?.status, run?.cancellationRequested, run?.startedAt])
 
-  async function handleStart() {
+  async function handleStart(fromTaskId?: string) {
     setStarting(true)
     setStartError(null)
     setCancelState('idle')
-    const res = await fetch(`/api/change-requests/${change.id}/execute`, { method: 'POST' })
+    const res = await fetch(`/api/change-requests/${change.id}/execute`, {
+      method: 'POST',
+      ...(fromTaskId ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fromTaskId }) } : {}),
+    })
     if (res.ok) {
       setChangeStatus('executing') // optimistic — keeps polling alive while run row is being created
       await poll()
@@ -177,22 +315,26 @@ export default function ExecutionView({ change, project }: { change: Change; pro
     }
   }
 
-  // Group events by iteration
-  const iterationMap = new Map<number, LiveEvent[]>()
-  for (const e of events) {
-    const arr = iterationMap.get(e.iteration) ?? []
-    arr.push(e)
-    iterationMap.set(e.iteration, arr)
-  }
-  const iterations = [...iterationMap.entries()]
-    .filter(([n]) => n > 0)
-    .sort(([a], [b]) => a - b)
-
   const runActive = run?.status === 'running'
   const runDone = run && run.status !== 'running'
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const summary = run?.summary as any
+
+  function getTaskUiState(
+    task: TaskRow,
+    taskEvents: LiveEvent[],
+  ): 'queued' | 'running' | 'repairing' | 'done' | 'failed' | 'blocked' {
+    if (task.status === 'done') return 'done'
+    if (task.status === 'failed') return 'failed'
+    if (task.status === 'blocked') return 'blocked'
+
+    const lastEvent = taskEvents[taskEvents.length - 1]
+    if (!lastEvent) return 'queued'
+    if (lastEvent.event_type === 'task.repair_started') return 'repairing'
+    if (lastEvent.event_type === 'task.started' || lastEvent.event_type === 'task.validation_started') return 'running'
+    return 'queued'
+  }
 
   return (
     <div className="flex flex-col h-screen bg-[#0b1326] text-on-surface overflow-hidden">
@@ -253,27 +395,38 @@ export default function ExecutionView({ change, project }: { change: Change; pro
               <div className={`rounded-xl border px-5 py-4 flex items-center gap-3 ${
                 summary.status === 'success' ? 'bg-green-500/10 border-green-500/20' :
                 summary.status === 'wip'     ? 'bg-yellow-500/10 border-yellow-500/20' :
+                summary.status === 'cancelled' ? 'bg-slate-500/10 border-slate-500/20' :
                 'bg-red-500/10 border-red-500/20'
               }`}>
                 <span className={`material-symbols-outlined ${
                   summary.status === 'success' ? 'text-green-400' :
                   summary.status === 'wip'     ? 'text-yellow-400' :
+                  summary.status === 'cancelled' ? 'text-slate-400' :
                   'text-red-400'
                 }`} style={{ fontSize: '20px' }}>
-                  {summary.status === 'success' ? 'check_circle' : summary.status === 'wip' ? 'warning' : 'cancel'}
+                  {summary.status === 'success' ? 'check_circle' : summary.status === 'wip' ? 'warning' : summary.status === 'cancelled' ? 'stop_circle' : 'cancel'}
                 </span>
-                <div>
+                <div className="flex-1">
                   <p className="text-sm font-semibold text-slate-200">
                     {summary.status === 'success' && `Done in ${summary.iterationsUsed} iteration${summary.iterationsUsed !== 1 ? 's' : ''}`}
                     {summary.status === 'wip' && `WIP commit — ${summary.finalFailureType ?? 'checks incomplete'}`}
                     {summary.status === 'budget_exceeded' && `Budget exceeded — ${summary.iterationsUsed} iterations used`}
                     {summary.status === 'blocked' && `Blocked — ${summary.finalFailureType ?? 'stuck detector fired'}`}
-                    {summary.status === 'cancelled' && `Cancelled after ${summary.iterationsUsed} iteration${summary.iterationsUsed !== 1 ? 's' : ''}`}
+                    {summary.status === 'cancelled' && `Cancelled`}
                   </p>
                   <p className="text-xs text-slate-500 mt-0.5 font-mono">
                     {summary.filesChanged?.length ?? 0} files · {summary.repairsAttempted ?? 0} repairs · {Math.round((summary.durationMs ?? 0) / 1000)}s
                   </p>
                 </div>
+                {summary.status === 'cancelled' && (
+                  <button
+                    onClick={() => handleStart()}
+                    disabled={starting}
+                    className="flex-shrink-0 px-4 py-2 rounded-lg bg-indigo-500 hover:bg-indigo-400 disabled:opacity-50 text-white text-sm font-bold font-headline transition-colors"
+                  >
+                    {starting ? 'Starting…' : 'Run again'}
+                  </button>
+                )}
               </div>
             )}
 
@@ -316,19 +469,101 @@ export default function ExecutionView({ change, project }: { change: Change; pro
               </div>
             )}
 
-            {/* Iteration cards */}
-            {iterations.length > 0 && (
-              <div className="space-y-3">
-                {iterations.map(([n, evs], i) => (
-                  <ExecutionIterationCard
-                    key={n}
-                    iteration={n}
-                    events={evs}
-                    defaultExpanded={i === iterations.length - 1}
-                    isFinal={i === iterations.length - 1}
-                    runActive={runActive}
-                  />
-                ))}
+            {/* Task list */}
+            {tasks.length > 0 && (
+              <div className="rounded-xl bg-[#131b2e] border border-white/5 overflow-hidden">
+                <div className="divide-y divide-white/5">
+                  {tasks.map(task => {
+                    const taskEvents = events.filter(e =>
+                      (e.payload as { taskId?: string } | undefined)?.taskId === task.id
+                    )
+                    const uiState = getTaskUiState(task, taskEvents)
+
+                    const statusColors: Record<string, string> = {
+                      done:      'text-green-400 bg-green-400/10',
+                      failed:    'text-red-400 bg-red-400/10',
+                      blocked:   'text-slate-500 bg-slate-500/10',
+                      running:   'text-indigo-400 bg-indigo-400/10',
+                      repairing: 'text-amber-400 bg-amber-400/10',
+                      queued:    'text-slate-600 bg-slate-700/30',
+                    }
+
+                    const blockedByIndex = task.blocked_by_task_id
+                      ? tasks.findIndex(t => t.id === task.blocked_by_task_id) + 1
+                      : null
+
+                    return (
+                      <div key={task.id} className="px-5 py-4">
+                        <div className="flex items-start gap-3">
+                          <span className={`mt-0.5 flex-shrink-0 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${statusColors[uiState] ?? statusColors['queued']}`}>
+                            {uiState}
+                          </span>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm text-slate-200 leading-snug">{task.description}</p>
+
+                            {/* Blocked reason */}
+                            {uiState === 'blocked' && blockedByIndex && (
+                              <p className="mt-1 text-xs text-slate-500">
+                                Blocked by task {blockedByIndex}
+                              </p>
+                            )}
+
+                            {/* Failure reason + retrigger */}
+                            {uiState === 'failed' && (
+                              <div className="mt-2 flex items-start gap-3 flex-wrap">
+                                {task.failure_reason && (
+                                  <p className="text-xs text-red-400 font-mono leading-snug break-all">{task.failure_reason}</p>
+                                )}
+                                <button
+                                  onClick={() => handleStart(task.id)}
+                                  disabled={starting}
+                                  className="flex-shrink-0 px-3 py-1 rounded border border-white/10 text-xs text-slate-400 hover:text-slate-200 hover:border-white/20 font-bold transition-colors disabled:opacity-50"
+                                >
+                                  {starting ? 'Starting…' : 'Retrigger'}
+                                </button>
+                              </div>
+                            )}
+
+                            {/* Live events for active task */}
+                            {(uiState === 'running' || uiState === 'repairing') && taskEvents.length > 0 && (
+                              <div className="mt-2 space-y-0.5">
+                                {taskEvents.slice(-3).map(e => (
+                                  <p key={`${e.id}`} className="text-[11px] text-slate-600 font-mono">
+                                    {e.event_type}
+                                  </p>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+
+                {/* Run summary footer */}
+                {run?.summary && (() => {
+                  const trs = (run.summary as { taskRunSummary?: { finalStatus: string; completedTasks: string[]; failedTasks: string[]; blockedTasks: string[]; totalTasks: number } }).taskRunSummary
+                  if (!trs) return null
+                  return (
+                    <div className="px-5 py-4 border-t border-white/5 flex items-center gap-4 text-xs text-slate-500">
+                      <span className={`font-bold ${
+                        trs.finalStatus === 'success' ? 'text-green-400' :
+                        trs.finalStatus === 'partial' ? 'text-amber-400' :
+                        'text-red-400'
+                      }`}>
+                        {trs.finalStatus.toUpperCase()}
+                      </span>
+                      <span>{trs.completedTasks.length}/{trs.totalTasks} tasks completed</span>
+                      {trs.failedTasks.length > 0 && (
+                        <span className="text-red-400">{trs.failedTasks.length} failed</span>
+                      )}
+                      {trs.blockedTasks.length > 0 && (
+                        <span>{trs.blockedTasks.length} blocked</span>
+                      )}
+                    </div>
+                  )
+                })()}
               </div>
             )}
 
@@ -341,7 +576,7 @@ export default function ExecutionView({ change, project }: { change: Change; pro
                   <p className="text-xs text-slate-500 mt-1">Run this change to see live progress, iteration history, and repair evidence.</p>
                 </div>
                 <button
-                  onClick={handleStart}
+                  onClick={() => handleStart()}
                   className="px-5 py-2 rounded-lg bg-indigo-500 hover:bg-indigo-400 text-white text-sm font-bold font-headline transition-colors"
                 >
                   Run execution
@@ -354,7 +589,7 @@ export default function ExecutionView({ change, project }: { change: Change; pro
               <div className="flex items-center justify-between rounded-xl bg-[#131b2e] border border-white/5 px-5 py-4">
                 <p className="text-sm text-slate-400">Run again from the beginning</p>
                 <button
-                  onClick={handleStart}
+                  onClick={() => handleStart()}
                   disabled={starting}
                   className="px-4 py-2 rounded-lg bg-[#0f1929] border border-white/10 hover:border-white/20 text-slate-300 text-sm font-semibold font-headline transition-colors disabled:opacity-50"
                 >
@@ -388,17 +623,22 @@ export default function ExecutionView({ change, project }: { change: Change; pro
               )}
               {events.map(e => {
                 const { level, message } = formatEventAsLog(e)
+                const msgLines = message.split('\n')
                 return (
-                  <div key={e.id} className={`flex gap-2 py-0.5 leading-relaxed ${
+                  <div key={e.id} className={`py-0.5 leading-relaxed ${
                     level === 'success' ? 'text-green-400' :
                     level === 'error'   ? 'text-red-400'   :
                     level === 'dim'     ? 'text-slate-600' :
                     'text-slate-300'
                   }`}>
-                    <span className="flex-shrink-0 text-slate-700 select-none">
-                      {level === 'success' ? '✓' : level === 'error' ? '✗' : '›'}
-                    </span>
-                    <span className="whitespace-pre-wrap break-all">{message}</span>
+                    {msgLines.map((line, i) => (
+                      <div key={i} className="flex gap-2">
+                        <span className="flex-shrink-0 text-slate-700 select-none w-3">
+                          {i === 0 ? (level === 'success' ? '✓' : level === 'error' ? '✗' : '›') : ''}
+                        </span>
+                        <span className="whitespace-pre-wrap break-words min-w-0">{line}</span>
+                      </div>
+                    ))}
                   </div>
                 )
               })}

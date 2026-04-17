@@ -102,9 +102,9 @@ export interface DetailedPlan {
   schema_version: 2
   planner_version: number
   goal: string
+  branch_name: string
   summary: PlanSummary
   file_map: PlanFileMap
-  // branch_name lives as a top-level column on change_plans — not stored here
   phases: Phase[]
 }
 

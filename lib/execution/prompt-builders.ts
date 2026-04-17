@@ -119,12 +119,42 @@ export interface TaskFileContext {
  * File-level task implementation prompt.
  * Replaces the symbol-extraction approach: the AI receives every file involved
  * in the task and returns a full replacement for each one.
+ *
+ * When `files` is empty the prompt is open-ended: the AI determines which files
+ * to create or modify.  Allowed paths: app/, components/, lib/, tests/, styles/,
+ * plus a small set of root config files.
  */
 export function buildTaskImplementationPrompt(
   task: { description: string; intent: string },
   files: TaskFileContext[],
   previousErrors?: string,
 ): string {
+  if (files.length === 0) {
+    return `You are a TypeScript/Next.js engineer implementing a planned change.
+
+## Task
+${task.description}
+
+## Change Intent
+${task.intent}
+${previousErrors ? `\n## Previous Attempt Failed — Fix These Errors\n\`\`\`\n${previousErrors}\n\`\`\`\nDo NOT repeat the same approach.\n` : ''}
+## Rules
+- Determine which files need to be created or modified to implement this task.
+- Only return files under these allowed paths: app/, components/, lib/, tests/, styles/
+  or root config files (tsconfig.json, tailwind.config.ts, next.config.ts, etc.).
+- Do not change unrelated code. Keep diffs minimal.
+
+## Output
+Return a JSON object:
+{
+  "files": [
+    { "path": "path/to/file.ts", "content": "<complete file content>" }
+  ],
+  "confidence": <0.0–1.0>,
+  "reasoning": "<one sentence explanation, max 140 chars>"
+}`
+  }
+
   const fileSection = files
     .map(f =>
       f.isNew

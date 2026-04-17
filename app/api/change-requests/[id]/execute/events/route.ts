@@ -29,7 +29,7 @@ export async function GET(
     .maybeSingle()
 
   if (!run) {
-    return NextResponse.json({ run: null, events: [], changeStatus: change.status })
+    return NextResponse.json({ run: null, events: [], tasks: [], changeStatus: change.status })
   }
 
   // Get all events for this run ordered by seq
@@ -38,6 +38,23 @@ export async function GET(
     .select('id, seq, iteration, event_type, phase, payload, created_at')
     .eq('run_id', run.id)
     .order('seq', { ascending: true })
+
+  // Load latest plan's tasks for per-task status display
+  const { data: latestPlan } = await db
+    .from('change_plans')
+    .select('id')
+    .eq('change_id', id)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  const { data: tasks } = latestPlan
+    ? await db
+        .from('change_plan_tasks')
+        .select('id, description, order_index, status, files, failure_reason, blocked_by_task_id, completed_at')
+        .eq('plan_id', latestPlan.id)
+        .order('order_index', { ascending: true })
+    : { data: [] }
 
   return NextResponse.json({
     run: {
@@ -49,6 +66,7 @@ export async function GET(
       cancellationRequested: run.cancellation_requested,
     },
     events: events ?? [],
+    tasks: tasks ?? [],
     changeStatus: change.status,
   })
 }

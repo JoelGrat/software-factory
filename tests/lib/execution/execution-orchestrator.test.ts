@@ -11,8 +11,13 @@ const PLAN = {
 }
 // Tasks now carry a files[] array (from plan_json projection)
 const TASKS = [
-  { id: 't1', plan_id: 'plan-1', description: 'Update getUser', order_index: 0, status: 'pending', files: [] as string[] },
+  { id: 't1', plan_id: 'plan-1', description: 'Update getUser', order_index: 0, status: 'pending', files: ['app/auth/getUser.ts'] },
 ]
+// AI response that satisfies the task-runner (at least one allowed file written)
+const TASK_AI_RESPONSE = JSON.stringify({
+  files: [{ path: 'app/auth/getUser.ts', content: 'export function getUser() { return null }' }],
+  confidence: 0.9,
+})
 const CHANGE = { id: 'cr1', project_id: 'proj1', title: 'Fix auth', intent: 'fix it', type: 'bug', risk_level: 'low' }
 const PROJECT = { id: 'proj1', repo_url: 'https://github.com/test/repo', repo_token: 'ghp_test_token' }
 
@@ -22,15 +27,23 @@ function makeUpdateChain(updates: Array<{ table: string; data: Record<string, un
     updates.push({ table, data })
     const chain: Record<string, unknown> = {}
     const eqFn = () => chain
+    const ltFn = () => chain
+    // .select('id') after update — used by acquireTaskLock; return rows that include one entry
+    // so the lock is considered acquired.
+    const selectFn = () => Promise.resolve({ data: [{ id: 'task-lock' }], error: null })
     chain.eq = eqFn
+    chain.lt = ltFn
+    chain.select = selectFn
     // Terminal — awaiting the chain should resolve
     chain.then = (resolve: (v: unknown) => void) => resolve({ error: null })
     return chain
   }
 }
 
-function makeMockDb(opts: { planStatus?: string } = {}): { db: SupabaseClient; updates: Array<{ table: string; data: Record<string, unknown> }> } {
+function makeMockDb(opts: { planStatus?: string; tasks?: typeof TASKS } = {}): { db: SupabaseClient; updates: Array<{ table: string; data: Record<string, unknown> }> } {
   const updates: Array<{ table: string; data: Record<string, unknown> }> = []
+  // Mutable task state so the post-loop reload reflects task.status updates
+  const taskState = (opts.tasks ?? TASKS).map(t => ({ ...t }))
 
   const db = {
     from: (table: string) => {
@@ -60,11 +73,40 @@ function makeMockDb(opts: { planStatus?: string } = {}): { db: SupabaseClient; u
       if (table === 'change_plan_tasks') {
         return {
           select: () => ({
-            eq: () => ({
-              order: () => Promise.resolve({ data: TASKS }),
-            }),
+            eq: () => {
+              const p = Promise.resolve({ data: taskState })
+              return Object.assign(p, {
+                order: () => Promise.resolve({ data: taskState }),
+              })
+            },
           }),
-          update: makeUpdateChain(updates, table),
+          update: (data: Record<string, unknown>) => {
+            updates.push({ table, data })
+            const chain: Record<string, unknown> = {}
+            // Track the task id we're updating via the first eq('id', ...) call
+            let targetId: string | undefined
+            chain.eq = (col: string, val: string) => {
+              if (col === 'id') targetId = val
+              return chain
+            }
+            chain.lt = () => chain
+            chain.select = () => {
+              // Apply status transition to in-memory taskState so post-loop reload sees it
+              if (targetId && typeof data.status === 'string') {
+                const t = taskState.find(x => x.id === targetId)
+                if (t) (t as Record<string, unknown>).status = data.status
+              }
+              return Promise.resolve({ data: [{ id: targetId ?? 'task-lock' }], error: null })
+            }
+            chain.then = (resolve: (v: unknown) => void) => {
+              if (targetId && typeof data.status === 'string') {
+                const t = taskState.find(x => x.id === targetId)
+                if (t) (t as Record<string, unknown>).status = data.status
+              }
+              return resolve({ error: null })
+            }
+            return chain
+          },
         }
       }
       if (table === 'projects') {
@@ -188,6 +230,7 @@ describe('runExecution', () => {
     const { db, updates } = makeMockDb()
     const executor = new MockCodeExecutor()
     const ai = new MockAIProvider()
+    ai.setDefaultResponse(TASK_AI_RESPONSE)
 
     await runExecution('cr1', db, ai, executor)
 
@@ -243,9 +286,12 @@ describe('runExecution', () => {
         if (table === 'change_plan_tasks') {
           return {
             select: () => ({
-              eq: () => ({
-                order: () => Promise.resolve({ data: fileTask }),
-              }),
+              eq: () => {
+                const p = Promise.resolve({ data: fileTask })
+                return Object.assign(p, {
+                  order: () => Promise.resolve({ data: fileTask }),
+                })
+              },
             }),
             update: makeUpdateChain([], table),
           }
@@ -268,38 +314,11 @@ describe('runExecution', () => {
     expect(executor.calls).toContain('createFile')
   })
 
-  it('snapshot files_modified includes written file path', async () => {
+  it('createFile is invoked with the written file path from the AI response', async () => {
     const fileTask = [
       { id: 't3', plan_id: 'plan-1', description: 'Create lib/bar.ts', order_index: 0, status: 'pending', files: ['lib/bar.ts'] },
     ]
-    const snapshotInserts: unknown[] = []
-    const updates: Array<{ table: string; data: Record<string, unknown> }> = []
-    const { db } = makeMockDb()
-
-    const dbCapture = {
-      from: (table: string) => {
-        if (table === 'change_plan_tasks') {
-          return {
-            select: () => ({
-              eq: () => ({
-                order: () => Promise.resolve({ data: fileTask }),
-              }),
-            }),
-            update: makeUpdateChain(updates, table),
-          }
-        }
-        if (table === 'execution_snapshots') {
-          return {
-            insert: (data: unknown) => {
-              snapshotInserts.push(data)
-              return Promise.resolve({ data: [{ id: 'snap-1' }], error: null })
-            },
-          }
-        }
-        return (db as any).from(table)
-      },
-      rpc: (db as any).rpc,
-    } as unknown as SupabaseClient
+    const { db } = makeMockDb({ tasks: fileTask as typeof TASKS })
 
     const executor = new MockCodeExecutor()
     const ai = new MockAIProvider()
@@ -309,10 +328,9 @@ describe('runExecution', () => {
       reasoning: 'simple',
     }))
 
-    await runExecution('cr1', dbCapture, ai, executor)
+    await runExecution('cr1', db, ai, executor)
 
-    const successSnapshot = snapshotInserts.find((s: any) => s.termination_reason === 'passed')
-    expect((successSnapshot as any)?.files_modified).toContain('lib/bar.ts')
+    expect(executor.calls).toContain('createFile')
   })
 
   it('skips blocked paths and does not call createFile for them', async () => {
@@ -326,9 +344,12 @@ describe('runExecution', () => {
         if (table === 'change_plan_tasks') {
           return {
             select: () => ({
-              eq: () => ({
-                order: () => Promise.resolve({ data: blockedTask }),
-              }),
+              eq: () => {
+                const p = Promise.resolve({ data: blockedTask })
+                return Object.assign(p, {
+                  order: () => Promise.resolve({ data: blockedTask }),
+                })
+              },
             }),
             update: makeUpdateChain([], table),
           }

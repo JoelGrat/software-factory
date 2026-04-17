@@ -21,7 +21,7 @@ async function checkDocker(): Promise<{ ok: boolean; error?: string }> {
 }
 
 export async function POST(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params
@@ -59,7 +59,14 @@ export async function POST(
     )
   }
 
-  // Verify approved plan exists
+  // Parse optional body — fromTaskId triggers a partial retrigger
+  let fromTaskId: string | null = null
+  try {
+    const body = await req.json().catch(() => ({}))
+    fromTaskId = (body as { fromTaskId?: unknown })?.fromTaskId as string | null ?? null
+  } catch { /* no body */ }
+
+  // Verify approved plan
   const { data: plan } = await db
     .from('change_plans')
     .select('id, status')
@@ -98,7 +105,7 @@ export async function POST(
 
   const adminDb = createAdminClient()
 
-  const clientRequestId = _req.headers.get('X-Client-Request-Id')
+  const clientRequestId = req.headers.get('X-Client-Request-Id')
   if (clientRequestId) {
     await adminDb
       .from('change_requests')
@@ -106,22 +113,36 @@ export async function POST(
       .eq('id', id)
   }
 
-  // Clear previous execution history before re-running
-  await adminDb.from('execution_runs').delete().eq('change_id', id)   // cascades to execution_events
-  await adminDb.from('execution_snapshots').delete().eq('change_id', id)
-  await adminDb.from('execution_trace').delete().eq('change_id', id)
-  await adminDb.from('execution_logs').delete().eq('change_id', id)
+  if (fromTaskId) {
+    // Retrigger: reset target task + transitive downstream dependents only
+    const { data: allTasks } = await adminDb
+      .from('change_plan_tasks')
+      .select('id, dependencies')
+      .eq('plan_id', plan.id)
 
-  // Reset plan task statuses to pending
-  const { data: latestPlan } = await adminDb
-    .from('change_plans')
-    .select('id')
-    .eq('change_id', id)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-  if (latestPlan) {
-    await adminDb.from('change_plan_tasks').update({ status: 'pending' }).eq('plan_id', latestPlan.id)
+    const { resetDownstreamTasks } = await import('@/lib/execution/task-retrigger')
+    await resetDownstreamTasks(adminDb, fromTaskId, (allTasks ?? []) as { id: string; dependencies: string[] }[])
+
+    // Clear execution runs to allow a new run, keep other audit data
+    await adminDb.from('execution_runs').delete().eq('change_id', id)
+  } else {
+    // Full re-run: clear all execution history and reset all tasks
+    await adminDb.from('execution_runs').delete().eq('change_id', id)
+    await adminDb.from('execution_snapshots').delete().eq('change_id', id)
+    await adminDb.from('execution_trace').delete().eq('change_id', id)
+    await adminDb.from('execution_logs').delete().eq('change_id', id)
+
+    await adminDb
+      .from('change_plan_tasks')
+      .update({
+        status: 'pending',
+        locked_by_run_id: null,
+        locked_at: null,
+        failure_reason: null,
+        blocked_by_task_id: null,
+        completed_at: null,
+      })
+      .eq('plan_id', plan.id)
   }
 
   const ai = getProvider()

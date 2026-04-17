@@ -24,12 +24,6 @@ export default async function ReviewPage({
 
   const proj = change.projects as unknown as { id: string; name: string; repo_url: string | null }
 
-  const { data: snapshots } = await db
-    .from('execution_snapshots')
-    .select('id, iteration, files_modified, tests_passed, tests_failed, termination_reason, planned_files')
-    .eq('change_id', changeId)
-    .order('iteration', { ascending: true })
-
   const { data: commit } = await db
     .from('change_commits')
     .select('id, branch_name, commit_hash, created_at')
@@ -54,8 +48,35 @@ export default async function ReviewPage({
         .order('order_index', { ascending: true })
     : { data: [] }
 
-  const passedSnapshot = [...(snapshots ?? [])].reverse().find(s => s.termination_reason === 'passed')
-  const allFiles = [...new Set((snapshots ?? []).flatMap(s => s.files_modified ?? []))]
+  // Read execution stats from the latest execution run summary
+  const { data: latestRun } = await db
+    .from('execution_runs')
+    .select('id, summary')
+    .eq('change_id', changeId)
+    .order('started_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  const summary = latestRun?.summary as {
+    filesChanged?: string[]
+    iterationsUsed?: number
+    taskRunSummary?: { completedTasks?: string[]; totalTasks?: number }
+  } | null
+
+  const filesModified = summary?.filesChanged ?? []
+  const iterationCount = summary?.iterationsUsed ?? 0
+
+  // Derive test counts from validation events in the latest run
+  const { data: validationEvents } = latestRun
+    ? await db
+        .from('execution_events')
+        .select('event_type')
+        .eq('run_id', latestRun.id)
+        .in('event_type', ['task.validation_passed', 'task.validation_failed'])
+    : { data: [] }
+
+  const testsPassed = (validationEvents ?? []).filter(e => e.event_type === 'task.validation_passed').length
+  const testsFailed = (validationEvents ?? []).filter(e => e.event_type === 'task.validation_failed').length
 
   return (
     <ReviewView
@@ -63,10 +84,10 @@ export default async function ReviewPage({
       project={proj}
       commit={commit ?? null}
       tasks={(tasks ?? []) as any[]}
-      filesModified={allFiles}
-      testsPassed={passedSnapshot?.tests_passed ?? 0}
-      testsFailed={passedSnapshot?.tests_failed ?? 0}
-      iterationCount={snapshots?.length ?? 0}
+      filesModified={filesModified}
+      testsPassed={testsPassed}
+      testsFailed={testsFailed}
+      iterationCount={iterationCount}
     />
   )
 }
