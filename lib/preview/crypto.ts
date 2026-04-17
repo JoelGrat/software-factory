@@ -4,7 +4,9 @@ const ALGO = 'aes-256-gcm'
 
 function getKey(): Buffer {
   const hex = process.env.PREVIEW_SECRET_KEY ?? ''
-  if (hex.length !== 64) throw new Error('PREVIEW_SECRET_KEY must be a 64-char hex string (32 bytes)')
+  if (hex.length !== 64 || !/^[0-9a-fA-F]{64}$/.test(hex)) {
+    throw new Error('PREVIEW_SECRET_KEY must be a 64-char hex string (32 bytes)')
+  }
   return Buffer.from(hex, 'hex')
 }
 
