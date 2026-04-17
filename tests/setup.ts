@@ -1,1 +1,1 @@
-// global test setup — add shared mocks here later
+import '@testing-library/jest-dom';
