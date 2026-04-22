@@ -233,7 +233,7 @@ export function PreviewPanel({ changeId }: { changeId: string }) {
           ) : (
             <span className="text-sm text-slate-500">URL not available</span>
           )}
-          <button onClick={() => { stop().then(() => { if (status === 'stopped') launch() }) }} disabled={loading}
+          <button onClick={async () => { await stop(); launch() }} disabled={loading}
             className="px-3 py-1.5 rounded-lg bg-[#0f1929] border border-white/10 hover:border-white/20 text-slate-300 text-xs font-semibold transition-colors disabled:opacity-50">
             Restart
           </button>
