@@ -568,10 +568,11 @@ export function ProjectSettingsView({
                               <button
                                 type="button"
                                 onClick={async () => {
-                                  await fetch(`/api/projects/${project.id}/env-vars`, {
+                                  const res = await fetch(`/api/projects/${project.id}/env-vars`, {
                                     method: 'DELETE', headers: { 'Content-Type': 'application/json' },
                                     body: JSON.stringify({ key: v.key }),
                                   })
+                                  if (!res.ok) { setVarError((await res.json()).error ?? 'Delete failed'); return }
                                   setEnvVarKeys(ks => ks.filter(k => k.id !== v.id))
                                 }}
                                 className="text-slate-600 hover:text-red-400 transition-colors"
@@ -625,7 +626,7 @@ export function ProjectSettingsView({
                             setImporting(true)
                             try {
                               const res = await fetch(`/api/projects/${project.id}/env-vars/import`, { method: 'POST' })
-                              if (!res.ok) { alert((await res.json()).error ?? 'Import failed'); return }
+                              if (!res.ok) { setVarError((await res.json()).error ?? 'Import failed'); return }
                               const { pairs } = await res.json()
                               for (const { key, value } of pairs) {
                                 await fetch(`/api/projects/${project.id}/env-vars`, {
