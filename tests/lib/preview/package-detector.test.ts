@@ -36,11 +36,15 @@ describe('detectStartCommand', () => {
     expect(detectStartCommand({ preview: 'vite preview', dev: 'vite' }))
       .toBe('npm run preview')
   })
-  it('uses start when no preview', () => {
-    expect(detectStartCommand({ start: 'node server.js', dev: 'nodemon' }))
+  it('prefers dev over start (avoids next start / production server)', () => {
+    expect(detectStartCommand({ start: 'next start', dev: 'next dev' }))
+      .toBe('npm run dev')
+  })
+  it('uses start when only start is defined', () => {
+    expect(detectStartCommand({ start: 'node server.js' }))
       .toBe('npm run start')
   })
-  it('falls back to dev', () => {
+  it('uses dev script directly', () => {
     expect(detectStartCommand({ dev: 'next dev' })).toBe('npm run dev')
   })
   it('falls back to npm run dev when no scripts match', () => {
