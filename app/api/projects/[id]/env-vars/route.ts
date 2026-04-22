@@ -72,7 +72,8 @@ export async function DELETE(req: Request, { params }: Params) {
   if (!key) return NextResponse.json({ error: 'key required' }, { status: 400 })
 
   const admin = createAdminClient()
-  await (admin.from('project_env_vars') as any).delete().eq('project_id', id).eq('key', key)
+  const { error } = await (admin.from('project_env_vars') as any).delete().eq('project_id', id).eq('key', key)
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   return NextResponse.json({ ok: true })
 }

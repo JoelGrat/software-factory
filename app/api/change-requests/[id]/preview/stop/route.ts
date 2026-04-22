@@ -25,6 +25,15 @@ export async function POST(req: Request, { params }: Params) {
   if (!previewId) return NextResponse.json({ error: 'previewId required' }, { status: 400 })
 
   const admin = createAdminClient()
+
+  // Verify previewId belongs to this change (prevents cross-change stop)
+  const { data: preview } = await (admin.from('preview_containers') as any)
+    .select('id')
+    .eq('id', previewId)
+    .eq('change_id', changeId)
+    .single()
+  if (!preview) return NextResponse.json({ error: 'Preview not found' }, { status: 404 })
+
   await stopPreview(admin, previewId)
   return NextResponse.json({ ok: true })
 }

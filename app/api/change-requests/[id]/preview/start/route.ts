@@ -74,5 +74,10 @@ export async function POST(req: Request, { params }: Params) {
   await expireIdle(admin, proj.id)
 
   const result = await startPreview(admin, changeId, proj.id, proj.repo_url, proj.repo_token, branchName, config, envVars, force)
+
+  if (result.status === 'needs_config') return NextResponse.json(result, { status: 422 })
+  if (result.status === 'max_previews_reached') return NextResponse.json(result, { status: 503 })
+  if (result.status === 'port_exhausted') return NextResponse.json(result, { status: 503 })
+  if (result.status === 'error') return NextResponse.json(result, { status: 500 })
   return NextResponse.json(result)
 }
