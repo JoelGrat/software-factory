@@ -25,7 +25,7 @@ export interface PreviewConfig {
 }
 
 export interface StartResult {
-  status: 'running' | 'needs_config' | 'error' | 'max_previews_reached' | 'port_exhausted'
+  status: 'starting' | 'needs_config' | 'error' | 'max_previews_reached' | 'port_exhausted'
   previewId?: string
   url?: string
   missingKeys?: string[]
@@ -44,8 +44,8 @@ export interface PreviewStatus {
 }
 
 async function dockerExec(containerId: string, command: string): Promise<string> {
-  const { stdout, stderr } = await execFile('docker', ['exec', containerId, 'sh', '-c', command])
-  return stdout + stderr
+  const { stdout } = await execFile('docker', ['exec', containerId, 'sh', '-c', command])
+  return stdout
 }
 
 async function appendLog(db: SupabaseClient, previewId: string, line: string): Promise<void> {
@@ -115,7 +115,7 @@ export async function startPreview(
       .eq('id', previewId)
   })
 
-  return { status: 'running', previewId, url: defaultStrategy.getUrl(port) }
+  return { status: 'starting', previewId, url: defaultStrategy.getUrl(port) }
 }
 
 async function bootContainer(
@@ -148,15 +148,16 @@ async function bootContainer(
 
   // Clone branch
   const authedUrl = repoUrl.replace('https://', `https://oauth2:${repoToken}@`)
-  const workDir = `/app/${config.workDir}`.replace('/app/.', '/app')
+  const workDir = config.workDir === '.' || config.workDir === '' ? '/app' : `/app/${config.workDir}`
   await log(`Cloning ${branchName}…`)
   await dockerExec(containerId, `git clone --depth 1 ${authedUrl} /app 2>&1`)
   await dockerExec(containerId, `cd /app && (git fetch --depth 1 origin ${branchName} 2>/dev/null && git checkout ${branchName}) || true`)
 
-  // Write .env
+  // Write .env — base64-encode the content so shell metacharacters in values are never evaluated
   const envContent = Object.entries(envVars).map(([k, v]) => `${k}=${v}`).join('\n')
   if (envContent) {
-    await dockerExec(containerId, `printf '%s' "${envContent.replace(/"/g, '\\"').replace(/\n/g, '\\n')}" > ${workDir}/.env`)
+    const b64 = Buffer.from(envContent, 'utf8').toString('base64')
+    await dockerExec(containerId, `echo '${b64}' | base64 -d > ${workDir}/.env`)
   }
 
   // Detect package manager from root files
