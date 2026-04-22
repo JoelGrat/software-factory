@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { LeftNav } from '@/components/app/left-nav'
 import { ProfileAvatar } from '@/components/app/profile-avatar'
 import { ChangeStepBar } from '@/components/app/change-step-bar'
+import { PreviewPanel } from '@/components/preview/PreviewPanel'
 
 interface Task {
   id: string; description: string; status: string; order_index: number
@@ -236,12 +237,19 @@ export default function ReviewView({
             </div>
 
             {/* Action bar */}
-            <div className="rounded-xl bg-[#131b2e] border border-white/5 p-5 flex items-center justify-between gap-4">
+            <div className="rounded-xl bg-[#131b2e] border border-white/5 p-5 space-y-4">
+              {/* Preview */}
               <div>
-                <p className="text-sm font-semibold text-slate-200">Ready to approve?</p>
-                <p className="text-xs text-slate-500 mt-0.5">Approving marks this change as done. The branch stays open for manual merge.</p>
+                <p className="text-[10px] uppercase tracking-widest text-slate-500 font-headline mb-2">Preview</p>
+                <PreviewPanel changeId={change.id} />
               </div>
-              <div className="flex items-center gap-2 flex-shrink-0">
+
+              <div className="border-t border-white/5 pt-4 flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm font-semibold text-slate-200">Ready to approve?</p>
+                  <p className="text-xs text-slate-500 mt-0.5">Approving marks this change as done. The branch stays open for manual merge.</p>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
                 {deleteConfirm ? (
                   <>
                     <span className="text-xs text-slate-400">Delete this change?</span>
@@ -281,6 +289,7 @@ export default function ReviewView({
                 >
                   {approving ? 'Approving…' : 'Approve'}
                 </button>
+                </div>
               </div>
             </div>
             {error && (
