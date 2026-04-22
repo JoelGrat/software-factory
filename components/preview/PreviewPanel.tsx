@@ -57,6 +57,11 @@ export function PreviewPanel({ changeId }: { changeId: string }) {
     fetchStatus()
   }, [fetchStatus])
 
+  // Auto-expand startup log when status transitions to error
+  useEffect(() => {
+    if (status === 'error') setShowLog(true)
+  }, [status])
+
   // Start keepalive loop when running
   useEffect(() => {
     if (status === 'running' && previewId) {
@@ -111,10 +116,14 @@ export function PreviewPanel({ changeId }: { changeId: string }) {
     if (!previewId) return
     setLoading(true)
     try {
-      await fetch(`/api/change-requests/${changeId}/preview/stop`, {
+      const res = await fetch(`/api/change-requests/${changeId}/preview/stop`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ previewId }),
       })
+      if (!res.ok) {
+        setErrorMessage('Failed to stop preview')
+        return
+      }
       setStatus('stopped')
       stopPolling(); stopKeepalive()
     } finally { setLoading(false) }
@@ -134,8 +143,10 @@ export function PreviewPanel({ changeId }: { changeId: string }) {
           <pre className="text-[10px] font-mono text-slate-400 whitespace-pre-wrap break-all">
             {startupLog || '(waiting for output…)'}
           </pre>
-          <button onClick={() => navigator.clipboard.writeText(startupLog)}
-            className="mt-2 text-[10px] text-slate-600 hover:text-slate-400 transition-colors">
+          <button
+            onClick={() => navigator.clipboard.writeText(startupLog).catch(() => {})}
+            className="mt-2 text-[10px] text-slate-600 hover:text-slate-400 transition-colors"
+          >
             Copy
           </button>
         </div>
@@ -179,7 +190,10 @@ export function PreviewPanel({ changeId }: { changeId: string }) {
         {missingModal}
         <button onClick={() => launch()} disabled={loading}
           className="flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-bold font-headline transition-colors">
-          <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>play_arrow</span>
+          {loading
+            ? <span className="animate-spin material-symbols-outlined" style={{ fontSize: '16px' }}>progress_activity</span>
+            : <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>play_arrow</span>
+          }
           {loading ? 'Launching…' : 'Launch Preview'}
         </button>
         {errorMessage && <p className="text-xs text-red-400 mt-1">{errorMessage}</p>}
@@ -199,21 +213,27 @@ export function PreviewPanel({ changeId }: { changeId: string }) {
     )
   }
 
-  if (status === 'running' && url) {
+  if (status === 'running') {
     return (
       <div className="space-y-1">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="h-2 w-2 rounded-full bg-emerald-400 flex-shrink-0" />
-          <a href={url} target="_blank" rel="noreferrer"
-            className="text-sm font-mono text-emerald-400 hover:text-emerald-300 underline underline-offset-2 truncate max-w-[200px]">
-            {url}
-          </a>
-          <a href={url} target="_blank" rel="noreferrer"
-            className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors">
-            <span className="material-symbols-outlined" style={{ fontSize: '13px' }}>open_in_new</span>
-            Open
-          </a>
-          <button onClick={() => { stop().then(() => launch()) }} disabled={loading}
+          {url ? (
+            <>
+              <a href={url} target="_blank" rel="noreferrer"
+                className="text-sm font-mono text-emerald-400 hover:text-emerald-300 underline underline-offset-2 truncate max-w-[200px]">
+                {url}
+              </a>
+              <a href={url} target="_blank" rel="noreferrer"
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors">
+                <span className="material-symbols-outlined" style={{ fontSize: '13px' }}>open_in_new</span>
+                Open
+              </a>
+            </>
+          ) : (
+            <span className="text-sm text-slate-500">URL not available</span>
+          )}
+          <button onClick={() => { stop().then(() => { if (status === 'stopped') launch() }) }} disabled={loading}
             className="px-3 py-1.5 rounded-lg bg-[#0f1929] border border-white/10 hover:border-white/20 text-slate-300 text-xs font-semibold transition-colors disabled:opacity-50">
             Restart
           </button>
