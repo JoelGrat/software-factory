@@ -130,16 +130,41 @@ async function bootContainer(
 ): Promise<void> {
   const log = (line: string) => appendLog(db, previewId, line)
 
-  // Start container
+  // Start container — retry with the next port if the host port is already bound
   await log('Starting container…')
-  const { stdout } = await execFile('docker', [
-    'run', '-d', '--rm',
-    `-p`, `${port}:${config.portInternal}`,
-    `--memory=${config.maxMemoryMb}m`,
-    `--cpu-shares=${config.maxCpuShares}`,
-    'node:20-slim', 'tail', '-f', '/dev/null',
-  ])
-  const containerId = stdout.trim()
+  let containerId: string
+  {
+    const triedPorts = new Set<number>()
+    let currentPort = port
+    while (true) {
+      try {
+        const { stdout } = await execFile('docker', [
+          'run', '-d', '--rm',
+          `-p`, `${currentPort}:${config.portInternal}`,
+          `--memory=${config.maxMemoryMb}m`,
+          `--cpu-shares=${config.maxCpuShares}`,
+          'node:20-slim', 'tail', '-f', '/dev/null',
+        ])
+        containerId = stdout.trim()
+        if (currentPort !== port) {
+          // Update DB row with the actual port we ended up using
+          await (db.from('preview_containers') as any)
+            .update({ port: currentPort })
+            .eq('id', previewId)
+          port = currentPort
+        }
+        break
+      } catch (err: any) {
+        if (String(err).includes('port is already allocated') || String(err).includes('address already in use')) {
+          await log(`Port ${currentPort} already in use on host, trying next…`)
+          triedPorts.add(currentPort)
+          currentPort = await allocatePort(db, triedPorts)
+        } else {
+          throw err
+        }
+      }
+    }
+  }
   await (db.from('preview_containers') as any).update({ container_id: containerId }).eq('id', previewId)
 
   // Install git

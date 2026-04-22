@@ -15,13 +15,16 @@ export function pickPort(usedPorts: Set<number>): number {
   throw new Error('port_pool_exhausted')
 }
 
-/** Query DB for in-use ports, pick lowest free one. */
-export async function allocatePort(db: SupabaseClient): Promise<number> {
+/** Query DB for in-use ports, pick lowest free one.
+ *  @param exclude Additional ports to treat as used (e.g. ones that failed to bind on the host).
+ */
+export async function allocatePort(db: SupabaseClient, exclude: Set<number> = new Set()): Promise<number> {
   const { data, error } = await (db.from('preview_containers') as any)
     .select('port')
     .in('status', ['starting', 'running'])
   if (error) throw new Error(`allocatePort: db query failed: ${error.message}`)
   const used = new Set<number>((data ?? []).map((r: any) => r.port as number).filter(Boolean))
+  for (const p of exclude) used.add(p)
   return pickPort(used)
 }
 
