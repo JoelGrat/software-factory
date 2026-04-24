@@ -146,13 +146,14 @@ export async function generateDetailedPlan(
   // First attempt
   await onSubstep?.('plan_creating_phases')
   const prompt = buildDetailedPlanPrompt(change, spec, plannerVersion)
-  const result = await ai.complete(prompt, { maxTokens: 8192 })
+  const result = await ai.complete(prompt, { maxTokens: 16000 })
 
   let plan: DetailedPlan
   try {
     plan = JSON.parse(stripCodeFence(result.content))
   } catch {
-    throw new Error(`Plan generation produced non-JSON response: ${result.content.slice(0, 200)}`)
+    const truncated = result.outputTokens >= 15900
+    throw new Error(`Plan generation produced non-JSON response${truncated ? ' (response truncated — plan too large)' : ''}: ${result.content.slice(0, 200)}`)
   }
 
   await onSubstep?.('plan_validating')
@@ -165,13 +166,14 @@ export async function generateDetailedPlan(
   // One retry with gate failures included
   await onSubstep?.('plan_creating_phases')
   const retryPrompt = buildDetailedPlanPrompt(change, spec, plannerVersion, validation.diagnostics.issues)
-  const retryResult = await ai.complete(retryPrompt, { maxTokens: 8192 })
+  const retryResult = await ai.complete(retryPrompt, { maxTokens: 16000 })
 
   let retryPlan: DetailedPlan
   try {
     retryPlan = JSON.parse(stripCodeFence(retryResult.content))
   } catch {
-    throw new Error(`Plan generation retry produced non-JSON response: ${retryResult.content.slice(0, 200)}`)
+    const truncated = retryResult.outputTokens >= 15900
+    throw new Error(`Plan generation retry produced non-JSON response${truncated ? ' (response truncated — plan too large)' : ''}: ${retryResult.content.slice(0, 200)}`)
   }
 
   await onSubstep?.('plan_validating')
