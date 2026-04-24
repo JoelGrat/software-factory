@@ -53,3 +53,45 @@ export async function resetDownstreamTasks(
 
   return toReset
 }
+
+/**
+ * Union of collectDownstreamIds over multiple roots.
+ */
+export function collectDownstreamIdsFromRoots(
+  roots: string[],
+  tasks: TaskDep[],
+): Set<string> {
+  const result = new Set<string>()
+  for (const root of roots) {
+    for (const id of collectDownstreamIds(root, tasks)) {
+      result.add(id)
+    }
+  }
+  return result
+}
+
+/**
+ * Reset multiple root tasks and all their transitive downstream dependents.
+ */
+export async function resetDownstreamTasksFromRoots(
+  db: SupabaseClient,
+  roots: string[],
+  allTasks: TaskDep[],
+): Promise<Set<string>> {
+  const toReset = collectDownstreamIdsFromRoots(roots, allTasks)
+  if (toReset.size === 0) return toReset
+
+  const { error } = await db.from('change_plan_tasks')
+    .update({
+      status: 'pending',
+      locked_by_run_id: null,
+      locked_at: null,
+      failure_reason: null,
+      blocked_by_task_id: null,
+      completed_at: null,
+    })
+    .in('id', [...toReset])
+
+  if (error) throw new Error(`resetDownstreamTasksFromRoots failed: ${error.message}`)
+  return toReset
+}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { collectDownstreamIds } from '@/lib/execution/task-retrigger'
+import { collectDownstreamIds, collectDownstreamIdsFromRoots } from '@/lib/execution/task-retrigger'
 
 interface T { id: string; dependencies: string[] }
 
@@ -53,5 +53,41 @@ describe('collectDownstreamIds', () => {
       { id: 'D', dependencies: ['B', 'C'] },
     ]
     expect(collectDownstreamIds('A', tasks)).toEqual(new Set(['A', 'B', 'C', 'D']))
+  })
+})
+
+describe('collectDownstreamIdsFromRoots', () => {
+  it('single root matches collectDownstreamIds', () => {
+    const tasks: T[] = [
+      { id: 'A', dependencies: [] },
+      { id: 'B', dependencies: ['A'] },
+      { id: 'C', dependencies: [] },
+    ]
+    expect(collectDownstreamIdsFromRoots(['A'], tasks)).toEqual(new Set(['A', 'B']))
+  })
+
+  it('two independent roots collect both closures without overlap', () => {
+    const tasks: T[] = [
+      { id: 'A', dependencies: [] },
+      { id: 'B', dependencies: ['A'] },
+      { id: 'X', dependencies: [] },
+      { id: 'Y', dependencies: ['X'] },
+      { id: 'Z', dependencies: [] },
+    ]
+    expect(collectDownstreamIdsFromRoots(['A', 'X'], tasks)).toEqual(new Set(['A', 'B', 'X', 'Y']))
+  })
+
+  it('shared downstream included once when two roots both feed it', () => {
+    const tasks: T[] = [
+      { id: 'A', dependencies: [] },
+      { id: 'B', dependencies: [] },
+      { id: 'C', dependencies: ['A', 'B'] },
+    ]
+    expect(collectDownstreamIdsFromRoots(['A', 'B'], tasks)).toEqual(new Set(['A', 'B', 'C']))
+  })
+
+  it('empty roots returns empty set', () => {
+    const tasks: T[] = [{ id: 'A', dependencies: [] }]
+    expect(collectDownstreamIdsFromRoots([], tasks)).toEqual(new Set())
   })
 })
