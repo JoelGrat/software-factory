@@ -30,6 +30,8 @@ export interface TaskRunnerOptions {
   runId: string
   changeId: string
   changeIntent: string
+  /** Reviewer feedback from the previous execution, if any. Injected into the first attempt prompt. */
+  reviewFeedback?: string | null
   taskIndex: number
   baselineTypeErrorSigs: Set<string>
   preExistingFailedTests: Set<string>
@@ -64,7 +66,7 @@ export async function runTask(
   executor: CodeExecutor,
   opts: TaskRunnerOptions,
 ): Promise<TaskRunResult> {
-  const { runId, changeId, changeIntent, taskIndex, baselineTypeErrorSigs, preExistingFailedTests, budget, seq } = opts
+  const { runId, changeId, changeIntent, reviewFeedback, taskIndex, baselineTypeErrorSigs, preExistingFailedTests, budget, seq } = opts
   const taskStartMs = Date.now()
 
   // Acquire lock (conditional — prevents double-execution)
@@ -110,6 +112,7 @@ export async function runTask(
     const prompt = buildTaskImplementationPrompt(
       { description: task.description, intent: changeIntent },
       fileContexts,
+      reviewFeedback ? `Reviewer rejected the previous execution. Their feedback:\n${reviewFeedback}` : undefined,
     )
 
     const aiResult = await ai.complete(prompt, { maxTokens: 8192 })

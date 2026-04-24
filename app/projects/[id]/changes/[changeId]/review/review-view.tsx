@@ -12,7 +12,7 @@ interface Task {
   system_components: { name: string; type: string } | null
 }
 interface Commit { id: string; branch_name: string; commit_hash: string; created_at: string }
-interface Change { id: string; project_id: string; title: string; intent: string; type: string; risk_level: string | null; status: string }
+interface Change { id: string; project_id: string; title: string; intent: string; type: string; risk_level: string | null; status: string; review_feedback?: string | null }
 interface Project { id: string; name: string; repo_url: string | null }
 
 export default function ReviewView({
@@ -39,6 +39,22 @@ export default function ReviewView({
   const [deleting, setDeleting] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [feedback, setFeedback] = useState(change.review_feedback ?? '')
+  const [savingFeedback, setSavingFeedback] = useState(false)
+  const [feedbackSaved, setFeedbackSaved] = useState(false)
+
+  async function handleSaveFeedback() {
+    setSavingFeedback(true)
+    setFeedbackSaved(false)
+    const res = await fetch(`/api/change-requests/${change.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ review_feedback: feedback }),
+    })
+    setSavingFeedback(false)
+    if (res.ok) setFeedbackSaved(true)
+    else setError('Failed to save feedback')
+  }
 
   async function handleDelete() {
     setDeleting(true)
@@ -233,6 +249,35 @@ export default function ReviewView({
                     </span>
                   </div>
                 ))}
+              </div>
+            </div>
+
+            {/* Feedback */}
+            <div className="rounded-xl bg-[#131b2e] border border-white/5 overflow-hidden">
+              <div className="px-5 py-4 border-b border-white/5 flex items-center justify-between">
+                <p className="text-xs font-bold uppercase tracking-widest text-slate-400 font-headline">Request Changes</p>
+                {feedbackSaved && (
+                  <span className="text-[10px] font-mono text-green-400">Saved</span>
+                )}
+              </div>
+              <div className="px-5 py-4 space-y-3">
+                <p className="text-xs text-slate-500">Describe what was implemented incorrectly. This will be included in the next re-run so the AI knows what to fix.</p>
+                <textarea
+                  value={feedback}
+                  onChange={e => { setFeedback(e.target.value); setFeedbackSaved(false) }}
+                  rows={4}
+                  placeholder="e.g. The button was added to the wrong page. It should appear in the settings panel, not the dashboard."
+                  className="w-full rounded-lg bg-[#0f1929] border border-white/10 focus:border-indigo-500/50 focus:outline-none px-3 py-2.5 text-sm text-slate-300 placeholder-slate-600 font-mono resize-none transition-colors"
+                />
+                <div className="flex justify-end">
+                  <button
+                    onClick={handleSaveFeedback}
+                    disabled={savingFeedback || !feedback.trim()}
+                    className="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-bold font-headline transition-colors"
+                  >
+                    {savingFeedback ? 'Saving…' : 'Save feedback'}
+                  </button>
+                </div>
               </div>
             </div>
 

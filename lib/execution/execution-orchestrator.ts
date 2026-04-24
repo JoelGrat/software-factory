@@ -112,7 +112,7 @@ export async function runExecution(
     // Load change
     const { data: change } = await db
       .from('change_requests')
-      .select('id, project_id, title, intent, type, risk_level')
+      .select('id, project_id, title, intent, type, risk_level, review_feedback')
       .eq('id', changeId)
       .single()
     if (!change) throw new Error(`Change not found: ${changeId}`)
@@ -285,6 +285,7 @@ export async function runExecution(
         runId,
         changeId,
         changeIntent: (change as { intent: string }).intent,
+        reviewFeedback: (change as { review_feedback?: string | null }).review_feedback,
         taskIndex: task.order_index,
         baselineTypeErrorSigs,
         preExistingFailedTests,
