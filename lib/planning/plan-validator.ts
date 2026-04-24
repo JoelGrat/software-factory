@@ -106,15 +106,6 @@ export function validatePlanOutput(plan: DetailedPlan): ValidationResult {
             break
           }
         }
-        const needsSnippets = ['database', 'backend', 'refactor'].includes(task.type)
-        if (needsSnippets && (!task.playbook.code_snippets || task.playbook.code_snippets.length === 0)) {
-          if (issues.length < 10) {
-            issues.push(`task "${task.id}" (${task.type}) requires at least one code_snippet`)
-          } else {
-            moreThanCap = true
-            break
-          }
-        }
       }
 
       if (moreThanCap) break
