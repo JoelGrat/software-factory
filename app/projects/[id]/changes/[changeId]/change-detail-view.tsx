@@ -83,7 +83,7 @@ interface Change {
   analysis_quality: string | null
   failed_stage: string | null
   retryable: boolean | null
-  failure_diagnostics: { summary: string; issues: string[] } | null
+  failure_diagnostics: { stage: string; reason: string; diagnostics: { summary: string; issues: string[] } } | null
   tags: string[]
   created_at: string
   updated_at: string
@@ -628,10 +628,10 @@ export function ChangeDetailView({
                 </div>
                 {change.failure_diagnostics && (
                   <div className="px-5 py-4 space-y-1">
-                    <p className="text-xs text-slate-400">{change.failure_diagnostics.summary}</p>
-                    {change.failure_diagnostics.issues.length > 0 && (
+                    <p className="text-xs text-slate-400">{change.failure_diagnostics.diagnostics?.summary ?? change.failure_diagnostics.reason}</p>
+                    {(change.failure_diagnostics.diagnostics?.issues?.length ?? 0) > 0 && (
                       <ul className="mt-2 space-y-0.5">
-                        {change.failure_diagnostics.issues.slice(0, 5).map((issue, i) => (
+                        {change.failure_diagnostics.diagnostics.issues.slice(0, 5).map((issue, i) => (
                           <li key={i} className="text-xs text-slate-500 font-mono before:content-['·_'] before:text-slate-700">{issue}</li>
                         ))}
                       </ul>
