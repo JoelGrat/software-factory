@@ -591,7 +591,7 @@ export async function runExecution(
       filesChanged: [],
       finalFailureType: errorMessage,
       commitOutcome: { type: 'no_commit', reason: 'error' },
-      durationMs: 0,
+      durationMs: typeof startedAt !== 'undefined' ? Date.now() - startedAt : 0,
       testabilityStatus: 'blocked' as const,
       resolvedErrors: [],
       unresolvedErrors: [],

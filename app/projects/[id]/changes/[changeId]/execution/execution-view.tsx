@@ -210,11 +210,12 @@ interface Change {
   title: string
   status: string
   risk_level: string | null
+  review_feedback?: string | null
 }
 
 interface Project { id: string; name: string }
 
-export default function ExecutionView({ change, project }: { change: Change; project: Project | null }) {
+export default function ExecutionView({ change, project, autoStart = false }: { change: Change; project: Project | null; autoStart?: boolean }) {
   const router = useRouter()
   const [changeStatus, setChangeStatus] = useState(change.status)
   const [run, setRun] = useState<RunData | null>(null)
@@ -286,6 +287,16 @@ export default function ExecutionView({ change, project }: { change: Change; pro
     }
     return () => { if (elapsedRef.current) clearInterval(elapsedRef.current) }
   }, [run?.status, run?.cancellationRequested, run?.startedAt])
+
+  // Auto-start when arriving from the review page re-run flow
+  const autoStartFiredRef = useRef(false)
+  useEffect(() => {
+    if (!autoStart || autoStartFiredRef.current) return
+    if (changeStatus === 'executing' || run?.status === 'running') return
+    autoStartFiredRef.current = true
+    handleStart()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStart])
 
   async function handleStart(fromTaskId?: string) {
     setStarting(true)
@@ -378,6 +389,17 @@ export default function ExecutionView({ change, project }: { change: Change; pro
                 {run ? `Run ${run.id.slice(0, 8)} · ${run.status}` : 'No run yet'}
               </p>
             </div>
+
+            {/* Review feedback banner */}
+            {change.review_feedback && (
+              <div className="rounded-xl bg-amber-500/5 border border-amber-500/20 px-5 py-4 flex items-start gap-3">
+                <span className="material-symbols-outlined text-amber-400 flex-shrink-0 mt-0.5" style={{ fontSize: '16px' }}>feedback</span>
+                <div className="min-w-0">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-amber-500/70 font-headline mb-1">Implementing feedback</p>
+                  <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap">{change.review_feedback}</p>
+                </div>
+              </div>
+            )}
 
             {/* Live strip (running) */}
             {runActive && (
@@ -554,11 +576,11 @@ export default function ExecutionView({ change, project }: { change: Change; pro
                       }`}>
                         {trs.finalStatus.toUpperCase()}
                       </span>
-                      <span>{trs.completedTasks.length}/{trs.totalTasks} tasks completed</span>
-                      {trs.failedTasks.length > 0 && (
+                      <span>{(trs.completedTasks?.length ?? 0)}/{trs.totalTasks} tasks completed</span>
+                      {(trs.failedTasks?.length ?? 0) > 0 && (
                         <span className="text-red-400">{trs.failedTasks.length} failed</span>
                       )}
-                      {trs.blockedTasks.length > 0 && (
+                      {(trs.blockedTasks?.length ?? 0) > 0 && (
                         <span>{trs.blockedTasks.length} blocked</span>
                       )}
                     </div>
