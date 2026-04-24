@@ -175,6 +175,10 @@ export function validatePatchChangeRequest(body: unknown): PatchResult {
     }
     updates.tags = b.tags
   }
+  if (b.review_feedback !== undefined) {
+    if (typeof b.review_feedback !== 'string') return { valid: false, error: 'review_feedback must be a string' }
+    updates.review_feedback = b.review_feedback.trim() || null
+  }
 
   if (Object.keys(updates).length === 0) return { valid: false, error: 'nothing to update' }
   return { valid: true, updates }

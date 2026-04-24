@@ -15,7 +15,7 @@ export default async function ReviewPage({
 
   const { data: change } = await db
     .from('change_requests')
-    .select('id, title, intent, type, risk_level, status, projects!inner(id, name, owner_id, repo_url)')
+    .select('id, title, intent, type, risk_level, status, review_feedback, projects!inner(id, name, owner_id, repo_url)')
     .eq('id', changeId)
     .eq('projects.owner_id', user.id)
     .single()
