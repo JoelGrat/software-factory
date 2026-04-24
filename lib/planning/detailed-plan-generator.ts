@@ -65,8 +65,7 @@ Rules — every task MUST have:
 3. At least one validation check
 4. A non-empty expected_result
 5. depends_on references that exist within this plan
-6. A playbook object with commit, implementation_notes, commands, expected_outputs, code_snippets, temporary_failures_allowed, and rollback
-7. database/backend/refactor tasks MUST include at least one code_snippet with real content
+6. A playbook object with commit, implementation_notes, commands, expected_outputs, temporary_failures_allowed, and rollback
 
 Task types: backend, frontend, database, testing, infra, api, refactor
 Substep actions: write_file, modify_file, run_command, verify_schema, run_test, insert_row
@@ -115,14 +114,6 @@ Respond with JSON:
             "implementation_notes": ["Use Next.js App Router page.tsx convention", "Import from @/components/ using the @ alias"],
             "commands": ["npm run build"],
             "expected_outputs": ["Compiled successfully"],
-            "code_snippets": [
-              {
-                "file": "app/projects/[id]/docs/page.tsx",
-                "language": "tsx",
-                "purpose": "Docs page",
-                "content": "export default function DocsPage() { return <div>Docs</div> }"
-              }
-            ],
             "temporary_failures_allowed": [],
             "commit": "feat: add docs page",
             "rollback": []
