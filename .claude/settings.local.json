@@ -27,7 +27,28 @@
       "Bash(npm test *)",
       "Bash(npx eslint *)",
       "Bash(node *)",
-      "Bash(git rm *)"
+      "Bash(git rm *)",
+      "Bash(git *)",
+      "Bash(python tmp_replace.py)",
+      "mcp__plugin_claude-mem_mcp-search__smart_search",
+      "mcp__ide__getDiagnostics",
+      "Bash(cat)",
+      "Read(//tmp/**)",
+      "Bash(npx next *)",
+      "Bash(gh pr create --title 'feat: task-based execution loop' --body ':*)",
+      "Bash(where gh:*)",
+      "Read(//c/Program Files/GitHub CLI/**)",
+      "Bash(cmd.exe:*)",
+      "Bash(mkdir -p app/projects/\\\\[id\\\\]/docs)",
+      "Bash(cp \"app/projects/[projectId]/docs/page.tsx\" \"app/projects/[id]/docs/page.tsx\")",
+      "Bash(npm list *)",
+      "Bash(npm install *)",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(list\\(d.get\\('devDependencies',{}\\).keys\\(\\)\\)\\)\")",
+      "Bash(mkdir -p \"C:/Users/joelg/softwareFactory_git/app/api/projects/[id]/env-vars/import\")",
+      "Bash(mkdir -p \"C:/Users/joelg/softwareFactory_git/app/api/projects/[id]/preview-config\")",
+      "Bash(mkdir -p \"C:/Users/joelg/softwareFactory_git/app/api/change-requests/[id]/preview/start\")",
+      "Bash(mkdir -p \"C:/Users/joelg/softwareFactory_git/app/api/change-requests/[id]/preview/stop\")",
+      "Bash(mkdir -p \"C:/Users/joelg/softwareFactory_git/app/api/change-requests/[id]/preview/status\")"
     ]
   }
 }

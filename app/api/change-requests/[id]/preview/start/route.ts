@@ -1,8 +1,9 @@
 // app/api/change-requests/[id]/preview/start/route.ts
 import { NextResponse } from 'next/server'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { decrypt } from '@/lib/preview/crypto'
 import { startPreview, expireIdle } from '@/lib/preview/preview-manager'
 import type { PreviewConfig } from '@/lib/preview/preview-manager'
 
@@ -57,19 +58,25 @@ export async function POST(req: Request, { params }: Params) {
     healthPath: cfg.health_path ?? '/',
     healthText: cfg.health_text ?? null,
     portInternal: cfg.port_internal ?? 3000,
-    expectedKeys: cfg.expected_keys ?? [],
+    expectedKeys: [],
     maxMemoryMb: cfg.max_memory_mb ?? 1024,
     maxCpuShares: cfg.max_cpu_shares ?? 512,
   }
 
-  // Load + decrypt env vars
-  const { data: varRows } = await (admin.from('project_env_vars') as any)
-    .select('key, value_enc')
-    .eq('project_id', proj.id)
+  // Load env vars from .env.local on the host
   const envVars: Record<string, string> = {}
-  for (const row of varRows ?? []) {
-    try { envVars[(row as any).key] = decrypt((row as any).value_enc) } catch { /* skip corrupted */ }
-  }
+  try {
+    const content = await readFile(join(process.cwd(), '.env.local'), 'utf8')
+    for (const line of content.split('\n')) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.startsWith('#')) continue
+      const eqIdx = trimmed.indexOf('=')
+      if (eqIdx < 1) continue
+      const key = trimmed.slice(0, eqIdx).trim()
+      const value = trimmed.slice(eqIdx + 1).trim().replace(/^["']|["']$/g, '')
+      envVars[key] = value
+    }
+  } catch { /* .env.local missing — start without env vars */ }
 
   await expireIdle(admin, proj.id)
 

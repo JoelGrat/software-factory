@@ -646,17 +646,6 @@ export function ProjectSettingsView({
                         <p className="text-[11px] text-slate-600 mt-1.5">Reads your local .env.local and saves all key/value pairs above. Review before importing.</p>
                       </div>
 
-                      {/* Expected keys */}
-                      <div className="pt-2 border-t border-white/5">
-                        <label className={`${labelClass} block mb-1.5`}>Expected keys <span className="font-normal normal-case tracking-normal text-slate-500">(comma-separated)</span></label>
-                        <input
-                          value={previewCfg.expected_keys.join(', ')}
-                          onChange={e => setPreviewCfg(c => ({ ...c, expected_keys: e.target.value.split(',').map(s => s.trim()).filter(Boolean) }))}
-                          placeholder="DATABASE_URL, NEXTAUTH_SECRET"
-                          className={inputClass}
-                        />
-                        <p className="text-[11px] text-slate-600 mt-1.5">Keys listed here trigger a warning at launch if not saved above.</p>
-                      </div>
                     </div>
                   </>
                 )}

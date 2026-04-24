@@ -219,12 +219,14 @@ async function bootContainer(
     await new Promise(r => setTimeout(r, POLL_INTERVAL_MS))
     try {
       const res = await fetch(healthUrl)
+      // Any HTTP response means the server is up (even 404).
+      // Only a network-level error (fetch throws) means "not ready yet".
+      if (!config.healthText) {
+        await (db.from('preview_containers') as any).update({ status: 'running' }).eq('id', previewId)
+        await log('Preview is ready.')
+        return
+      }
       if (res.ok) {
-        if (!config.healthText) {
-          await (db.from('preview_containers') as any).update({ status: 'running' }).eq('id', previewId)
-          await log('Preview is ready.')
-          return
-        }
         const text = await res.text()
         if (text.includes(config.healthText)) {
           await (db.from('preview_containers') as any).update({ status: 'running' }).eq('id', previewId)
