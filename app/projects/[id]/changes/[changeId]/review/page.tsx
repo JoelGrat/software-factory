@@ -52,7 +52,7 @@ export default async function ReviewPage({
   const { data: tasks } = latestPlan
     ? await db
         .from('change_plan_tasks')
-        .select('id, description, status, order_index, system_components(name, type)')
+        .select('id, description, status, order_index, dependencies, system_components(name, type)')
         .eq('plan_id', latestPlan.id)
         .order('order_index', { ascending: true })
     : { data: [] }
@@ -93,6 +93,7 @@ export default async function ReviewPage({
       project={proj}
       commit={commit ?? null}
       tasks={(tasks ?? []) as any[]}
+      planId={latestPlan?.id ?? null}
       filesModified={filesModified}
       testsPassed={testsPassed}
       testsFailed={testsFailed}

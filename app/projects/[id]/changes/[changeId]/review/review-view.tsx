@@ -9,6 +9,7 @@ import { PreviewPanel } from '@/components/preview/PreviewPanel'
 
 interface Task {
   id: string; description: string; status: string; order_index: number
+  dependencies: string[]
   system_components: { name: string; type: string } | null
 }
 interface Commit { id: string; branch_name: string; commit_hash: string; created_at: string }
@@ -20,6 +21,7 @@ export default function ReviewView({
   project,
   commit,
   tasks,
+  planId, // eslint-disable-next-line @typescript-eslint/no-unused-vars
   filesModified,
   testsPassed,
   testsFailed,
@@ -29,6 +31,7 @@ export default function ReviewView({
   project: Project | null
   commit: Commit | null
   tasks: Task[]
+  planId: string | null
   filesModified: string[]
   testsPassed: number
   testsFailed: number
@@ -36,6 +39,7 @@ export default function ReviewView({
 }) {
   const router = useRouter()
   const [approving, setApproving] = useState(false)
+  const [rerunning, setRerunning] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -90,6 +94,19 @@ export default function ReviewView({
       setError(data.error ?? 'Failed to approve')
       setApproving(false)
     }
+  }
+
+  async function handleRerun() {
+    setRerunning(true)
+    setError(null)
+    if (feedback.trim()) {
+      await fetch(`/api/change-requests/${change.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ review_feedback: feedback }),
+      })
+    }
+    router.push(`/projects/${project?.id}/changes/${change.id}/execution?autoStart=1`)
   }
 
   return (
@@ -321,12 +338,13 @@ export default function ReviewView({
                     <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>delete</span>
                   </button>
                 )}
-                <Link
-                  href={`/projects/${project?.id}/changes/${change.id}/execution`}
-                  className="px-4 py-2 rounded-lg bg-[#0f1929] border border-white/10 hover:border-white/20 text-slate-300 text-sm font-semibold font-headline transition-colors"
+                <button
+                  onClick={handleRerun}
+                  disabled={rerunning}
+                  className="px-4 py-2 rounded-lg bg-[#0f1929] border border-white/10 hover:border-white/20 disabled:opacity-50 text-slate-300 text-sm font-semibold font-headline transition-colors"
                 >
-                  Re-run
-                </Link>
+                  {rerunning ? 'Starting…' : 'Re-run'}
+                </button>
                 <button
                   onClick={handleApprove}
                   disabled={approving}
