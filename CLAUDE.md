@@ -81,3 +81,4 @@ See `.env.local.example` for the full list. Required for full functionality:
 | `AI_PROVIDER` | AI calls (`claude` \| `openai` \| `mock`) |
 | `ANTHROPIC_API_KEY` | when `AI_PROVIDER=claude` |
 | `OPENAI_API_KEY` | when `AI_PROVIDER=openai` |
+| `PREVIEW_SECRET_KEY` | preview feature (encrypt env vars) — 64-char hex, generate: `openssl rand -hex 32` |

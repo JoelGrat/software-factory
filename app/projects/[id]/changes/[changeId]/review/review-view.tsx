@@ -5,20 +5,32 @@ import Link from 'next/link'
 import { LeftNav } from '@/components/app/left-nav'
 import { ProfileAvatar } from '@/components/app/profile-avatar'
 import { ChangeStepBar } from '@/components/app/change-step-bar'
+import { PreviewPanel } from '@/components/preview/PreviewPanel'
 
 interface Task {
   id: string; description: string; status: string; order_index: number
+  dependencies: string[]
   system_components: { name: string; type: string } | null
 }
 interface Commit { id: string; branch_name: string; commit_hash: string; created_at: string }
 interface Change { id: string; project_id: string; title: string; intent: string; type: string; risk_level: string | null; status: string; review_feedback?: string | null }
 interface Project { id: string; name: string; repo_url: string | null }
 
+type AnalyzePhase = 'idle' | 'analyzing' | 'confirming' | 'applying'
+
+interface TaskSuggestion {
+  taskId: string
+  confidence: 'high' | 'medium' | 'low'
+  explanation: string
+}
+
 export default function ReviewView({
   change,
   project,
   commit,
   tasks,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  planId,
   filesModified,
   testsPassed,
   testsFailed,
@@ -28,6 +40,7 @@ export default function ReviewView({
   project: Project | null
   commit: Commit | null
   tasks: Task[]
+  planId: string | null
   filesModified: string[]
   testsPassed: number
   testsFailed: number
@@ -35,12 +48,18 @@ export default function ReviewView({
 }) {
   const router = useRouter()
   const [approving, setApproving] = useState(false)
+  const [rerunning, setRerunning] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [feedback, setFeedback] = useState(change.review_feedback ?? '')
   const [savingFeedback, setSavingFeedback] = useState(false)
   const [feedbackSaved, setFeedbackSaved] = useState(false)
+  const [analyzePhase, setAnalyzePhase] = useState<AnalyzePhase>('idle')
+  const [suggestions, setSuggestions] = useState<TaskSuggestion[]>([])
+  const [lowConfidence, setLowConfidence] = useState(false)
+  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set())
+  const [analyzeError, setAnalyzeError] = useState<string | null>(null)
 
   async function handleSaveFeedback() {
     setSavingFeedback(true)
@@ -88,6 +107,70 @@ export default function ReviewView({
       const data = await res.json().catch(() => ({}))
       setError(data.error ?? 'Failed to approve')
       setApproving(false)
+    }
+  }
+
+  async function handleRerun() {
+    setRerunning(true)
+    setError(null)
+    if (feedback.trim()) {
+      await fetch(`/api/change-requests/${change.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ review_feedback: feedback }),
+      })
+    }
+    router.push(`/projects/${project?.id}/changes/${change.id}/execution?autoStart=1`)
+  }
+
+  async function handleAnalyze() {
+    if (!feedback.trim()) return
+    setAnalyzePhase('analyzing')
+    setAnalyzeError(null)
+
+    await fetch(`/api/change-requests/${change.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ review_feedback: feedback }),
+    })
+
+    const res = await fetch(`/api/change-requests/${change.id}/analyze-feedback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ feedback }),
+    })
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      setAnalyzeError(data.error ?? 'Analysis failed')
+      setAnalyzePhase('idle')
+      return
+    }
+
+    const data = await res.json() as { suggestions: TaskSuggestion[]; lowConfidence: boolean }
+    setSuggestions(data.suggestions)
+    setLowConfidence(data.lowConfidence)
+    setSelectedTaskIds(new Set(data.suggestions.map(s => s.taskId)))
+    setAnalyzePhase('confirming')
+  }
+
+  async function handleApplyFixes() {
+    if (selectedTaskIds.size === 0) return
+    setAnalyzePhase('applying')
+    setError(null)
+
+    const res = await fetch(`/api/change-requests/${change.id}/execute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fromTaskIds: [...selectedTaskIds] }),
+    })
+
+    if (res.ok) {
+      router.push(`/projects/${project?.id}/changes/${change.id}/execution`)
+    } else {
+      const data = await res.json().catch(() => ({}))
+      setError(data.detail ?? data.error ?? 'Failed to start targeted fix')
+      setAnalyzePhase('confirming')
     }
   }
 
@@ -251,42 +334,174 @@ export default function ReviewView({
               </div>
             </div>
 
-            {/* Feedback */}
+            {/* Request Changes */}
             <div className="rounded-xl bg-[#131b2e] border border-white/5 overflow-hidden">
               <div className="px-5 py-4 border-b border-white/5 flex items-center justify-between">
                 <p className="text-xs font-bold uppercase tracking-widest text-slate-400 font-headline">Request Changes</p>
-                {feedbackSaved && (
+                {feedbackSaved && analyzePhase === 'idle' && (
                   <span className="text-[10px] font-mono text-green-400">Saved</span>
                 )}
               </div>
               <div className="px-5 py-4 space-y-3">
-                <p className="text-xs text-slate-500">Describe what was implemented incorrectly. This will be included in the next re-run so the AI knows what to fix.</p>
+                <p className="text-xs text-slate-500">
+                  Describe what was implemented incorrectly. Click <span className="text-slate-300">Analyze</span> to let AI suggest which tasks to re-run.
+                </p>
                 <textarea
                   value={feedback}
-                  onChange={e => { setFeedback(e.target.value); setFeedbackSaved(false) }}
+                  onChange={e => { setFeedback(e.target.value); setFeedbackSaved(false); setAnalyzePhase('idle') }}
                   rows={4}
+                  disabled={analyzePhase === 'analyzing' || analyzePhase === 'applying'}
                   placeholder="e.g. The button was added to the wrong page. It should appear in the settings panel, not the dashboard."
-                  className="w-full rounded-lg bg-[#0f1929] border border-white/10 focus:border-indigo-500/50 focus:outline-none px-3 py-2.5 text-sm text-slate-300 placeholder-slate-600 font-mono resize-none transition-colors"
+                  className="w-full rounded-lg bg-[#0f1929] border border-white/10 focus:border-indigo-500/50 focus:outline-none px-3 py-2.5 text-sm text-slate-300 placeholder-slate-600 font-mono resize-none transition-colors disabled:opacity-50"
                 />
-                <div className="flex justify-end">
-                  <button
-                    onClick={handleSaveFeedback}
-                    disabled={savingFeedback || !feedback.trim()}
-                    className="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-bold font-headline transition-colors"
-                  >
-                    {savingFeedback ? 'Saving…' : 'Save feedback'}
-                  </button>
-                </div>
+                {analyzeError && (
+                  <p className="text-xs text-red-400 font-mono">{analyzeError}</p>
+                )}
+                {analyzePhase === 'idle' && (
+                  <div className="flex items-center justify-between">
+                    <button
+                      onClick={handleSaveFeedback}
+                      disabled={savingFeedback || !feedback.trim()}
+                      className="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-40 text-slate-400 text-xs font-semibold font-headline transition-colors"
+                    >
+                      {savingFeedback ? 'Saving…' : 'Save'}
+                    </button>
+                    <button
+                      onClick={handleAnalyze}
+                      disabled={!feedback.trim()}
+                      className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-bold font-headline transition-colors"
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>auto_awesome</span>
+                      Analyze
+                    </button>
+                  </div>
+                )}
+                {analyzePhase === 'analyzing' && (
+                  <div className="flex items-center gap-2 text-xs text-indigo-400">
+                    <span className="material-symbols-outlined animate-spin" style={{ fontSize: '14px' }}>progress_activity</span>
+                    Analyzing feedback…
+                  </div>
+                )}
               </div>
+
+              {/* Task scope confirmation — shown when analyzePhase === 'confirming' */}
+              {analyzePhase === 'confirming' && (
+                <div className="border-t border-white/5">
+                  <div className="px-5 py-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-bold uppercase tracking-widest text-slate-400 font-headline">Suggested Patch Scope</p>
+                      <button
+                        onClick={() => setAnalyzePhase('idle')}
+                        className="text-[10px] text-slate-600 hover:text-slate-400 transition-colors"
+                      >
+                        Edit feedback
+                      </button>
+                    </div>
+
+                    {lowConfidence && (
+                      <div className="flex items-start gap-2 rounded-lg bg-amber-500/10 border border-amber-500/20 px-3 py-2">
+                        <span className="material-symbols-outlined text-amber-400 flex-shrink-0" style={{ fontSize: '14px' }}>warning</span>
+                        <p className="text-xs text-amber-300">Could not confidently map feedback to tasks — select manually below.</p>
+                      </div>
+                    )}
+
+                    <div className="space-y-2">
+                      {tasks.map(task => {
+                        const suggestion = suggestions.find(s => s.taskId === task.id)
+                        const isSelected = selectedTaskIds.has(task.id)
+                        const confidenceColor = suggestion?.confidence === 'high'
+                          ? 'text-green-400 bg-green-400/10'
+                          : suggestion?.confidence === 'medium'
+                          ? 'text-amber-400 bg-amber-400/10'
+                          : 'text-slate-500 bg-slate-500/10'
+
+                        return (
+                          <label
+                            key={task.id}
+                            className={`flex items-start gap-3 rounded-lg px-3 py-2.5 cursor-pointer transition-colors ${
+                              isSelected ? 'bg-indigo-500/10 border border-indigo-500/20' : 'bg-white/[0.02] border border-white/5 hover:border-white/10'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={e => {
+                                setSelectedTaskIds(prev => {
+                                  const next = new Set(prev)
+                                  if (e.target.checked) next.add(task.id)
+                                  else next.delete(task.id)
+                                  return next
+                                })
+                              }}
+                              className="mt-0.5 flex-shrink-0 accent-indigo-500"
+                            />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-sm text-slate-200">{task.description}</span>
+                                {suggestion && (
+                                  <span className={`text-[9px] font-bold uppercase tracking-wider px-1 py-0.5 rounded font-mono ${confidenceColor}`}>
+                                    {suggestion.confidence}
+                                  </span>
+                                )}
+                                {task.status === 'done' && !suggestion && (
+                                  <span className="text-[9px] font-mono text-slate-600 uppercase">done</span>
+                                )}
+                              </div>
+                              {suggestion?.explanation && (
+                                <p className="text-[11px] text-slate-500 font-mono mt-0.5">{suggestion.explanation}</p>
+                              )}
+                            </div>
+                          </label>
+                        )
+                      })}
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1">
+                      <button
+                        onClick={handleRerun}
+                        disabled={rerunning}
+                        className="text-xs text-slate-500 hover:text-slate-300 transition-colors disabled:opacity-40"
+                      >
+                        {rerunning ? 'Starting…' : 'Run full execution instead'}
+                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => { setAnalyzePhase('idle'); setSelectedTaskIds(new Set()) }}
+                          className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={handleApplyFixes}
+                          disabled={selectedTaskIds.size === 0 || analyzePhase === 'applying'}
+                          className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-bold font-headline transition-colors"
+                        >
+                          {analyzePhase === 'applying'
+                            ? <><span className="material-symbols-outlined animate-spin" style={{ fontSize: '12px' }}>progress_activity</span> Starting…</>
+                            : <><span className="material-symbols-outlined" style={{ fontSize: '12px' }}>build</span> Apply Fixes ({selectedTaskIds.size})</>
+                          }
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Action bar */}
-            <div className="rounded-xl bg-[#131b2e] border border-white/5 p-5 flex items-center justify-between gap-4">
+            <div className="rounded-xl bg-[#131b2e] border border-white/5 p-5 space-y-4">
+              {/* Preview */}
               <div>
-                <p className="text-sm font-semibold text-slate-200">Ready to approve?</p>
-                <p className="text-xs text-slate-500 mt-0.5">Approving marks this change as done. The branch stays open for manual merge.</p>
+                <p className="text-[10px] uppercase tracking-widest text-slate-500 font-headline mb-2">Preview</p>
+                <PreviewPanel changeId={change.id} />
               </div>
-              <div className="flex items-center gap-2 flex-shrink-0">
+
+              <div className="border-t border-white/5 pt-4 flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm font-semibold text-slate-200">Ready to approve?</p>
+                  <p className="text-xs text-slate-500 mt-0.5">Approving marks this change as done. The branch stays open for manual merge.</p>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
                 {deleteConfirm ? (
                   <>
                     <span className="text-xs text-slate-400">Delete this change?</span>
@@ -313,12 +528,6 @@ export default function ReviewView({
                     <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>delete</span>
                   </button>
                 )}
-                <Link
-                  href={`/projects/${project?.id}/changes/${change.id}/execution`}
-                  className="px-4 py-2 rounded-lg bg-[#0f1929] border border-white/10 hover:border-white/20 text-slate-300 text-sm font-semibold font-headline transition-colors"
-                >
-                  Re-run
-                </Link>
                 <button
                   onClick={handleApprove}
                   disabled={approving}
@@ -326,6 +535,7 @@ export default function ReviewView({
                 >
                   {approving ? 'Approving…' : 'Approve'}
                 </button>
+                </div>
               </div>
             </div>
             {error && (

@@ -71,11 +71,33 @@ export default async function ProjectSettingsPage({ params }: { params: Promise<
     executionCount: snapCount ?? 0,
   }
 
+  // Preview: env var keys (not values) + config
+  const { data: envVarRows } = await db
+    .from('project_env_vars' as any)
+    .select('id, key, updated_at')
+    .eq('project_id', id)
+    .order('key') as any
+
+  const { data: previewConfigRow } = await db
+    .from('project_preview_config' as any)
+    .select('*')
+    .eq('project_id', id)
+    .maybeSingle() as any
+
+  const envVarKeys: { id: string; key: string; updated_at: string }[] = envVarRows ?? []
+  const previewConfig = previewConfigRow ?? {
+    install_command: 'auto', start_command: 'auto', work_dir: '.',
+    health_path: '/', health_text: '', port_internal: 3000,
+    expected_keys: [], max_memory_mb: 1024, max_cpu_shares: 512,
+  }
+
   return (
     <ProjectSettingsView
       project={{ ...project, project_settings } as any}
       modelHealth={modelHealth}
       dangerStats={dangerStats}
+      envVarKeys={envVarKeys}
+      previewConfig={previewConfig as any}
     />
   )
 }

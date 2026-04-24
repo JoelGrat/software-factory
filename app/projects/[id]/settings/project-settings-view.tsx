@@ -40,7 +40,8 @@ interface Settings {
 type SectionId =
   | 'general' | 'repository' | 'execution' | 'risk-policy'
   | 'scan-model' | 'test-strategy' | 'exec-environment'
-  | 'notifications' | 'automation' | 'model-health' | 'danger-zone'
+  | 'notifications' | 'automation' | 'env-vars' | 'preview-config'
+  | 'model-health' | 'danger-zone'
 
 const SECTIONS: { id: SectionId; label: string }[] = [
   { id: 'general',          label: 'General' },
@@ -52,6 +53,8 @@ const SECTIONS: { id: SectionId; label: string }[] = [
   { id: 'exec-environment', label: 'Exec Environment' },
   { id: 'notifications',    label: 'Notifications' },
   { id: 'automation',       label: 'Automation' },
+  { id: 'env-vars',         label: 'Env Vars' },
+  { id: 'preview-config',   label: 'Preview' },
   { id: 'model-health',     label: 'Model Health' },
   { id: 'danger-zone',      label: 'Danger Zone' },
 ]
@@ -159,9 +162,17 @@ function behaviorSummary(s: Settings): string[] {
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function ProjectSettingsView({
-  project: initial, modelHealth, dangerStats,
+  project: initial, modelHealth, dangerStats, envVarKeys: initialEnvVarKeys, previewConfig: initialPreviewConfig,
 }: {
-  project: Project; modelHealth: ModelHealth; dangerStats: DangerStats
+  project: Project
+  modelHealth: ModelHealth
+  dangerStats: DangerStats
+  envVarKeys: { id: string; key: string; updated_at: string }[]
+  previewConfig: {
+    install_command: string; start_command: string; work_dir: string
+    health_path: string; health_text: string | null; port_internal: number
+    expected_keys: string[]; max_memory_mb: number; max_cpu_shares: number
+  }
 }) {
   const router = useRouter()
   const [project, setProject] = useState(initial)
@@ -181,6 +192,18 @@ export function ProjectSettingsView({
   const [deleteError, setDeleteError] = useState<string | null>(null)
 
   const [activeSection, setActiveSection] = useState<SectionId>('general')
+
+  const [envVarKeys, setEnvVarKeys] = useState(initialEnvVarKeys)
+  const [newVarKey, setNewVarKey] = useState('')
+  const [newVarValue, setNewVarValue] = useState('')
+  const [addingVar, setAddingVar] = useState(false)
+  const [varError, setVarError] = useState<string | null>(null)
+  const [importing, setImporting] = useState(false)
+
+  const [previewCfg, setPreviewCfg] = useState(initialPreviewConfig)
+  const [savingPreview, setSavingPreview] = useState(false)
+  const [previewSaveError, setPreviewSaveError] = useState<string | null>(null)
+  const [previewSaveSuccess, setPreviewSaveSuccess] = useState(false)
 
   const saveBar = (
     <div className="flex items-center gap-3 pt-2">
@@ -526,6 +549,175 @@ export function ProjectSettingsView({
                       </Row>
                     </div>
                     {saveBar}
+                  </>
+                )}
+
+                {/* Env Vars */}
+                {activeSection === 'env-vars' && (
+                  <>
+                    <div className={sectionClass}>
+                      <SectionTitle>Environment Variables</SectionTitle>
+                      <p className="text-xs text-slate-500">Injected into preview containers. Values are encrypted at rest and never exposed to the browser.</p>
+
+                      {/* Key list */}
+                      {envVarKeys.length > 0 && (
+                        <div className="divide-y divide-white/5 rounded-lg overflow-hidden border border-white/10">
+                          {envVarKeys.map(v => (
+                            <div key={v.id} className="flex items-center justify-between px-3 py-2.5 bg-[#0f1929]">
+                              <span className="text-xs font-mono text-slate-300">{v.key}</span>
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  const res = await fetch(`/api/projects/${project.id}/env-vars`, {
+                                    method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ key: v.key }),
+                                  })
+                                  if (!res.ok) { setVarError((await res.json()).error ?? 'Delete failed'); return }
+                                  setEnvVarKeys(ks => ks.filter(k => k.id !== v.id))
+                                }}
+                                className="text-slate-600 hover:text-red-400 transition-colors"
+                              >
+                                <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>delete</span>
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Add var form */}
+                      <div className="flex gap-2 items-end">
+                        <div className="flex-1">
+                          <label className={`${labelClass} block mb-1`}>Key</label>
+                          <input value={newVarKey} onChange={e => setNewVarKey(e.target.value)} placeholder="DATABASE_URL" className={inputClass} />
+                        </div>
+                        <div className="flex-1">
+                          <label className={`${labelClass} block mb-1`}>Value</label>
+                          <input type="password" value={newVarValue} onChange={e => setNewVarValue(e.target.value)} placeholder="••••••••" className={inputClass} />
+                        </div>
+                        <button
+                          type="button"
+                          disabled={!newVarKey.trim() || addingVar}
+                          onClick={async () => {
+                            setAddingVar(true)
+                            setVarError(null)
+                            try {
+                              const res = await fetch(`/api/projects/${project.id}/env-vars`, {
+                                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ key: newVarKey.trim(), value: newVarValue }),
+                              })
+                              if (!res.ok) { setVarError((await res.json()).error ?? 'Failed'); return }
+                              setEnvVarKeys(ks => [...ks.filter(k => k.key !== newVarKey.trim()), { id: Date.now().toString(), key: newVarKey.trim(), updated_at: new Date().toISOString() }])
+                              setNewVarKey(''); setNewVarValue('')
+                            } finally { setAddingVar(false) }
+                          }}
+                          className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-colors disabled:opacity-50 whitespace-nowrap"
+                        >
+                          {addingVar ? 'Adding…' : 'Add'}
+                        </button>
+                      </div>
+                      {varError && <p className="text-xs text-red-400">{varError}</p>}
+
+                      {/* Import from .env.local */}
+                      <div className="pt-2 border-t border-white/5">
+                        <button
+                          type="button"
+                          disabled={importing}
+                          onClick={async () => {
+                            setImporting(true)
+                            try {
+                              const res = await fetch(`/api/projects/${project.id}/env-vars/import`, { method: 'POST' })
+                              if (!res.ok) { setVarError((await res.json()).error ?? 'Import failed'); return }
+                              const { pairs } = await res.json()
+                              for (const { key, value } of pairs) {
+                                await fetch(`/api/projects/${project.id}/env-vars`, {
+                                  method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ key, value }),
+                                })
+                              }
+                              const listRes = await fetch(`/api/projects/${project.id}/env-vars`)
+                              setEnvVarKeys(await listRes.json())
+                            } finally { setImporting(false) }
+                          }}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#0f1929] border border-white/10 hover:border-white/20 text-slate-300 transition-colors disabled:opacity-50"
+                        >
+                          <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>upload_file</span>
+                          {importing ? 'Importing…' : 'Import from .env.local'}
+                        </button>
+                        <p className="text-[11px] text-slate-600 mt-1.5">Reads your local .env.local and saves all key/value pairs above. Review before importing.</p>
+                      </div>
+
+                    </div>
+                  </>
+                )}
+
+                {/* Preview Config */}
+                {activeSection === 'preview-config' && (
+                  <>
+                    <div className={sectionClass}>
+                      <SectionTitle>Preview Configuration</SectionTitle>
+                      <p className="text-xs text-slate-500">Controls how preview containers are started. Use "auto" to detect from the repo.</p>
+
+                      <Row label="Install command" hint="auto detects from lockfile (pnpm/yarn/bun/npm)">
+                        <input value={previewCfg.install_command} onChange={e => setPreviewCfg(c => ({ ...c, install_command: e.target.value }))}
+                          placeholder="auto" className={`${inputClass} w-56`} />
+                      </Row>
+                      <Row label="Start command" hint="auto detects from package.json scripts">
+                        <input value={previewCfg.start_command} onChange={e => setPreviewCfg(c => ({ ...c, start_command: e.target.value }))}
+                          placeholder="auto" className={`${inputClass} w-56`} />
+                      </Row>
+                      <Row label="Working directory" hint="Relative path for monorepos">
+                        <input value={previewCfg.work_dir} onChange={e => setPreviewCfg(c => ({ ...c, work_dir: e.target.value }))}
+                          placeholder="." className={`${inputClass} w-40`} />
+                      </Row>
+                      <Row label="Health check path" hint="URL path polled to detect when app is ready">
+                        <input value={previewCfg.health_path} onChange={e => setPreviewCfg(c => ({ ...c, health_path: e.target.value }))}
+                          placeholder="/" className={`${inputClass} w-40`} />
+                      </Row>
+                      <Row label="Health check text" hint="Optional: response body must contain this string">
+                        <input value={previewCfg.health_text ?? ''} onChange={e => setPreviewCfg(c => ({ ...c, health_text: e.target.value || null }))}
+                          placeholder="(any 200 response)" className={`${inputClass} w-56`} />
+                      </Row>
+                      <Row label="App port (inside container)">
+                        <div className="flex items-center gap-2">
+                          <input type="number" value={previewCfg.port_internal} onChange={e => setPreviewCfg(c => ({ ...c, port_internal: Number(e.target.value) }))}
+                            className={numberInputClass} />
+                        </div>
+                      </Row>
+                      <Row label="Max memory" hint="Container memory limit">
+                        <div className="flex items-center gap-2">
+                          <input type="number" min={256} max={8192} step={256} value={previewCfg.max_memory_mb}
+                            onChange={e => setPreviewCfg(c => ({ ...c, max_memory_mb: Number(e.target.value) }))} className={numberInputClass} />
+                          <span className="text-xs text-slate-500">MB</span>
+                        </div>
+                      </Row>
+                      <Row label="CPU shares" hint="512 ≈ ½ core, 1024 ≈ 1 core">
+                        <input type="number" min={128} max={4096} step={128} value={previewCfg.max_cpu_shares}
+                          onChange={e => setPreviewCfg(c => ({ ...c, max_cpu_shares: Number(e.target.value) }))} className={numberInputClass} />
+                      </Row>
+                    </div>
+
+                    <div className="flex items-center gap-3 pt-2">
+                      <button
+                        type="button"
+                        disabled={savingPreview}
+                        onClick={async () => {
+                          setSavingPreview(true); setPreviewSaveError(null); setPreviewSaveSuccess(false)
+                          try {
+                            const res = await fetch(`/api/projects/${project.id}/preview-config`, {
+                              method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify(previewCfg),
+                            })
+                            if (!res.ok) { setPreviewSaveError((await res.json()).error ?? 'Save failed'); return }
+                            setPreviewSaveSuccess(true)
+                          } finally { setSavingPreview(false) }
+                        }}
+                        className="px-5 py-2 rounded-lg text-sm font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition-all disabled:opacity-50"
+                      >
+                        {savingPreview ? 'Saving…' : 'Save preview config'}
+                      </button>
+                      {previewSaveSuccess && <span className="text-xs text-emerald-400 font-medium">Saved</span>}
+                      {previewSaveError && <span className="text-xs text-red-400">{previewSaveError}</span>}
+                    </div>
                   </>
                 )}
 

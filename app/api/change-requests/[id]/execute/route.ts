@@ -59,11 +59,17 @@ export async function POST(
     )
   }
 
-  // Parse optional body — fromTaskId triggers a partial retrigger
-  let fromTaskId: string | null = null
+  // Parse optional body — fromTaskIds (multi-root) or fromTaskId (single, legacy)
+  let fromTaskIds: string[] | null = null
   try {
-    const body = await req.json().catch(() => ({}))
-    fromTaskId = (body as { fromTaskId?: unknown })?.fromTaskId as string | null ?? null
+    const body = await req.json().catch(() => ({}) as Record<string, unknown>)
+    const multi = (body as { fromTaskIds?: unknown }).fromTaskIds
+    const single = (body as { fromTaskId?: unknown }).fromTaskId
+    if (Array.isArray(multi) && multi.length > 0) {
+      fromTaskIds = multi as string[]
+    } else if (typeof single === 'string' && single) {
+      fromTaskIds = [single]
+    }
   } catch { /* no body */ }
 
   // Verify approved plan
@@ -113,17 +119,16 @@ export async function POST(
       .eq('id', id)
   }
 
-  if (fromTaskId) {
-    // Retrigger: reset target task + transitive downstream dependents only
+  if (fromTaskIds) {
+    // Retrigger: reset target tasks + transitive downstream dependents only
     const { data: allTasks } = await adminDb
       .from('change_plan_tasks')
       .select('id, dependencies')
       .eq('plan_id', plan.id)
 
-    const { resetDownstreamTasks } = await import('@/lib/execution/task-retrigger')
-    await resetDownstreamTasks(adminDb, fromTaskId, (allTasks ?? []) as { id: string; dependencies: string[] }[])
+    const { resetDownstreamTasksFromRoots } = await import('@/lib/execution/task-retrigger')
+    await resetDownstreamTasksFromRoots(adminDb, fromTaskIds, (allTasks ?? []) as { id: string; dependencies: string[] }[])
 
-    // Clear execution runs to allow a new run, keep other audit data
     await adminDb.from('execution_runs').delete().eq('change_id', id)
   } else {
     // Full re-run: clear all execution history and reset all tasks

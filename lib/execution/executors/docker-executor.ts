@@ -143,7 +143,10 @@ export class DockerExecutor implements CodeExecutor {
         .filter(Boolean) as TypeCheckResult['errors']
       return { passed: errors.length === 0, errors, output }
     } catch (err) {
-      const output = (err as { stdout?: string; stderr?: string }).stdout ?? String(err)
+      const errStr = String(err)
+      // Re-throw Docker daemon errors — container died, don't let execution silently continue
+      if (/no such container|container is not running/i.test(errStr)) throw err
+      const output = (err as { stdout?: string; stderr?: string }).stdout ?? errStr
       const errors = output.split('\n').filter(l => /error TS/.test(l))
         .map(line => {
           const m = line.match(/^(.+)\((\d+),\d+\): error TS\d+: (.+)$/)
@@ -169,7 +172,9 @@ export class DockerExecutor implements CodeExecutor {
       const { stdout } = await dockerExec(env.containerId, cmd)
       rawStdout = stdout
     } catch (err) {
-      rawStdout = (err as { stdout?: string }).stdout ?? String(err)
+      const errStr = String(err)
+      if (/no such container|container is not running/i.test(errStr)) throw err
+      rawStdout = (err as { stdout?: string }).stdout ?? errStr
     }
 
     const durationMs = Date.now() - tStart
@@ -198,7 +203,9 @@ export class DockerExecutor implements CodeExecutor {
         const { stdout: vs } = await dockerExec(env.containerId, verboseCmd)
         verboseOut = vs
       } catch (err) {
-        verboseOut = (err as { stdout?: string }).stdout ?? String(err)
+        const errStr = String(err)
+        if (/no such container|container is not running/i.test(errStr)) throw err
+        verboseOut = (err as { stdout?: string }).stdout ?? errStr
       }
       const verboseExitMatch = verboseOut.match(/__EXIT:(\d+)\s*$/)
       const verboseExitCode = verboseExitMatch ? parseInt(verboseExitMatch[1]!) : exitCode

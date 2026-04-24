@@ -588,7 +588,7 @@ export function ChangeDetailView({
               {/* Summary */}
               <p className="text-xs text-slate-500 font-mono">
                 {change.priority} priority · created {new Date(change.created_at).toLocaleDateString('en-GB')}
-                {change.tags.length > 0 && ` · ${change.tags.join(', ')}`}
+                {(change.tags?.length ?? 0) > 0 && ` · ${change.tags!.join(', ')}`}
               </p>
             </div>
 

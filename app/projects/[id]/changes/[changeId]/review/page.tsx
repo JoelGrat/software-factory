@@ -13,16 +13,25 @@ export default async function ReviewPage({
   const { data: { user } } = await db.auth.getUser()
   if (!user) redirect('/login')
 
+  const { data: project } = await db
+    .from('projects')
+    .select('id, name, repo_url')
+    .eq('id', id)
+    .eq('owner_id', user.id)
+    .single()
+
+  if (!project) redirect('/projects')
+
   const { data: change } = await db
     .from('change_requests')
-    .select('id, title, intent, type, risk_level, status, review_feedback, projects!inner(id, name, owner_id, repo_url)')
+    .select('id, title, intent, type, risk_level, status, review_feedback')
     .eq('id', changeId)
-    .eq('projects.owner_id', user.id)
+    .eq('project_id', id)
     .single()
 
   if (!change) redirect(`/projects/${id}`)
 
-  const proj = change.projects as unknown as { id: string; name: string; repo_url: string | null }
+  const proj = project
 
   const { data: commit } = await db
     .from('change_commits')
@@ -43,7 +52,7 @@ export default async function ReviewPage({
   const { data: tasks } = latestPlan
     ? await db
         .from('change_plan_tasks')
-        .select('id, description, status, order_index, system_components(name, type)')
+        .select('id, description, status, order_index, dependencies, system_components(name, type)')
         .eq('plan_id', latestPlan.id)
         .order('order_index', { ascending: true })
     : { data: [] }
@@ -84,6 +93,7 @@ export default async function ReviewPage({
       project={proj}
       commit={commit ?? null}
       tasks={(tasks ?? []) as any[]}
+      planId={latestPlan?.id ?? null}
       filesModified={filesModified}
       testsPassed={testsPassed}
       testsFailed={testsFailed}
