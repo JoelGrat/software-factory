@@ -115,7 +115,7 @@ function getPipelineAutoTab(status: string | null): 'spec' | 'plan' | 'tasks' | 
 
 function getAllPlanTasks(planJson: PlanJson | null | undefined): PlanPhaseTask[] {
   if (!planJson) return []
-  return planJson.phases.flatMap(p => p.tasks)
+  return (planJson.phases ?? []).flatMap(p => p.tasks ?? [])
 }
 
 const ANALYZING_STATUSES = ['analyzing', 'analyzing_mapping', 'analyzing_propagation', 'analyzing_scoring', 'planning']
@@ -1155,9 +1155,9 @@ export function ChangeDetailView({
                               <span className="mt-1 h-2 w-2 rounded-full flex-shrink-0 bg-slate-600" />
                               <div className="flex-1 min-w-0">
                                 <p className="text-sm text-slate-300 font-medium leading-snug">{task.title}</p>
-                                {task.files.length > 0 && (
+                                {(task.files?.length ?? 0) > 0 && (
                                   <div className="flex flex-wrap gap-x-2 gap-y-0.5 mt-1.5">
-                                    {task.files.map(f => (
+                                    {task.files!.map(f => (
                                       <span key={f} className="text-[10px] font-mono text-indigo-400/60">{f}</span>
                                     ))}
                                   </div>
@@ -1242,21 +1242,21 @@ export function ChangeDetailView({
                               </pre>
                             </div>
                           ) : (
-                            plan.plan_json.phases.map((phase, pi) => (
+                            (plan.plan_json.phases ?? []).map((phase, pi) => (
                               <div key={phase.id} className="px-5 py-4">
                                 <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 font-headline mb-3">
                                   Phase {pi + 1} — {phase.title}
                                 </p>
                                 <div className="space-y-3">
-                                  {phase.tasks.map((task) => (
+                                  {(phase.tasks ?? []).map((task) => (
                                     <div key={task.id} className="rounded-lg bg-[#0f172a] border border-white/5 p-3">
                                       <div className="flex items-start justify-between gap-3 mb-1.5">
                                         <span className="text-sm text-slate-200 font-medium leading-snug">{task.title}</span>
                                         <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-500 uppercase flex-shrink-0">{task.type}</span>
                                       </div>
-                                      {task.files.length > 0 && (
+                                      {(task.files?.length ?? 0) > 0 && (
                                         <div className="flex flex-wrap gap-1.5 mt-2">
-                                          {task.files.map(f => (
+                                          {task.files!.map(f => (
                                             <span key={f} className="text-[10px] font-mono text-indigo-400/70 bg-indigo-400/5 px-1.5 py-0.5 rounded">{f}</span>
                                           ))}
                                         </div>
