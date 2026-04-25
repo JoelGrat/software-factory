@@ -115,9 +115,21 @@ export async function runTask(
       reviewFeedback ? `Reviewer rejected the previous execution. Their feedback:\n${reviewFeedback}` : undefined,
     )
 
-    const aiResult = await ai.complete(prompt, { maxTokens: 8192 })
-    let parsed: { files?: { path: string; content: string }[]; confidence?: number } = {}
-    try { parsed = parseAiJson(aiResult.content) } catch { /* AI returned unparseable content — zero files written */ }
+    const aiResult = await ai.complete(prompt, { maxTokens: 16000 })
+    let parsed: { files?: { path: string; content: string }[]; confidence?: number; reasoning?: string } | null = null
+    try { parsed = parseAiJson(aiResult.content) } catch { /* AI returned unparseable content */ }
+
+    // If the AI explicitly returned files:[] (not a parse failure), it determined no
+    // changes are needed for this task — treat it as a successful no-op.
+    if (parsed !== null && Array.isArray(parsed.files) && parsed.files.length === 0) {
+      await releaseTaskDone(db, task.id)
+      await insertEvent(db, {
+        runId, changeId, seq: seq(), iteration: taskIndex,
+        eventType: 'task.completed',
+        payload: { taskId: task.id, durationMs: Date.now() - taskStartMs, noFilesNeeded: true },
+      })
+      return { success: true, filesWritten: [], newFiles: [] }
+    }
 
     const filesWritten: string[] = []
     const newFiles: NewFileCreation[] = []
@@ -125,7 +137,7 @@ export async function runTask(
     // Pre-check existence before writing so new-file detection is accurate.
     // For pre-specified files the isNew flag from fileContexts is authoritative.
     // For AI-determined files (open-ended mode, empty fileContexts) we probe disk now.
-    const aiFiles = (parsed.files ?? []).filter(f => isPathAllowed(f.path)).slice(0, TASK_FILE_CAP)
+    const aiFiles = ((parsed?.files) ?? []).filter(f => isPathAllowed(f.path)).slice(0, TASK_FILE_CAP)
     const preExistenceMap = new Map<string, boolean>()
     for (const fw of aiFiles) {
       if (!fw.content) continue
