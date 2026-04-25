@@ -124,11 +124,26 @@ export interface TaskFileContext {
  * to create or modify.  Allowed paths: app/, components/, lib/, tests/, styles/,
  * plus a small set of root config files.
  */
+const TEST_CONVENTIONS = `
+## Testing Conventions (MANDATORY for test files)
+- Framework: Vitest. Import from 'vitest': describe, it, expect, vi, beforeEach, afterEach.
+- Mock ALL external services — never call real Supabase, network, or filesystem in tests.
+- Mock Supabase with vi.mock(): \`vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))\`
+- For functions that query Supabase, mock the return value: \`mockClient.from.mockReturnValue({ select: vi.fn().mockResolvedValue({ data: [...], error: null }) })\`
+- Tests must pass without a real database — use vi.fn() for all DB calls.
+- Keep tests focused: one describe block, test the public API, not implementation details.`.trim()
+
+function hasTestFiles(files: TaskFileContext[]): boolean {
+  return files.some(f => /\.test\.[jt]sx?$|\.spec\.[jt]sx?$|^tests\//.test(f.path))
+}
+
 export function buildTaskImplementationPrompt(
   task: { description: string; intent: string },
   files: TaskFileContext[],
   previousErrors?: string,
 ): string {
+  const testSection = hasTestFiles(files) ? `\n${TEST_CONVENTIONS}\n` : ''
+
   if (files.length === 0) {
     return `You are a TypeScript/Next.js engineer implementing a planned change.
 
@@ -137,7 +152,7 @@ ${task.description}
 
 ## Change Intent
 ${task.intent}
-${previousErrors ? `\n## Previous Attempt Failed — Fix These Errors\n\`\`\`\n${previousErrors}\n\`\`\`\nDo NOT repeat the same approach.\n` : ''}
+${testSection}${previousErrors ? `\n## Previous Attempt Failed — Fix These Errors\n\`\`\`\n${previousErrors}\n\`\`\`\nDo NOT repeat the same approach.\n` : ''}
 ## Rules
 - Determine which files need to be created or modified to implement this task.
 - Only return files under these allowed paths: app/, components/, lib/, tests/, styles/
@@ -175,7 +190,7 @@ ${task.intent}
 
 ## Files
 ${fileSection}
-${previousErrors ? `\n## Previous Attempt Failed — Fix These Errors\n\`\`\`\n${previousErrors}\n\`\`\`\nDo NOT repeat the same approach.\n` : ''}
+${testSection}${previousErrors ? `\n## Previous Attempt Failed — Fix These Errors\n\`\`\`\n${previousErrors}\n\`\`\`\nDo NOT repeat the same approach.\n` : ''}
 ## Rules
 - Implement the task. Modify existing files or create new ones as needed.
 - Do not change unrelated code. Keep diffs minimal.
