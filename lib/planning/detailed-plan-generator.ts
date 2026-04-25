@@ -20,7 +20,8 @@ function buildDetailedPlanPrompt(
   change: { title: string; intent: string },
   spec: ChangeSpec,
   plannerVersion: number,
-  gateFailures?: string[]
+  gateFailures?: string[],
+  existingFiles?: string[]
 ): string {
   const lines = [
     'You are generating a machine-executable implementation plan for a software change.',
@@ -42,6 +43,12 @@ function buildDetailedPlanPrompt(
   if (gateFailures?.length) {
     lines.push('', 'The previous attempt failed these quality gates — fix ALL of them:')
     lines.push(...gateFailures.map(f => `- ${f}`))
+  }
+
+  if (existingFiles && existingFiles.length > 0) {
+    lines.push('', 'EXISTING files in this project (scanned from the repo):')
+    lines.push(existingFiles.join('\n'))
+    lines.push('', 'IMPORTANT: For files in the list above, use action "modify_file" and say "extend/modify". For files NOT in the list, use action "write_file" and say "create".')
   }
 
   lines.push(`
@@ -132,11 +139,12 @@ export async function generateDetailedPlan(
   spec: ChangeSpec,
   plannerVersion: number,
   ai: AIProvider,
-  onSubstep?: (status: string) => Promise<void>
+  onSubstep?: (status: string) => Promise<void>,
+  existingFiles?: string[]
 ): Promise<DetailedPlan> {
   // First attempt
   await onSubstep?.('plan_creating_phases')
-  const prompt = buildDetailedPlanPrompt(change, spec, plannerVersion)
+  const prompt = buildDetailedPlanPrompt(change, spec, plannerVersion, undefined, existingFiles)
   const result = await ai.complete(prompt, { maxTokens: 16000 })
 
   let plan: DetailedPlan
@@ -156,7 +164,7 @@ export async function generateDetailedPlan(
 
   // One retry with gate failures included
   await onSubstep?.('plan_creating_phases')
-  const retryPrompt = buildDetailedPlanPrompt(change, spec, plannerVersion, validation.diagnostics.issues)
+  const retryPrompt = buildDetailedPlanPrompt(change, spec, plannerVersion, validation.diagnostics.issues, existingFiles)
   const retryResult = await ai.complete(retryPrompt, { maxTokens: 16000 })
 
   let retryPlan: DetailedPlan

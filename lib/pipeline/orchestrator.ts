@@ -41,10 +41,19 @@ export async function runPipeline(
 ): Promise<void> {
   const { data: change, error: changeError } = await db
     .from('change_requests')
-    .select('id, pipeline_status, failed_stage, title, intent, type')
+    .select('id, pipeline_status, failed_stage, title, intent, type, project_id')
     .eq('id', changeId)
     .single()
   if (!change) throw new Error(`Change not found: ${changeId}${changeError ? ` (${changeError.message})` : ''}`)
+
+  // Load existing file paths so the planner knows what to create vs. extend
+  const { data: existingFiles } = await db
+    .from('files')
+    .select('path')
+    .eq('project_id', change.project_id)
+    .order('path', { ascending: true })
+    .limit(300)
+  const existingFilePaths = (existingFiles ?? []).map((f: { path: string }) => f.path)
 
   const isRetry =
     change.pipeline_status === 'failed' &&
@@ -119,7 +128,8 @@ export async function runPipeline(
       }
       const plan = await generateDetailedPlan(
         change, specRow.structured, plannerVersion, ai,
-        (s) => updatePipelineStatus(db, changeId, s)
+        (s) => updatePipelineStatus(db, changeId, s),
+        existingFilePaths,
       )
       const branchName = deriveBranchName(plan.goal, changeId)
       plan.branch_name = branchName
