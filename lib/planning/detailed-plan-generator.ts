@@ -73,6 +73,7 @@ Rules — every task MUST have:
 4. A non-empty expected_result
 5. depends_on references that exist within this plan
 6. A playbook object with commit, implementation_notes, commands, expected_outputs, temporary_failures_allowed, and rollback
+7. Every task must WRITE or CREATE at least one file. Do NOT include pure verification, build-check, or test-run tasks that only run commands without writing files. Fold verification into the validation[] of the task that produced the files.
 
 Task types: backend, frontend, database, testing, infra, api, refactor
 Substep actions: write_file, modify_file, run_command, verify_schema, run_test, insert_row
